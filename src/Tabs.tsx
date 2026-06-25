@@ -8,11 +8,17 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createStore, reconcile, unwrap } from "solid-js/store";
 import BlocksPanel from "./BlocksPanel";
 import PaneNode from "./PaneNode";
 import PortableTerminal from "./PortableTerminal";
-import { loadConfig, type Config } from "./config";
+import {
+  loadConfig,
+  saveConfig,
+  DEFAULT_CONFIG,
+  type Config,
+} from "./config";
+import Settings from "./Settings";
 import type { Block, PtyBlock } from "./blocks";
 import { b64ToString, stripAnsi } from "./blocks";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -32,12 +38,19 @@ import CommandPalette from "./CommandPalette";
 import WorkflowsPalette from "./WorkflowsPalette";
 import SshPalette from "./SshPalette";
 import { sshCommand } from "./ssh";
+import { loadCustomFonts } from "./fonts";
+import {
+  ACTIONS,
+  comboToAction,
+  eventToCombo,
+  resolveBindings,
+  type ActionId,
+} from "./keybindings";
 import {
   leafIds,
   makeLeaf,
   makeLeafWithId,
   makeSplit,
-  neighbourLeaf,
   paneCounters,
   removeLeaf,
   seedPaneCounters,
@@ -153,7 +166,41 @@ function makeEmptyTab(): TabState {
 }
 
 export default function Tabs() {
-  const [config] = createResource<Config>(loadConfig);
+  const [config, setConfig] = createStore<Config>(
+    JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as Config
+  );
+  const [configReady, setConfigReady] = createSignal(false);
+  loadConfig()
+    .then((c) => setConfig(reconcile(c)))
+    .catch((e) => console.error("load config", e))
+    .finally(() => setConfigReady(true));
+
+  let cfgSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistConfig = () => {
+    if (cfgSaveTimer) clearTimeout(cfgSaveTimer);
+    cfgSaveTimer = setTimeout(() => {
+      saveConfig(unwrap(config)).catch((e) => console.error("save config", e));
+    }, 400);
+  };
+
+  const adjustFontSize = (delta: number) => {
+    const next = Math.max(
+      8,
+      Math.min(40, config.appearance.fontSize + delta)
+    );
+    setConfig("appearance", "fontSize", next);
+    persistConfig();
+  };
+  const resetFontSize = () => {
+    setConfig("appearance", "fontSize", DEFAULT_CONFIG.appearance.fontSize);
+    persistConfig();
+  };
+
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
+  // Action currently being rebound in Settings (waiting for a key combo).
+  const [recordingAction, setRecordingAction] = createSignal<ActionId | null>(
+    null
+  );
   const [ai] = createResource<AiStatus>(aiStatus);
 
   const restored = loadSession();
@@ -430,6 +477,17 @@ export default function Tabs() {
     (startMarkerId: number, endMarkerIdHint: number | null) => void
   >();
   const leafRefreshFns = new Map<number, () => void>();
+
+  // Register imported custom fonts at startup so a saved custom `fontFamily`
+  // renders; re-fit terminals once they're available (font metrics change).
+  loadCustomFonts()
+    .then((fams) => {
+      if (!fams.length) return;
+      requestAnimationFrame(() => {
+        for (const fn of leafRefreshFns.values()) fn();
+      });
+    })
+    .catch(() => {});
 
   const focusActiveTerminal = () => {
     const leaf = activeLeaf();
@@ -890,12 +948,21 @@ export default function Tabs() {
     });
   });
 
+  // Cyclic pane navigation: any arrow steps through panes in tree order and
+  // wraps around. Right/Down go forward, Left/Up backward — so you can hop
+  // through every pane with a single arrow, even ones that are below/above.
   const navigatePane = (direction: "left" | "right" | "up" | "down") => {
     const tab = activeTab();
     if (!tab) return;
-    const next = neighbourLeaf(tab.tree, tab.activeLeafId, direction);
-    if (next === null) return;
-    focusLeaf(next);
+    const ids = leafIds(tab.tree);
+    if (ids.length < 2) return;
+    const idx = ids.indexOf(tab.activeLeafId);
+    if (idx === -1) return;
+    const forward = direction === "right" || direction === "down";
+    const next = forward
+      ? (idx + 1) % ids.length
+      : (idx - 1 + ids.length) % ids.length;
+    focusLeaf(ids[next]);
   };
 
   const resizeSplit = (splitId: number, ratio: number) => {
@@ -1202,7 +1269,133 @@ export default function Tabs() {
     if (refocusTerminal) focusActiveTerminal();
   };
 
+  // --- Remappable shortcuts ---
+
+  const cycleTab = (dir: number) => {
+    if (tabs.length < 2) return;
+    const idx = tabIndex(activeId());
+    if (idx === -1) return;
+    setActiveId(tabs[(idx + dir + tabs.length) % tabs.length].id);
+  };
+
+  // Each action does its own preventDefault so a no-op (e.g. search with no
+  // blocks) still flows through to the terminal.
+  const actionHandlers: Record<ActionId, (e: KeyboardEvent) => void> = {
+    newTab: (e) => {
+      e.preventDefault();
+      addTab();
+    },
+    closeTab: (e) => {
+      e.preventDefault();
+      closeActivePane();
+    },
+    nextTab: (e) => {
+      e.preventDefault();
+      cycleTab(1);
+    },
+    prevTab: (e) => {
+      e.preventDefault();
+      cycleTab(-1);
+    },
+    splitH: (e) => {
+      e.preventDefault();
+      splitActivePane("row");
+    },
+    splitV: (e) => {
+      e.preventDefault();
+      splitActivePane("column");
+    },
+    togglePanel: (e) => {
+      e.preventDefault();
+      setPanelVisible(!panelVisible());
+    },
+    search: (e) => {
+      const leaf = activeLeaf();
+      if (!leaf || leaf.blocks.length === 0) return;
+      e.preventDefault();
+      if (!panelVisible()) setPanelVisible(true);
+      setSearchOpen(true);
+    },
+    paletteAI: (e) => {
+      e.preventDefault();
+      setPaletteOpen(true);
+    },
+    workflows: (e) => {
+      e.preventDefault();
+      setWorkflowsOpen(true);
+    },
+    ssh: (e) => {
+      e.preventDefault();
+      setSshOpen(true);
+    },
+    copy: (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      copyActiveSelection();
+    },
+    paste: (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const leaf = activeLeaf();
+      if (leaf) pasteIntoPane(leaf.id);
+    },
+    settings: (e) => {
+      e.preventDefault();
+      setSettingsOpen(true);
+    },
+  };
+
+  const reverseBindings = createMemo(() =>
+    comboToAction(resolveBindings(config.keybindings))
+  );
+
+  /** Assign a combo to an action, clearing it from any other action first. */
+  const applyBinding = (id: ActionId, combo: string) => {
+    for (const a of ACTIONS) {
+      if (a.id !== id && reverseBindings()[combo] === a.id) {
+        setConfig("keybindings", a.id, "");
+      }
+    }
+    setConfig("keybindings", id, combo);
+    persistConfig();
+  };
+
+  const resetBindings = () => {
+    setConfig("keybindings", {});
+    persistConfig();
+  };
+
   const onKeyDown = (e: KeyboardEvent) => {
+    // While the settings modal is open it captures the keyboard. If a shortcut
+    // is being rebound, the next combo is recorded; otherwise Esc closes it and
+    // everything else flows through to its inputs (no app shortcuts fire).
+    if (settingsOpen()) {
+      const rec = recordingAction();
+      if (rec) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.key === "Escape") {
+          setRecordingAction(null);
+        } else if (!["Control", "Shift", "Alt", "Meta"].includes(e.key)) {
+          // Require a real modifier so we can't bind a bare key (which would
+          // hijack normal typing).
+          if (e.ctrlKey || e.altKey || e.metaKey) {
+            const combo = eventToCombo(e);
+            if (combo) {
+              applyBinding(rec, combo);
+              setRecordingAction(null);
+            }
+          }
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSettingsOpen(false);
+      }
+      return;
+    }
+
     const target = e.target as HTMLElement | null;
     const inField =
       !!target &&
@@ -1213,38 +1406,22 @@ export default function Tabs() {
     // helper textarea has focus. Anything not on this list flows through to
     // the terminal normally (so the shell's own Ctrl+C / Ctrl+R / etc still
     // work).
-    const isOurShortcut = (() => {
-      if (e.altKey && !e.ctrlKey && !e.shiftKey) {
-        return (
-          e.key === "ArrowLeft" ||
-          e.key === "ArrowRight" ||
-          e.key === "ArrowUp" ||
-          e.key === "ArrowDown"
-        );
-      }
-      if (!e.ctrlKey) return false;
-      if (e.shiftKey) {
-        const k = e.key.toLowerCase();
-        return (
-          k === "t" ||
-          k === "w" ||
-          k === "p" ||
-          k === "d" ||
-          k === "e" ||
-          k === "r" ||
-          k === "s" ||
-          k === "c" ||
-          k === "v"
-        );
-      }
-      // Ctrl (no Shift):
-      if (e.key === "Tab") return true;
-      if (e.key >= "1" && e.key <= "9") return true;
-      const k = e.key.toLowerCase();
-      if (k === "b" || k === "f") return true;
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") return true;
-      return false;
-    })();
+    const combo = eventToCombo(e);
+    const isBound = !!(combo && reverseBindings()[combo]);
+    // Layout-special keys that aren't remappable but must still bypass xterm.
+    const isSpecial =
+      (e.altKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        e.key.startsWith("Arrow")) ||
+      (e.ctrlKey &&
+        !e.shiftKey &&
+        /^(?:Digit|Numpad)[0-9]$/.test(e.code)) ||
+      (e.ctrlKey && (e.key === "+" || e.key === "=" || e.key === "-")) ||
+      (e.ctrlKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowUp" || e.key === "ArrowDown"));
+    const isOurShortcut = isBound || isSpecial;
     if (inField && !isOurShortcut) {
       return;
     }
@@ -1299,7 +1476,48 @@ export default function Tabs() {
       }
     }
 
+    // Remappable app shortcuts, dispatched from the keybindings config.
+    if (combo) {
+      const action = reverseBindings()[combo];
+      if (action) {
+        actionHandlers[action](e);
+        return;
+      }
+    }
+
     if (!e.ctrlKey) return;
+
+    // Go to tab N — matched on the PHYSICAL key (e.code) so it works on AZERTY
+    // and other layouts where the number row needs Shift for digits.
+    const tabDigit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+    if (!e.shiftKey && tabDigit) {
+      e.preventDefault();
+      const i = Number(tabDigit[1]) - 1;
+      if (i < tabs.length) setActiveId(tabs[i].id);
+      return;
+    }
+
+    // Zoom text size. Reset on the physical 0 key; +/-/= for in/out. Digit keys
+    // were already handled above (so Ctrl+6 on AZERTY = tab 6, not zoom).
+    // stopImmediatePropagation so xterm doesn't forward the key to the shell.
+    if (e.code === "Digit0" || e.code === "Numpad0") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      resetFontSize();
+      return;
+    }
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      adjustFontSize(1);
+      return;
+    }
+    if (e.key === "-") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      adjustFontSize(-1);
+      return;
+    }
 
     if (!e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       const leaf = activeLeaf();
@@ -1308,70 +1526,6 @@ export default function Tabs() {
       setBlockNavMode(true);
       navigateBlocks(e.key === "ArrowUp" ? -1 : 1);
       return;
-    }
-
-    if (!e.shiftKey && (e.key === "f" || e.key === "F")) {
-      const leaf = activeLeaf();
-      if (!leaf || leaf.blocks.length === 0) return;
-      e.preventDefault();
-      if (!panelVisible()) setPanelVisible(true);
-      setSearchOpen(true);
-      return;
-    }
-
-    // Splits — Ctrl+Shift+D = side-by-side (row), Ctrl+Shift+E = stacked (col)
-    if (e.shiftKey && (e.key === "D" || e.key === "d")) {
-      e.preventDefault();
-      splitActivePane("row");
-      return;
-    }
-    if (e.shiftKey && (e.key === "E" || e.key === "e")) {
-      e.preventDefault();
-      splitActivePane("column");
-      return;
-    }
-
-    if (e.shiftKey && (e.key === "T" || e.key === "t")) {
-      e.preventDefault();
-      addTab();
-    } else if (e.shiftKey && (e.key === "W" || e.key === "w")) {
-      e.preventDefault();
-      closeActivePane();
-    } else if (e.key === "Tab") {
-      e.preventDefault();
-      if (tabs.length < 2) return;
-      const idx = tabIndex(activeId());
-      if (idx === -1) return;
-      const next = (idx + (e.shiftKey ? -1 : 1) + tabs.length) % tabs.length;
-      setActiveId(tabs[next].id);
-    } else if (!e.shiftKey && (e.key === "b" || e.key === "B")) {
-      e.preventDefault();
-      setPanelVisible(!panelVisible());
-    } else if (e.shiftKey && (e.key === "P" || e.key === "p")) {
-      e.preventDefault();
-      setPaletteOpen(true);
-    } else if (e.shiftKey && (e.key === "R" || e.key === "r")) {
-      e.preventDefault();
-      setWorkflowsOpen(true);
-    } else if (e.shiftKey && (e.key === "S" || e.key === "s")) {
-      e.preventDefault();
-      setSshOpen(true);
-    } else if (e.shiftKey && (e.key === "C" || e.key === "c")) {
-      // stopPropagation so xterm doesn't also see it and emit ^C to the shell.
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      copyActiveSelection();
-    } else if (e.shiftKey && (e.key === "V" || e.key === "v")) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const leaf = activeLeaf();
-      if (leaf) pasteIntoPane(leaf.id);
-    } else if (e.key >= "1" && e.key <= "9") {
-      const i = parseInt(e.key, 10) - 1;
-      if (i < tabs.length) {
-        e.preventDefault();
-        setActiveId(tabs[i].id);
-      }
     }
   };
 
@@ -1452,10 +1606,7 @@ export default function Tabs() {
     });
   });
 
-  createEffect(() => {
-    const c = config();
-    if (c) applyCssVars(c);
-  });
+  createEffect(() => applyCssVars(config));
 
   // When the active tab changes, force every leaf in the now-visible tab to
   // refit + refresh. xterm's WebGL canvas doesn't paint while display:none, so
@@ -1522,11 +1673,10 @@ export default function Tabs() {
 
   return (
     <Show
-      when={config()}
+      when={configReady()}
       fallback={<div class="loading">Chargement de la configuration…</div>}
     >
-      {(cfg) => (
-        <div class="app-shell">
+      <div class="app-shell">
           <div class="tab-bar">
             <For each={tabs}>
               {(tab, idx) => (
@@ -1672,6 +1822,13 @@ export default function Tabs() {
               +
             </button>
             <div class="tab-bar-spacer" />
+            <button
+              class="workflows-toggle"
+              title="Réglages (Ctrl+,)"
+              onClick={() => setSettingsOpen(true)}
+            >
+              ⚙
+            </button>
             <button
               class="workflows-toggle"
               title="SSH (Ctrl+Shift+S)"
@@ -1961,7 +2118,7 @@ export default function Tabs() {
                             <Show when={leafAcc()}>
                               <PortableTerminal
                                 leaf={leafAcc()}
-                                appearance={cfg().appearance}
+                                appearance={config.appearance}
                                 active={() =>
                                   isActiveTabId(tab.id) &&
                                   tab.activeLeafId === leafId
@@ -2065,6 +2222,16 @@ export default function Tabs() {
               }}
               onInsert={(cmd) => insertIntoActiveTerminal(cmd)}
             />
+            <Settings
+              open={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
+              config={config}
+              setConfig={setConfig}
+              onChange={persistConfig}
+              recording={recordingAction}
+              onStartRecord={setRecordingAction}
+              onResetBindings={resetBindings}
+            />
             <SshPalette
               open={sshOpen}
               onClose={() => setSshOpen(false)}
@@ -2132,7 +2299,6 @@ export default function Tabs() {
             />
           </div>
         </div>
-      )}
     </Show>
   );
 }

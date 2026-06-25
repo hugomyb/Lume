@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
+use parking_lot::Mutex;
+
 mod ai;
 mod complete;
 mod config;
+mod fonts;
 mod osc;
 mod pty;
 mod shell;
@@ -11,7 +14,7 @@ mod workflows;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let cfg = Arc::new(config::load());
+    let cfg = Arc::new(Mutex::new(config::load()));
     let pty_manager = Arc::new(pty::PtyManager::new());
     let ai_manager = Arc::new(ai::AiManager::new());
 
@@ -23,10 +26,15 @@ pub fn run() {
         .manage(ai_manager)
         .invoke_handler(tauri::generate_handler![
             config::get_config,
+            config::save_config,
             shell::get_shell_setup_hint,
             complete::fs_complete,
             workflows::list_workflows,
             ssh::list_ssh_hosts,
+            fonts::list_system_fonts,
+            fonts::import_font,
+            fonts::list_custom_fonts,
+            fonts::remove_custom_font,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

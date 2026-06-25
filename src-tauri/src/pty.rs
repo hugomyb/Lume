@@ -74,7 +74,7 @@ fn resolve_shell(cfg: &ShellConfig) -> (String, Vec<String>) {
 pub fn pty_spawn(
     app: AppHandle,
     pty_state: State<'_, Arc<PtyManager>>,
-    cfg_state: State<'_, Arc<Config>>,
+    cfg_state: State<'_, Arc<Mutex<Config>>>,
     rows: u16,
     cols: u16,
     cwd: Option<String>,
@@ -85,7 +85,7 @@ pub fn pty_spawn(
 fn spawn_impl(
     app: AppHandle,
     pty_state: State<'_, Arc<PtyManager>>,
-    cfg_state: State<'_, Arc<Config>>,
+    cfg_state: State<'_, Arc<Mutex<Config>>>,
     rows: u16,
     cols: u16,
     init_cwd: Option<String>,
@@ -100,7 +100,7 @@ fn spawn_impl(
         })
         .context("openpty")?;
 
-    let (program, args) = resolve_shell(&cfg_state.shell);
+    let (program, args) = resolve_shell(&cfg_state.lock().shell);
     let mut cmd = CommandBuilder::new(program);
     for arg in args {
         cmd.arg(arg);

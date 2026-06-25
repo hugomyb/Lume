@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -10,6 +11,9 @@ use tauri::State;
 pub struct Config {
     pub appearance: AppearanceConfig,
     pub shell: ShellConfig,
+    /// Action id → key combo overrides for the remappable shortcuts. Missing
+    /// entries fall back to the frontend defaults.
+    pub keybindings: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +21,10 @@ pub struct Config {
 pub struct AppearanceConfig {
     pub font_family: String,
     pub font_size: u16,
+    pub cursor_blink: bool,
+    /// "block" | "bar" | "underline"
+    pub cursor_style: String,
+    pub scrollback: u32,
     pub theme: ThemeConfig,
 }
 
@@ -27,6 +35,9 @@ impl Default for AppearanceConfig {
                 r#"Menlo, "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace"#
                     .to_string(),
             font_size: 14,
+            cursor_blink: true,
+            cursor_style: "block".to_string(),
+            scrollback: 5000,
             theme: ThemeConfig::default(),
         }
     }
@@ -132,8 +143,25 @@ pub fn load() -> Config {
 }
 
 #[tauri::command]
-pub fn get_config(state: State<'_, Arc<Config>>) -> Config {
-    (**state).clone()
+pub fn get_config(state: State<'_, Arc<Mutex<Config>>>) -> Config {
+    state.lock().clone()
+}
+
+/// Persist the config to disk and update the in-memory copy so newly-spawned
+/// shells pick up shell changes without a restart.
+#[tauri::command]
+pub fn save_config(
+    state: State<'_, Arc<Mutex<Config>>>,
+    config: Config,
+) -> Result<(), String> {
+    let path = config_path().ok_or_else(|| "HOME not set".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())?;
+    *state.lock() = config;
+    Ok(())
 }
 
 fn write_default(path: &Path) -> Result<()> {
@@ -151,6 +179,9 @@ const DEFAULT_TOML: &str = r##"# Lume configuration
 [appearance]
 fontFamily = "Menlo, \"DejaVu Sans Mono\", \"Liberation Mono\", Consolas, monospace"
 fontSize = 14
+cursorBlink = true
+cursorStyle = "block"
+scrollback = 5000
 
 [appearance.theme]
 background = "#0e1014"

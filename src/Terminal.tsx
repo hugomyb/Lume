@@ -76,6 +76,17 @@ const acLog = (...args: unknown[]) => {
   if (AC_DEBUG) console.debug("[lume-ac]", ...args);
 };
 
+// Appended after the user's font so xterm — which has weak built-in glyph
+// fallback — can still find icons/symbols missing from the chosen font (e.g.
+// Powerline/Nerd glyphs, or the dashed arrows ⇡⇣ P10k uses). Only the fonts
+// actually installed take effect; the rest are ignored by the browser.
+const FONT_FALLBACKS =
+  '"Symbols Nerd Font Mono", "Symbols Nerd Font", "MesloLGS NF", "Noto Sans Symbols2", "Noto Sans Symbols", "Noto Color Emoji", "DejaVu Sans Mono", "Unifont CSUR", "Unifont Sample", "Unifont", monospace';
+
+function withFallbacks(family: string): string {
+  return family ? `${family}, ${FONT_FALLBACKS}` : FONT_FALLBACKS;
+}
+
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
@@ -147,11 +158,12 @@ export default function Terminal(props: TerminalProps) {
     if (!containerRef) return;
 
     term = new XTerm({
-      fontFamily: props.appearance.fontFamily,
+      fontFamily: withFallbacks(props.appearance.fontFamily),
       fontSize: props.appearance.fontSize,
-      cursorBlink: true,
+      cursorBlink: props.appearance.cursorBlink,
+      cursorStyle: props.appearance.cursorStyle,
       allowProposedApi: true,
-      scrollback: 5000,
+      scrollback: props.appearance.scrollback,
       // Disable smooth scrolling — it's a noticeable lag tax on WebKit2GTK.
       smoothScrollDuration: 0,
       theme: toXtermTheme(props.appearance.theme),
@@ -159,15 +171,27 @@ export default function Terminal(props: TerminalProps) {
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef);
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        console.warn("[lume] WebGL context lost, disposing addon");
-        webgl.dispose();
-      });
-      term.loadAddon(webgl);
-    } catch (e) {
-      console.warn("[lume] WebGL addon failed, falling back to DOM renderer", e);
+    // The WebGL renderer is fast but has glyph-rendering gaps (some Nerd Font /
+    // icon glyphs render as tofu where the DOM renderer would fall back fine).
+    // Allow disabling it: `localStorage.setItem("lume.noWebgl","1")` + reload.
+    const useWebgl = (() => {
+      try {
+        return localStorage.getItem("lume.noWebgl") !== "1";
+      } catch {
+        return true;
+      }
+    })();
+    if (useWebgl) {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          console.warn("[lume] WebGL context lost, disposing addon");
+          webgl.dispose();
+        });
+        term.loadAddon(webgl);
+      } catch (e) {
+        console.warn("[lume] WebGL addon failed, falling back to DOM renderer", e);
+      }
     }
     // Wait one frame so flex layout has time to compute the container's real
     // size — otherwise fit() reads 0x0 (or the default 80x24) and we spawn
@@ -774,6 +798,38 @@ export default function Terminal(props: TerminalProps) {
     });
 
     if (props.active()) term.focus();
+  });
+
+  // Live-apply appearance changes from Settings. Reading every field (incl. all
+  // theme colors via toXtermTheme) up front registers the reactive deps even on
+  // the first run before `term` exists, so later changes always re-run this.
+  createEffect(() => {
+    const a = props.appearance;
+    const next = {
+      fontFamily: withFallbacks(a.fontFamily),
+      fontSize: a.fontSize,
+      cursorBlink: a.cursorBlink,
+      cursorStyle: a.cursorStyle,
+      scrollback: a.scrollback,
+      theme: toXtermTheme(a.theme),
+    };
+    if (!term) return;
+    term.options.fontFamily = next.fontFamily;
+    term.options.fontSize = next.fontSize;
+    term.options.cursorBlink = next.cursorBlink;
+    term.options.cursorStyle = next.cursorStyle;
+    term.options.scrollback = next.scrollback;
+    term.options.theme = next.theme;
+    // Font metrics changed → refit + repaint.
+    requestAnimationFrame(() => {
+      if (!term || !fit || !containerRef) return;
+      const rect = containerRef.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      try {
+        fit.fit();
+        term.refresh(0, term.rows - 1);
+      } catch {}
+    });
   });
 
   createEffect(() => {

@@ -24,9 +24,14 @@ export type Theme = {
   brightWhite: string;
 };
 
+export type CursorStyle = "block" | "bar" | "underline";
+
 export type Appearance = {
   fontFamily: string;
   fontSize: number;
+  cursorBlink: boolean;
+  cursorStyle: CursorStyle;
+  scrollback: number;
   theme: Theme;
 };
 
@@ -38,11 +43,55 @@ export type ShellConfig = {
 export type Config = {
   appearance: Appearance;
   shell: ShellConfig;
+  /** Action id → key combo overrides for remappable shortcuts. */
+  keybindings: Record<string, string>;
 };
 
 export function loadConfig(): Promise<Config> {
   return invoke<Config>("get_config");
 }
+
+export function saveConfig(config: Config): Promise<void> {
+  return invoke<void>("save_config", { config });
+}
+
+export const DEFAULT_THEME: Theme = {
+  background: "#0e1014",
+  foreground: "#e6e6e6",
+  cursor: "#e6e6e6",
+  selection: "#3a4150",
+  accent: "#4ea1ff",
+  black: "#2c303a",
+  red: "#ff5c8d",
+  green: "#56d364",
+  yellow: "#e3b341",
+  blue: "#4ea1ff",
+  magenta: "#c678dd",
+  cyan: "#56b6c2",
+  white: "#c0c4ce",
+  brightBlack: "#525866",
+  brightRed: "#ff7ba0",
+  brightGreen: "#7ce081",
+  brightYellow: "#f0c674",
+  brightBlue: "#73b5ff",
+  brightMagenta: "#d49eea",
+  brightCyan: "#7fc8d3",
+  brightWhite: "#e6e9f0",
+};
+
+export const DEFAULT_CONFIG: Config = {
+  appearance: {
+    fontFamily:
+      'Menlo, "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace',
+    fontSize: 14,
+    cursorBlink: true,
+    cursorStyle: "block",
+    scrollback: 5000,
+    theme: DEFAULT_THEME,
+  },
+  shell: { program: null, args: [] },
+  keybindings: {},
+};
 
 import type { ITheme } from "@xterm/xterm";
 
