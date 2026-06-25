@@ -1,0 +1,9 @@
+node_modules
+dist
+
+# IDE
+.idea
+*.swp
+.DS_Store
+
+graphify-out
