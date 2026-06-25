@@ -211,21 +211,23 @@ export default function WorkflowsPalette(props: Props) {
               </>
             }
           >
-            {/* Fill stage */}
-            <div class="palette-header">
-              <button class="wf-back" onClick={backToList} title="Retour">
-                ‹
-              </button>
-              <span class="wf-fill-title">{selected()!.name}</span>
-              <span class="palette-shortcut">Esc</span>
-            </div>
+            {(wf) => (
+              <>
+                {/* Fill stage */}
+                <div class="palette-header">
+                  <button class="wf-back" onClick={backToList} title="Retour">
+                    ‹
+                  </button>
+                  <span class="wf-fill-title">{wf().name}</span>
+                  <span class="palette-shortcut">Esc</span>
+                </div>
 
-            <Show when={selected()!.description}>
-              <div class="wf-fill-desc">{selected()!.description}</div>
-            </Show>
+                <Show when={wf().description}>
+                  <div class="wf-fill-desc">{wf().description}</div>
+                </Show>
 
-            <div class="wf-args">
-              <For each={effectiveArgs(selected()!)}>
+                <div class="wf-args">
+                  <For each={effectiveArgs(wf())}>
                 {(arg, i) => (
                   <label class="wf-arg">
                     <span class="wf-arg-name">{arg.name}</span>
@@ -276,6 +278,8 @@ export default function WorkflowsPalette(props: Props) {
                 </button>
               </div>
             </div>
+              </>
+            )}
           </Show>
         </div>
       </div>
