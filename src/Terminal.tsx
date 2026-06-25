@@ -668,7 +668,27 @@ export default function Terminal(props: TerminalProps) {
       setTimeout(() => overlay.remove(), 1500);
     });
 
+    // Reclaim the host PTY size after a remote client resized the shared PTY.
+    let lastSizeAssert = 0;
+    const reassertHostSize = () => {
+      if (ptyId === undefined || !term) return;
+      const now = performance.now();
+      if (now - lastSizeAssert < 250) return;
+      lastSizeAssert = now;
+      invoke("pty_resize", {
+        id: ptyId,
+        rows: term.rows,
+        cols: term.cols,
+      }).catch(() => {});
+    };
+    // Also when the user clicks back into this terminal.
+    term.textarea?.addEventListener("focus", () => reassertHostSize());
+
     term.onData((data) => {
+      // A remote-control client may have shrunk the shared PTY to its own
+      // size. As soon as the host types again, reclaim the host's dimensions
+      // so this terminal renders at full width (throttled).
+      reassertHostSize();
       // First keystroke after a prompt: the cursor still sits at the start of
       // the command line (the keystroke hasn't echoed back yet), so this is the
       // anchor. Prompt-agnostic — the only fallback when OSC 133;B is absent.
