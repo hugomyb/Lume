@@ -220,30 +220,71 @@ fn start_tunnel(
     if let Some(err) = child.stderr.take() {
         readers.push(Box::new(err));
     }
+    // The URL is captured as soon as cloudflared prints it, but the tunnel
+    // isn't reachable until a few seconds later (QUIC connection registers).
+    // Publishing the URL too early causes Cloudflare error 1033. So we hold the
+    // captured URL in `pending` and only publish it once a "registered tunnel
+    // connection" log line appears (with an 8s fallback for log wording drift).
+    let pending: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     for r in readers {
         let public_url = public_url.clone();
+        let pending = pending.clone();
         let token = token.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(r);
             // Keep reading to the end — if we stop draining cloudflared's pipe
-            // it blocks/dies on its next write and the tunnel drops (error 1033).
+            // it blocks/dies on its next write and the tunnel drops.
             for line in reader.lines().map_while(Result::ok) {
-                if public_url.lock().is_none() {
-                    if let Some(pos) = line.find("https://") {
-                        let rest = &line[pos..];
-                        let end = rest
-                            .find(|c: char| c.is_whitespace())
-                            .unwrap_or(rest.len());
-                        let base = &rest[..end];
-                        if base.contains(".trycloudflare.com") {
-                            *public_url.lock() = Some(format!("{base}/?t={token}"));
+                if pending.lock().is_none() {
+                    if let Some(base) = extract_trycloudflare(&line) {
+                        *pending.lock() = Some(format!("{base}/?t={token}"));
+                    }
+                }
+                let low = line.to_lowercase();
+                if low.contains("registered tunnel connection")
+                    || low.contains("connection registered")
+                    || low.contains("registered tunnel")
+                {
+                    if let Some(u) = pending.lock().clone() {
+                        let mut pu = public_url.lock();
+                        if pu.is_none() {
+                            *pu = Some(u);
                         }
                     }
                 }
             }
         });
     }
+    // Fallback: publish after a delay in case the "registered" wording changes.
+    {
+        let public_url = public_url.clone();
+        let pending = pending.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            if let Some(u) = pending.lock().clone() {
+                let mut pu = public_url.lock();
+                if pu.is_none() {
+                    *pu = Some(u);
+                }
+            }
+        });
+    }
     Some(child)
+}
+
+/// Extract a `https://*.trycloudflare.com` base URL from a cloudflared log line.
+fn extract_trycloudflare(line: &str) -> Option<String> {
+    let pos = line.find("https://")?;
+    let rest = &line[pos..];
+    let end = rest
+        .find(|c: char| c.is_whitespace())
+        .unwrap_or(rest.len());
+    let base = &rest[..end];
+    if base.contains(".trycloudflare.com") {
+        Some(base.to_string())
+    } else {
+        None
+    }
 }
 
 fn gen_token() -> String {
