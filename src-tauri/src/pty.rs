@@ -10,6 +10,7 @@ use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::broadcast;
 
 use crate::config::{Config, ShellConfig};
 use crate::osc::{BlockEvent, OscEvent, OscParser};
@@ -18,6 +19,40 @@ pub struct PtySession {
     writer: Box<dyn Write + Send>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     cwd: Arc<Mutex<Option<String>>>,
+    /// Raw terminal output, fanned out to remote-control subscribers.
+    output_tx: broadcast::Sender<Vec<u8>>,
+}
+
+impl PtyManager {
+    /// Subscribe to a session's raw output stream (for remote control).
+    pub fn subscribe(&self, id: u64) -> Option<broadcast::Receiver<Vec<u8>>> {
+        self.sessions.lock().get(&id).map(|s| s.output_tx.subscribe())
+    }
+
+    /// Write raw bytes to a session. Returns false if the id is unknown.
+    pub fn write_bytes(&self, id: u64, bytes: &[u8]) -> bool {
+        let mut sessions = self.sessions.lock();
+        match sessions.get_mut(&id) {
+            Some(s) => {
+                let _ = s.writer.write_all(bytes);
+                let _ = s.writer.flush();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Resize a session's PTY (used when a remote client drives the size).
+    pub fn resize_pty(&self, id: u64, rows: u16, cols: u16) {
+        if let Some(s) = self.sessions.lock().get(&id) {
+            let _ = s.master.resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
+        }
+    }
 }
 
 #[derive(Default)]
@@ -132,12 +167,18 @@ fn spawn_impl(
     let cwd = Arc::new(Mutex::new(std::env::current_dir().ok().map(|p| p.display().to_string())));
     let cwd_for_reader = cwd.clone();
 
+    // Fan-out of raw output to remote-control subscribers. The receiver held
+    // here is dropped immediately; subscribers are created on demand.
+    let (output_tx, _) = broadcast::channel::<Vec<u8>>(2048);
+    let output_tx_reader = output_tx.clone();
+
     pty_state.sessions.lock().insert(
         id,
         PtySession {
             writer,
             master: pair.master,
             cwd,
+            output_tx,
         },
     );
 
@@ -215,6 +256,12 @@ fn spawn_impl(
                         if capturing {
                             let tail = &result.passthrough[cur..];
                             append_capped(&mut output_buf, tail, MAX_CAPTURE);
+                        }
+
+                        // Fan out raw bytes to any remote-control clients
+                        // (only clone when someone is actually listening).
+                        if output_tx_reader.receiver_count() > 0 {
+                            let _ = output_tx_reader.send(result.passthrough.clone());
                         }
 
                         let payload = PtyOutputEvent {

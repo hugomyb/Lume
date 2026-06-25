@@ -40,9 +40,19 @@ export type ShellConfig = {
   args: string[];
 };
 
+export type NotificationsConfig = {
+  /** Fire a desktop notification when a long command finishes unfocused. */
+  enabled: boolean;
+  /** Minimum command duration (seconds) before notifying. */
+  minDurationSec: number;
+  /** Play a sound with the notification. */
+  sound: boolean;
+};
+
 export type Config = {
   appearance: Appearance;
   shell: ShellConfig;
+  notifications: NotificationsConfig;
   /** Action id → key combo overrides for remappable shortcuts. */
   keybindings: Record<string, string>;
 };
@@ -90,6 +100,7 @@ export const DEFAULT_CONFIG: Config = {
     theme: DEFAULT_THEME,
   },
   shell: { program: null, args: [] },
+  notifications: { enabled: true, minDurationSec: 10, sound: true },
   keybindings: {},
 };
 

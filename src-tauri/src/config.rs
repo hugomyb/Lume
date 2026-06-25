@@ -11,9 +11,31 @@ use tauri::State;
 pub struct Config {
     pub appearance: AppearanceConfig,
     pub shell: ShellConfig,
+    pub notifications: NotificationsConfig,
     /// Action id → key combo overrides for the remappable shortcuts. Missing
     /// entries fall back to the frontend defaults.
     pub keybindings: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NotificationsConfig {
+    /// Fire a desktop notification when a long command finishes unfocused.
+    pub enabled: bool,
+    /// Minimum command duration (seconds) before notifying.
+    pub min_duration_sec: u32,
+    /// Play a sound with the notification.
+    pub sound: bool,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_duration_sec: 10,
+            sound: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, Show } from "solid-js";
 import Terminal from "./Terminal";
 import { placeholderMap, placeholderVer } from "./PaneNode";
 import type { Appearance } from "./config";
@@ -14,6 +14,7 @@ type Props = {
   onBlock: (ev: PtyBlock) => void;
   onCwd: (cwd: string) => void;
   onSelectionReady: (getSelection: () => string) => void;
+  onSearchReady: (openSearch: () => void) => void;
   onCopyBlock: (markerId: number) => void;
   canCopyMarker: (markerId: number) => boolean;
   onFocusReady: (focus: () => void) => void;
@@ -26,6 +27,8 @@ type Props = {
   onContextMenu: (x: number, y: number) => void;
   onPaneDragStart: (leafId: number) => void;
   onPaneDragEnd: () => void;
+  /** Whether the tab has more than one pane (grip is useless otherwise). */
+  multiPane: () => boolean;
 };
 
 /** Renders a Terminal in a wrapper div that lives at the top level of the
@@ -106,31 +109,33 @@ export default function PortableTerminal(props: Props) {
         props.onContextMenu(e.clientX, e.clientY);
       }}
     >
-      <div
-        class="pane-grip"
-        draggable={true}
-        title="Glisser pour déplacer ce pane"
-        onMouseDown={(e) => {
-          // Don't trigger pane activation onto the underlying terminal-portal-host
-          e.stopPropagation();
-        }}
-        onDragStart={(e) => {
-          if (!e.dataTransfer) return;
-          e.dataTransfer.setData("text/lume-pane", String(props.leaf.id));
-          e.dataTransfer.effectAllowed = "move";
-          props.onPaneDragStart(props.leaf.id);
-        }}
-        onDragEnd={() => props.onPaneDragEnd()}
-      >
-        <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-          <circle cx="3" cy="3" r="1" />
-          <circle cx="9" cy="3" r="1" />
-          <circle cx="3" cy="6" r="1" />
-          <circle cx="9" cy="6" r="1" />
-          <circle cx="3" cy="9" r="1" />
-          <circle cx="9" cy="9" r="1" />
-        </svg>
-      </div>
+      <Show when={props.multiPane()}>
+        <div
+          class="pane-grip"
+          draggable={true}
+          title="Glisser pour déplacer ce pane"
+          onMouseDown={(e) => {
+            // Don't trigger pane activation onto the underlying terminal-portal-host
+            e.stopPropagation();
+          }}
+          onDragStart={(e) => {
+            if (!e.dataTransfer) return;
+            e.dataTransfer.setData("text/lume-pane", String(props.leaf.id));
+            e.dataTransfer.effectAllowed = "move";
+            props.onPaneDragStart(props.leaf.id);
+          }}
+          onDragEnd={() => props.onPaneDragEnd()}
+        >
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <circle cx="3" cy="3" r="1" />
+            <circle cx="9" cy="3" r="1" />
+            <circle cx="3" cy="6" r="1" />
+            <circle cx="9" cy="6" r="1" />
+            <circle cx="3" cy="9" r="1" />
+            <circle cx="9" cy="9" r="1" />
+          </svg>
+        </div>
+      </Show>
       <Terminal
         active={props.active}
         appearance={props.appearance}
@@ -140,6 +145,7 @@ export default function PortableTerminal(props: Props) {
         onBlock={props.onBlock}
         onCwd={props.onCwd}
         onSelectionReady={props.onSelectionReady}
+        onSearchReady={props.onSearchReady}
         onCopyBlock={props.onCopyBlock}
         canCopyMarker={props.canCopyMarker}
         onFocusReady={props.onFocusReady}

@@ -11,6 +11,7 @@ import type { Block } from "./blocks";
 import { stripAnsi } from "./blocks";
 import type { AiState } from "./ai";
 import { getShellSetupHint } from "./shellSetup";
+import { copyText } from "./clipboard";
 import MarkdownRender from "./markdown";
 
 function BlockAiPanel(props: {
@@ -179,7 +180,7 @@ function EmptyState(props: { active: () => boolean }) {
 
   const copy = async (line: string) => {
     try {
-      await navigator.clipboard.writeText(line);
+      await copyText(line);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (e) {
@@ -328,7 +329,7 @@ export default function BlocksPanel(props: Props) {
     const m = ctxMenu();
     if (!m) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       flashCopied(m.blockId, kind);
     } catch (err) {
       console.error(err);

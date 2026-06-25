@@ -26,6 +26,34 @@ pub fn fs_complete(cwd: String, token: String) -> Vec<FsEntry> {
     complete_impl(&cwd, &token).unwrap_or_default()
 }
 
+/// List a directory's entries for the file-tree sidebar. Directories sort
+/// first, then alphabetically (case-insensitive). Dotfiles are included only
+/// when `show_hidden` is set.
+#[tauri::command]
+pub fn read_dir(path: String, show_hidden: bool) -> Result<Vec<FsEntry>, String> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&path).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') && !show_hidden {
+            continue;
+        }
+        let is_dir = entry
+            .file_type()
+            .map(|t| t.is_dir() || (t.is_symlink() && entry.path().is_dir()))
+            .unwrap_or(false);
+        out.push(FsEntry { name, is_dir });
+        if out.len() >= 5000 {
+            break;
+        }
+    }
+    out.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
 fn complete_impl(cwd: &str, token: &str) -> Option<Vec<FsEntry>> {
     // Split into the directory part (everything up to and including the last
     // '/') and the prefix we match entries against.

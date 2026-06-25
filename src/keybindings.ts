@@ -12,6 +12,7 @@ export type ActionId =
   | "splitV"
   | "togglePanel"
   | "search"
+  | "termSearch"
   | "paletteAI"
   | "workflows"
   | "ssh"
@@ -30,6 +31,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "splitV", label: "Split vertical", default: "Ctrl+Shift+e" },
   { id: "togglePanel", label: "Sidebar blocs", default: "Ctrl+b" },
   { id: "search", label: "Filtrer les blocs", default: "Ctrl+f" },
+  { id: "termSearch", label: "Rechercher dans le terminal", default: "Ctrl+Shift+f" },
   { id: "paletteAI", label: "Palette IA", default: "Ctrl+Shift+p" },
   { id: "workflows", label: "Workflows", default: "Ctrl+Shift+r" },
   { id: "ssh", label: "SSH", default: "Ctrl+Shift+s" },

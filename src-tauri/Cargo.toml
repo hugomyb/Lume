@@ -30,6 +30,13 @@ toml = "0.8"
 tauri-plugin-window-state = "2"
 serde_yaml = "0.9.34"
 ttf-parser = "0.25.1"
+tauri-plugin-clipboard-manager = "2.3.2"
+tauri-plugin-notification = "2.3.3"
+notify-rust = "4"
+axum = { version = "0.8.9", features = ["ws"] }
+tokio = { version = "1.52.3", features = ["sync", "net", "rt-multi-thread", "macros", "io-util", "time"] }
+futures-util = "0.3.32"
+getrandom = "0.3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -39,6 +39,29 @@ import WorkflowsPalette from "./WorkflowsPalette";
 import SshPalette from "./SshPalette";
 import { sshCommand } from "./ssh";
 import { loadCustomFonts } from "./fonts";
+import { copyText, pasteText } from "./clipboard";
+import {
+  remoteInstallCloudflared,
+  remoteSetTarget,
+  remoteStart,
+  remoteStatus,
+  remoteStop,
+  type RemoteInfo,
+} from "./remote";
+import FileTree from "./FileTree";
+import RemoteDialog from "./RemoteDialog";
+import {
+  IconBlocks,
+  IconChevronLeft,
+  IconChevronRight,
+  IconFolder,
+  IconLayouts,
+  IconSettings,
+  IconSmartphone,
+  IconSsh,
+  IconWorkflow,
+} from "./icons";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ACTIONS,
   comboToAction,
@@ -251,6 +274,28 @@ export default function Tabs() {
       localStorage.setItem("lume.panelVisible", panelVisible() ? "1" : "0");
     } catch {}
   });
+  // Left file-tree sidebar (shows the active pane's cwd tree).
+  const [fileTreeVisible, setFileTreeVisible] = createSignal(
+    localStorage.getItem("lume.fileTreeVisible") === "1"
+  );
+  createEffect(() => {
+    try {
+      localStorage.setItem(
+        "lume.fileTreeVisible",
+        fileTreeVisible() ? "1" : "0"
+      );
+    } catch {}
+  });
+  const ftWidthRaw = Number(localStorage.getItem("lume.fileTreeWidth"));
+  const [fileTreeWidth, setFileTreeWidth] = createSignal(
+    Number.isFinite(ftWidthRaw) && ftWidthRaw >= 180 ? ftWidthRaw : 240
+  );
+  createEffect(() => {
+    const w = fileTreeWidth();
+    try {
+      if (w) localStorage.setItem("lume.fileTreeWidth", String(w));
+    } catch {}
+  });
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [workflowsOpen, setWorkflowsOpen] = createSignal(false);
   const [sshOpen, setSshOpen] = createSignal(false);
@@ -277,6 +322,33 @@ export default function Tabs() {
    *  a transparent drop-catcher overlay above their xterm so the drop event
    *  isn't swallowed by xterm's own handlers. */
   const [draggingTabId, setDraggingTabId] = createSignal<number | null>(null);
+
+  // Tab strip horizontal scroll state → drives the left/right "hidden tabs"
+  // chevron indicators (the native scrollbar is hidden as it overlaps tabs).
+  let tabListRef: HTMLDivElement | undefined;
+  const [tabScroll, setTabScroll] = createSignal({ left: false, right: false });
+  const updateTabScroll = () => {
+    const el = tabListRef;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    const cur = tabScroll();
+    if (cur.left !== left || cur.right !== right) setTabScroll({ left, right });
+  };
+  const scrollTabs = (dir: -1 | 1) =>
+    tabListRef?.scrollBy({ left: dir * 220, behavior: "smooth" });
+  // Recompute indicators when the tab set changes (rAF so layout has settled).
+  createEffect(() => {
+    tabs.length;
+    requestAnimationFrame(updateTabScroll);
+  });
+  onMount(() => {
+    const onResize = () => updateTabScroll();
+    window.addEventListener("resize", onResize);
+    onCleanup(() => window.removeEventListener("resize", onResize));
+    requestAnimationFrame(updateTabScroll);
+  });
+
   /** Set while the user is dragging a pane grip. Drives the swap-target
    *  overlay on every other pane in the same tab. */
   const [draggingPaneLeafId, setDraggingPaneLeafId] = createSignal<
@@ -506,6 +578,75 @@ export default function Tabs() {
   // Per-leaf focus/scroll/refresh callbacks, registered by each Terminal on mount.
   const leafFocusFns = new Map<number, () => void>();
   const leafSelectionFns = new Map<number, () => string>();
+  const leafSearchFns = new Map<number, () => void>();
+
+  // Desktop notification when a long command finishes while Lume is in the
+  // background. Run-start time is tracked per leaf (output start → output end).
+  // Uses the Tauri notification plugin (the Web Notification API is unreliable
+  // under WebKitGTK). Toggle + threshold live in config.notifications.
+  const commandRunStart = new Map<number, number>();
+
+  // `document.hasFocus()` is unreliable under WebKitGTK, so track focus from
+  // Tauri's native window events (driven by the window manager), with DOM
+  // focus/blur as a backup.
+  let windowFocused = true;
+  window.addEventListener("focus", () => (windowFocused = true));
+  window.addEventListener("blur", () => (windowFocused = false));
+  void getCurrentWindow()
+    .onFocusChanged(({ payload }) => (windowFocused = payload))
+    .catch(() => {});
+
+  // Send via our own Rust `notify` command (the bundled plugin's Linux path
+  // silently fails — it runs notify-rust's blocking show() inside tokio).
+  const sendNotify = (title: string, body: string) =>
+    invoke("notify", {
+      title,
+      body,
+      sound: config.notifications.sound,
+    }).catch((e) => console.error("[notif] send failed", e));
+
+  // Manual test from devtools: `__lumeTestNotif()`. Waits 3s so you can click
+  // another window first — GNOME may suppress banners from the *focused* app,
+  // which is exactly the real (unfocused) scenario.
+  let testNotifN = 0;
+  (window as unknown as { __lumeTestNotif: () => void }).__lumeTestNotif =
+    async () => {
+      testNotifN++;
+      console.info(
+        "[notif] clique une AUTRE fenêtre maintenant — envoi dans 3s…"
+      );
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        await invoke("notify", {
+          title: `🔔 Test Lume #${testNotifN}`,
+          body: `Notification n°${testNotifN} — ${new Date().toLocaleTimeString()}`,
+          sound: config.notifications.sound,
+        });
+        console.info("[notif] invoke resolved OK (no error from Rust)");
+      } catch (e) {
+        console.error("[notif] invoke REJECTED:", e);
+      }
+    };
+
+  const notifyCommandDone = (
+    command: string | null,
+    exitCode: number | null,
+    durationMs: number
+  ) => {
+    if (!config.notifications.enabled) return;
+    const thresholdMs =
+      Math.max(0, config.notifications.minDurationSec ?? 10) * 1000;
+    if (durationMs < thresholdMs || windowFocused) return;
+    const ok = exitCode === 0 || exitCode === null;
+    // Include the finish time so two identical commands still each banner
+    // (GNOME coalesces notifications with identical content).
+    void sendNotify(
+      ok ? "✓ Commande terminée" : `✗ Échec (exit ${exitCode})`,
+      `${(command ?? "").slice(0, 100)} · ${Math.round(
+        durationMs / 1000
+      )}s · ${new Date().toLocaleTimeString()}`
+    );
+  };
   const leafScrollFns = new Map<
     number,
     (startMarkerId: number, endMarkerIdHint: number | null) => void
@@ -593,6 +734,74 @@ export default function Tabs() {
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
   };
+
+  // Keep remote-control clients bridged to the active pane's pty.
+  createEffect(() => {
+    void remoteSetTarget(activeLeaf()?.ptyId ?? null).catch(() => {});
+  });
+
+  // Remote-control dialog (opened from the pane context menu, not Settings).
+  const [remoteDialogOpen, setRemoteDialogOpen] = createSignal(false);
+  const [remoteInfo, setRemoteInfo] = createSignal<RemoteInfo | null>(null);
+  let remotePollTimer: ReturnType<typeof setInterval> | undefined;
+  const stopRemotePoll = () => {
+    if (remotePollTimer) clearInterval(remotePollTimer);
+    remotePollTimer = undefined;
+  };
+  // Live refresh of the connected-clients count + tunnel URL while running.
+  const refreshRemote = async () => {
+    try {
+      const s = await remoteStatus();
+      setRemoteInfo(s);
+      if (!s.running) stopRemotePoll();
+    } catch {
+      stopRemotePoll();
+    }
+  };
+  const startRemoteControl = async () => {
+    try {
+      const status = await remoteStatus();
+      const port = Number(localStorage.getItem("lume.remotePort")) || 4530;
+      const info = status.running
+        ? status
+        : await remoteStart(port, status.tunnelAvailable);
+      setRemoteInfo(info);
+      void remoteSetTarget(activeLeaf()?.ptyId ?? null);
+      setRemoteDialogOpen(true);
+      if (!remotePollTimer) remotePollTimer = setInterval(refreshRemote, 2000);
+    } catch (e) {
+      console.error("remote start", e);
+    }
+  };
+  const stopRemoteControl = async () => {
+    stopRemotePoll();
+    try {
+      setRemoteInfo(await remoteStop());
+    } catch (e) {
+      console.error("remote stop", e);
+    }
+    setRemoteDialogOpen(false);
+  };
+  // Install cloudflared then re-arm the remote with a public tunnel.
+  const [remoteInstalling, setRemoteInstalling] = createSignal(false);
+  const enableTunnel = async () => {
+    if (remoteInstalling()) return;
+    setRemoteInstalling(true);
+    try {
+      await remoteInstallCloudflared();
+      await remoteStop();
+      const port = Number(localStorage.getItem("lume.remotePort")) || 4530;
+      const info = await remoteStart(port, true);
+      setRemoteInfo(info);
+      void remoteSetTarget(activeLeaf()?.ptyId ?? null);
+      if (!remotePollTimer) remotePollTimer = setInterval(refreshRemote, 2000);
+    } catch (e) {
+      console.error("install cloudflared", e);
+    } finally {
+      setRemoteInstalling(false);
+    }
+  };
+  onCleanup(stopRemotePoll);
 
   const insertIntoActiveTerminal = async (text: string) => {
     const leaf = activeLeaf();
@@ -722,6 +931,7 @@ export default function Tabs() {
         leafScrollFns.delete(leafId);
         leafRefreshFns.delete(leafId);
         leafSelectionFns.delete(leafId);
+        leafSearchFns.delete(leafId);
       }
     }
     if (tabs.length === 1) {
@@ -796,6 +1006,7 @@ export default function Tabs() {
     leafScrollFns.delete(toClose);
     leafRefreshFns.delete(toClose);
     leafSelectionFns.delete(toClose);
+    leafSearchFns.delete(toClose);
   };
 
   type LayoutKind =
@@ -868,6 +1079,7 @@ export default function Tabs() {
       leafScrollFns.delete(oldId);
       leafRefreshFns.delete(oldId);
       leafSelectionFns.delete(oldId);
+      leafSearchFns.delete(oldId);
     }
 
     setTabs(tIdx, "tree", newTree);
@@ -890,11 +1102,7 @@ export default function Tabs() {
   const copyFromPane = async (leafId: number) => {
     const text = leafSelectionFns.get(leafId)?.() ?? "";
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (e) {
-      console.error("copy failed", e);
-    }
+    await copyText(text);
   };
 
   const copyActiveSelection = () => {
@@ -920,11 +1128,7 @@ export default function Tabs() {
     if (block.output) parts.push(stripAnsi(block.output).trimEnd());
     const text = parts.join("\n");
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (e) {
-      console.error("copy block failed", e);
-    }
+    await copyText(text);
   };
 
   const pasteIntoPane = async (leafId: number) => {
@@ -932,21 +1136,19 @@ export default function Tabs() {
     if (!tab) return;
     const leaf = tab.leaves[leafId];
     if (leaf.ptyId === null) return;
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text) return;
-      const bytes = new TextEncoder().encode(text);
-      let bin = "";
-      const chunk = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunk) {
-        bin += String.fromCharCode(
-          ...bytes.subarray(i, Math.min(i + chunk, bytes.length))
-        );
-      }
-      await invoke("pty_write", { id: leaf.ptyId, dataB64: btoa(bin) });
-    } catch (e) {
-      console.error("paste failed", e);
+    const text = await pasteText();
+    if (!text) return;
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode(
+        ...bytes.subarray(i, Math.min(i + chunk, bytes.length))
+      );
     }
+    await invoke("pty_write", { id: leaf.ptyId, dataB64: btoa(bin) }).catch(
+      (e) => console.error("paste write failed", e)
+    );
   };
 
   // Dismiss pane context menu on click outside / escape.
@@ -1257,6 +1459,7 @@ export default function Tabs() {
         if (blocks.length === 0) return;
         const lastIdx = blocks.length - 1;
         setTabs(tIdx, "leaves", leafId, "blocks", lastIdx, "status", "running");
+        commandRunStart.set(leafId, Date.now());
         break;
       }
       case "outputEnd": {
@@ -1270,6 +1473,15 @@ export default function Tabs() {
           exitCode: ev.exitCode,
           output,
         });
+        const runStart = commandRunStart.get(leafId);
+        commandRunStart.delete(leafId);
+        if (runStart) {
+          notifyCommandDone(
+            tabs[tIdx].leaves[leafId].blocks[lastIdx]?.command ?? null,
+            ev.exitCode,
+            Date.now() - runStart
+          );
+        }
         break;
       }
       case "promptEnd":
@@ -1349,6 +1561,12 @@ export default function Tabs() {
       e.preventDefault();
       if (!panelVisible()) setPanelVisible(true);
       setSearchOpen(true);
+    },
+    termSearch: (e) => {
+      const leaf = activeLeaf();
+      if (!leaf) return;
+      e.preventDefault();
+      leafSearchFns.get(leaf.id)?.();
     },
     paletteAI: (e) => {
       e.preventDefault();
@@ -1570,6 +1788,14 @@ export default function Tabs() {
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown, true);
     onCleanup(() => window.removeEventListener("keydown", onKeyDown, true));
+    // Registered before the awaits below so it keeps a valid reactive owner
+    // (past the first `await` the owner is gone). The unlisten vars it closes
+    // over are populated by the awaits and set by the time cleanup runs.
+    onCleanup(() => {
+      unlistenAiChunk?.();
+      unlistenAiDone?.();
+      unlistenAiError?.();
+    });
 
     unlistenAiChunk = await listen<AiChunkEvent>("ai:chunk", (e) => {
       const loc = findBlockByRequest(e.payload.requestId);
@@ -1631,12 +1857,6 @@ export default function Tabs() {
         status: "error",
         error: e.payload.message,
       });
-    });
-
-    onCleanup(() => {
-      unlistenAiChunk?.();
-      unlistenAiDone?.();
-      unlistenAiError?.();
     });
   });
 
@@ -1712,6 +1932,35 @@ export default function Tabs() {
     >
       <div class="app-shell">
           <div class="tab-bar">
+            <div class="tab-lead">
+              <button
+                class="tab-action"
+                title="Arborescence de fichiers"
+                classList={{ active: fileTreeVisible() }}
+                onClick={() => setFileTreeVisible(!fileTreeVisible())}
+              >
+                <IconFolder />
+              </button>
+            </div>
+            <div class="tab-list-wrap">
+              <Show when={tabScroll().left}>
+                <button
+                  class="tab-scroll-btn left"
+                  title="Onglets précédents"
+                  onClick={() => scrollTabs(-1)}
+                >
+                  <IconChevronLeft size={14} />
+                </button>
+              </Show>
+              <div
+                class="tab-list"
+                ref={tabListRef}
+                onScroll={updateTabScroll}
+                onWheel={(e) => {
+                  if (e.deltaY !== 0 && tabListRef)
+                    tabListRef.scrollLeft += e.deltaY;
+                }}
+              >
             <For each={tabs}>
               {(tab, idx) => (
                 <div
@@ -1793,7 +2042,6 @@ export default function Tabs() {
                     setDraggingTabId(null);
                     setReorderHover(null);
                   }}
-                  title={`${tab.title}  (Ctrl+${idx() + 1})  ·  double-clic pour renommer · clic-molette pour fermer · clic-droit pour split`}
                 >
                   <span class="tab-index">{idx() + 1}</span>
                   <Show
@@ -1855,39 +2103,78 @@ export default function Tabs() {
             >
               +
             </button>
-            <div class="tab-bar-spacer" />
-            <button
-              class="workflows-toggle"
-              title="Réglages (Ctrl+,)"
-              onClick={() => setSettingsOpen(true)}
-            >
-              ⚙
-            </button>
-            <button
-              class="workflows-toggle"
-              title="SSH (Ctrl+Shift+S)"
-              onClick={() => setSshOpen(true)}
-            >
-              ⇆
-            </button>
-            <button
-              class="workflows-toggle"
-              title="Workflows (Ctrl+Shift+R)"
-              onClick={() => setWorkflowsOpen(true)}
-            >
-              ⚡
-            </button>
-            <button
-              class="layouts-toggle"
-              title="Layouts prédéfinis"
-              classList={{ active: layoutsOpen() }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setLayoutsOpen(!layoutsOpen());
-              }}
-            >
-              ⊞
-            </button>
+              </div>
+              <Show when={tabScroll().right}>
+                <button
+                  class="tab-scroll-btn right"
+                  title="Onglets suivants"
+                  onClick={() => scrollTabs(1)}
+                >
+                  <IconChevronRight size={14} />
+                </button>
+              </Show>
+            </div>
+            <div class="tab-actions">
+              <Show when={remoteInfo()?.running}>
+                <button
+                  class="remote-indicator"
+                  classList={{ connected: (remoteInfo()?.clients ?? 0) > 0 }}
+                  title="Contrôle à distance actif — cliquer pour gérer"
+                  onClick={() => setRemoteDialogOpen(true)}
+                >
+                  <IconSmartphone size={15} />
+                  <span class="remote-indicator-dot" />
+                  <Show when={(remoteInfo()?.clients ?? 0) > 0}>
+                    <span class="remote-indicator-count">
+                      {remoteInfo()!.clients}
+                    </span>
+                  </Show>
+                </button>
+                <span class="tab-actions-sep" />
+              </Show>
+              <button
+                class="tab-action layouts-toggle"
+                title="Layouts prédéfinis"
+                classList={{ active: layoutsOpen() }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLayoutsOpen(!layoutsOpen());
+                }}
+              >
+                <IconLayouts />
+              </button>
+              <button
+                class="tab-action"
+                title="Blocs (Ctrl+B)"
+                classList={{ active: panelVisible() }}
+                onClick={() => setPanelVisible(!panelVisible())}
+              >
+                <IconBlocks />
+              </button>
+              <span class="tab-actions-sep" />
+              <button
+                class="tab-action"
+                title="Workflows (Ctrl+Shift+R)"
+                onClick={() => setWorkflowsOpen(true)}
+              >
+                <IconWorkflow />
+              </button>
+              <button
+                class="tab-action"
+                title="SSH (Ctrl+Shift+S)"
+                onClick={() => setSshOpen(true)}
+              >
+                <IconSsh />
+              </button>
+              <span class="tab-actions-sep" />
+              <button
+                class="tab-action"
+                title="Réglages (Ctrl+,)"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <IconSettings />
+              </button>
+            </div>
             <Show when={layoutsOpen()}>
               <div class="layouts-popup" onClick={(e) => e.stopPropagation()}>
                 <div class="layouts-popup-title">Appliquer un layout</div>
@@ -1959,14 +2246,6 @@ export default function Tabs() {
                 </p>
               </div>
             </Show>
-            <button
-              class="panel-toggle"
-              title="Blocs (Ctrl+B)"
-              classList={{ active: panelVisible() }}
-              onClick={() => setPanelVisible(!panelVisible())}
-            >
-              ⌘
-            </button>
           </div>
           <Show when={toast()}>
             <div class="lume-toast">{toast()}</div>
@@ -2026,6 +2305,19 @@ export default function Tabs() {
                     }}
                   >
                     ⬍ Split vertical
+                  </button>
+                  <div class="ctx-sep" />
+                  <button
+                    class="ctx-item"
+                    onClick={() => {
+                      const tIdx = tabIndex(tab.id);
+                      setActiveId(tab.id);
+                      setTabs(tIdx, "activeLeafId", m.leafId);
+                      startRemoteControl();
+                      setPaneCtxMenu(null);
+                    }}
+                  >
+                    ⇆ Contrôler à distance
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2117,6 +2409,16 @@ export default function Tabs() {
             }}
           </Show>
           <div class="body">
+            <FileTree
+              visible={fileTreeVisible}
+              width={fileTreeWidth}
+              onResize={setFileTreeWidth}
+              onToggle={() => setFileTreeVisible(false)}
+              cwd={() => activeLeaf()?.cwd ?? null}
+              onRun={(command) => insertIntoActiveTerminal(command + "\n")}
+              onInsert={(text) => insertIntoActiveTerminal(text)}
+              onCopy={(text) => copyText(text)}
+            />
             <div class="terminals">
               <For each={tabs}>
                 {(tab) => (
@@ -2197,6 +2499,9 @@ export default function Tabs() {
                                 onSelectionReady={(getSel) =>
                                   leafSelectionFns.set(leafId, getSel)
                                 }
+                                onSearchReady={(openSearch) =>
+                                  leafSearchFns.set(leafId, openSearch)
+                                }
                                 onCopyBlock={(markerId) =>
                                   copyBlockByMarker(leafId, markerId)
                                 }
@@ -2227,6 +2532,9 @@ export default function Tabs() {
                                 }
                                 onPaneDragEnd={() =>
                                   setDraggingPaneLeafId(null)
+                                }
+                                multiPane={() =>
+                                  Object.keys(tab.leaves).length > 1
                                 }
                               />
                             </Show>
@@ -2330,6 +2638,14 @@ export default function Tabs() {
                 if (b?.command) insertIntoActiveTerminal(b.command);
               }}
               onScrollToBlock={scrollToBlock}
+            />
+            <RemoteDialog
+              open={remoteDialogOpen}
+              info={remoteInfo}
+              installing={remoteInstalling}
+              onEnableTunnel={enableTunnel}
+              onStop={stopRemoteControl}
+              onClose={() => setRemoteDialogOpen(false)}
             />
           </div>
         </div>

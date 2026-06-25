@@ -10,11 +10,46 @@ import {
 import { customFamilies, importFontFile, listSystemFonts } from "./fonts";
 import { THEME_PRESETS } from "./themes";
 import {
+  remoteStart,
+  remoteStatus,
+  remoteStop,
+  type RemoteInfo,
+} from "./remote";
+import { copyText } from "./clipboard";
+import {
+  IconAppearance,
+  IconBell,
+  IconKeyboard,
+  IconSmartphone,
+  IconSsh,
+} from "./icons";
+import {
   ACTIONS,
   comboToLabel,
   resolveBindings,
   type ActionId,
 } from "./keybindings";
+
+/** A small on/off pill switch, used in place of native checkboxes. */
+function Toggle(props: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.checked}
+      class="settings-toggle"
+      classList={{ on: props.checked }}
+      disabled={props.disabled}
+      onClick={() => props.onChange(!props.checked)}
+    >
+      <span class="settings-toggle-knob" />
+    </button>
+  );
+}
 
 type Props = {
   open: () => boolean;
@@ -29,7 +64,12 @@ type Props = {
   onResetBindings: () => void;
 };
 
-type Section = "appearance" | "shell" | "keys";
+type Section =
+  | "appearance"
+  | "shell"
+  | "notifications"
+  | "remote"
+  | "keys";
 
 const MAIN_COLORS: { key: keyof Theme; label: string }[] = [
   { key: "background", label: "Fond" },
@@ -90,6 +130,36 @@ export default function Settings(props: Props) {
     props.setConfig("appearance", "theme", { ...theme });
     props.onChange();
   };
+  const setNotif = <K extends keyof Config["notifications"]>(
+    key: K,
+    value: Config["notifications"][K]
+  ) => {
+    props.setConfig("notifications", key, value);
+    props.onChange();
+  };
+
+  // --- Remote control ---
+  const [remote, setRemote] = createSignal<RemoteInfo | null>(null);
+  const [remotePort, setRemotePort] = createSignal(
+    Number(localStorage.getItem("lume.remotePort")) || 4530
+  );
+  const [remoteBusy, setRemoteBusy] = createSignal(false);
+  // Refresh status whenever the panel opens.
+  createEffect(() => {
+    if (props.open()) remoteStatus().then(setRemote).catch(() => {});
+  });
+  const toggleRemote = async (on: boolean) => {
+    if (remoteBusy()) return;
+    setRemoteBusy(true);
+    try {
+      const info = on ? await remoteStart(remotePort(), false) : await remoteStop();
+      setRemote(info);
+    } catch (e) {
+      console.error("remote toggle", e);
+    } finally {
+      setRemoteBusy(false);
+    }
+  };
   const resetAppearance = () => {
     props.setConfig("appearance", {
       ...DEFAULT_CONFIG.appearance,
@@ -143,21 +213,40 @@ export default function Settings(props: Props) {
               classList={{ active: section() === "appearance" }}
               onClick={() => setSection("appearance")}
             >
-              🎨 Apparence
+              <IconAppearance size={15} />
+              <span>Apparence</span>
             </button>
             <button
               class="settings-nav"
               classList={{ active: section() === "shell" }}
               onClick={() => setSection("shell")}
             >
-              ❯ Shell
+              <IconSsh size={15} />
+              <span>Shell</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "notifications" }}
+              onClick={() => setSection("notifications")}
+            >
+              <IconBell size={15} />
+              <span>Notifications</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "remote" }}
+              onClick={() => setSection("remote")}
+            >
+              <IconSmartphone size={15} />
+              <span>Remote</span>
             </button>
             <button
               class="settings-nav"
               classList={{ active: section() === "keys" }}
               onClick={() => setSection("keys")}
             >
-              ⌨ Raccourcis
+              <IconKeyboard size={15} />
+              <span>Raccourcis</span>
             </button>
             <div class="settings-sidebar-spacer" />
             <button class="settings-close" onClick={() => props.onClose()}>
@@ -249,16 +338,13 @@ export default function Settings(props: Props) {
                   />
                 </label>
 
-                <label class="settings-row">
+                <div class="settings-row">
                   <span class="settings-label">Curseur clignotant</span>
-                  <input
-                    type="checkbox"
+                  <Toggle
                     checked={a().cursorBlink}
-                    onChange={(e) =>
-                      setAppearance("cursorBlink", e.currentTarget.checked)
-                    }
+                    onChange={(v) => setAppearance("cursorBlink", v)}
                   />
-                </label>
+                </div>
 
                 <label class="settings-row">
                   <span class="settings-label">Style du curseur</span>
@@ -402,6 +488,113 @@ export default function Settings(props: Props) {
                 <p class="settings-note">
                   S'applique aux <strong>nouveaux</strong> terminaux.
                 </p>
+              </div>
+            </Show>
+
+            <Show when={section() === "notifications"}>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">Notifier les commandes longues</span>
+                  <Toggle
+                    checked={props.config.notifications.enabled}
+                    onChange={(v) => setNotif("enabled", v)}
+                  />
+                </div>
+                <label class="settings-row">
+                  <span class="settings-label">Durée minimale (s)</span>
+                  <input
+                    class="settings-input narrow"
+                    type="number"
+                    min="1"
+                    max="3600"
+                    disabled={!props.config.notifications.enabled}
+                    value={props.config.notifications.minDurationSec}
+                    onInput={(e) =>
+                      setNotif(
+                        "minDurationSec",
+                        Math.max(1, Number(e.currentTarget.value) || 10)
+                      )
+                    }
+                  />
+                </label>
+                <div class="settings-row">
+                  <span class="settings-label">Son de notification</span>
+                  <Toggle
+                    checked={props.config.notifications.sound}
+                    disabled={!props.config.notifications.enabled}
+                    onChange={(v) => setNotif("sound", v)}
+                  />
+                </div>
+                <p class="settings-note">
+                  Une notification système s'affiche quand une commande dépasse
+                  cette durée <strong>et que Lume n'est pas au premier plan</strong>.
+                </p>
+              </div>
+            </Show>
+
+            <Show when={section() === "remote"}>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">
+                    Activer le contrôle à distance
+                  </span>
+                  <Toggle
+                    checked={remote()?.running ?? false}
+                    disabled={remoteBusy()}
+                    onChange={(v) => toggleRemote(v)}
+                  />
+                </div>
+                <label class="settings-row">
+                  <span class="settings-label">Port</span>
+                  <input
+                    class="settings-input narrow"
+                    type="number"
+                    min="1024"
+                    max="65535"
+                    disabled={remote()?.running}
+                    value={remotePort()}
+                    onInput={(e) => {
+                      const p = Math.max(
+                        1,
+                        Math.min(65535, Number(e.currentTarget.value) || 4530)
+                      );
+                      setRemotePort(p);
+                      try {
+                        localStorage.setItem("lume.remotePort", String(p));
+                      } catch {}
+                    }}
+                  />
+                </label>
+
+                <Show
+                  when={remote()?.running}
+                  fallback={
+                    <p class="settings-note">
+                      Pilote le terminal du <strong>pane actif</strong> depuis un
+                      téléphone ou un autre PC du <strong>même réseau local</strong>.
+                      Désactivé par défaut.
+                    </p>
+                  }
+                >
+                  <div class="settings-subtitle">Connexion</div>
+                  <p class="settings-note">
+                    Ouvre cette adresse sur l'autre appareil (le <strong>pane
+                    actif</strong> est piloté en direct) :
+                  </p>
+                  <div class="remote-url-row">
+                    <code class="remote-url">{remote()!.url}</code>
+                    <button
+                      class="settings-import-btn"
+                      onClick={() => copyText(remote()!.url)}
+                    >
+                      Copier
+                    </button>
+                  </div>
+                  <p class="settings-note">
+                    ⚠️ Quiconque a cette adresse (jeton inclus) peut taper dans ton
+                    terminal. Coupe-le quand tu ne t'en sers pas.
+                  </p>
+                </Show>
               </div>
             </Show>
 

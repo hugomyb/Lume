@@ -1,4 +1,12 @@
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  getOwner,
+  onCleanup,
+  onMount,
+  runWithOwner,
+  Show,
+} from "solid-js";
 import { Portal } from "solid-js/web";
 import {
   Terminal as XTerm,
@@ -7,7 +15,10 @@ import {
 } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { SearchAddon } from "@xterm/addon-search";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 import { type Appearance, toXtermTheme } from "./config";
@@ -49,6 +60,8 @@ type TerminalProps = {
   onCwd?: (cwd: string) => void;
   /** Exposes a getter for the terminal's current text selection (for copy). */
   onSelectionReady?: (getSelection: () => string) => void;
+  /** Exposes a fn that opens the in-terminal scrollback search bar. */
+  onSearchReady?: (openSearch: () => void) => void;
   /** Fired when the per-block copy button is clicked, with the block's opaque
    *  marker id (see `onBlockLine`). */
   onCopyBlock?: (markerId: number) => void;
@@ -126,6 +139,62 @@ export default function Terminal(props: TerminalProps) {
   let closeAcRef: (() => void) | null = null;
   let acceptAcRef: (() => void) | null = null;
 
+  // --- Scrollback search state ---
+  let searchAddon: SearchAddon | undefined;
+  let searchInputRef: HTMLInputElement | undefined;
+  const [searchOpen, setSearchOpen] = createSignal(false);
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [searchResults, setSearchResults] = createSignal({ index: 0, count: 0 });
+  const [searchPos, setSearchPos] = createSignal({ top: 0, right: 0 });
+
+  const runSearch = (forward: boolean) => {
+    if (!searchAddon) return;
+    const q = searchQuery();
+    if (!q) {
+      searchAddon.clearDecorations();
+      setSearchResults({ index: 0, count: 0 });
+      return;
+    }
+    const th = props.appearance.theme;
+    const opts = {
+      caseSensitive: false,
+      decorations: {
+        matchBackground: th.selection,
+        matchBorder: th.selection,
+        matchOverviewRuler: th.accent,
+        activeMatchBackground: th.accent,
+        activeMatchBorder: th.accent,
+        activeMatchColorOverviewRuler: th.accent,
+      },
+    };
+    if (forward) searchAddon.findNext(q, opts);
+    else searchAddon.findPrevious(q, opts);
+  };
+
+  const openSearchBar = () => {
+    if (containerRef) {
+      const r = containerRef.getBoundingClientRect();
+      setSearchPos({
+        top: Math.max(8, r.top + 8),
+        right: Math.max(8, window.innerWidth - r.right + 12),
+      });
+    }
+    const sel = term?.getSelection();
+    if (sel && !sel.includes("\n")) setSearchQuery(sel);
+    setSearchOpen(true);
+    queueMicrotask(() => {
+      searchInputRef?.focus();
+      searchInputRef?.select();
+      if (searchQuery()) runSearch(true);
+    });
+  };
+
+  const closeSearchBar = () => {
+    setSearchOpen(false);
+    searchAddon?.clearDecorations();
+    term?.focus();
+  };
+
   // --- Inline autocomplete state ---
   const [acItems, setAcItems] = createSignal<Suggestion[]>([]);
   const [acIndex, setAcIndex] = createSignal(0);
@@ -153,6 +222,14 @@ export default function Terminal(props: TerminalProps) {
   // Monotonic counter to discard stale async path-completion responses.
   let acReqSeq = 0;
   let acRaf = 0;
+
+  // onMount below is async; past the first `await` Solid's reactive owner is
+  // gone, so an onCleanup() registered there is "outside a root" and never
+  // runs (leaking listeners/observers). Capture the owner now and re-enter it
+  // to register cleanups that actually dispose on unmount.
+  const owner = getOwner();
+  const addCleanup = (fn: () => void) =>
+    owner ? runWithOwner(owner, () => onCleanup(fn)) : onCleanup(fn);
 
   onMount(async () => {
     if (!containerRef) return;
@@ -193,6 +270,21 @@ export default function Terminal(props: TerminalProps) {
         console.warn("[lume] WebGL addon failed, falling back to DOM renderer", e);
       }
     }
+
+    // Clickable links: Ctrl/Cmd+click opens URLs externally (via the OS), like
+    // VS Code's terminal — a plain click stays available for text selection.
+    term.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        if (event.ctrlKey || event.metaKey) openUrl(uri).catch(console.error);
+      })
+    );
+
+    // Scrollback search.
+    searchAddon = new SearchAddon();
+    term.loadAddon(searchAddon);
+    searchAddon.onDidChangeResults((r) =>
+      setSearchResults({ index: (r?.resultIndex ?? -1) + 1, count: r?.resultCount ?? 0 })
+    );
     // Wait one frame so flex layout has time to compute the container's real
     // size — otherwise fit() reads 0x0 (or the default 80x24) and we spawn
     // the shell at the wrong dimensions.
@@ -485,6 +577,7 @@ export default function Terminal(props: TerminalProps) {
     props.onSpawned?.(ptyId);
     props.onFocusReady?.(() => term?.focus());
     props.onSelectionReady?.(() => term?.getSelection() ?? "");
+    props.onSearchReady?.(openSearchBar);
 
     // Flush any events that arrived between listener registration and PTY id
     // being assigned.
@@ -603,7 +696,7 @@ export default function Terminal(props: TerminalProps) {
     // the cursor moves (arrow-key editing). A cheap no-op when not at a prompt.
     const acWriteSub: IDisposable = term.onWriteParsed(() => scheduleRecompute());
     const acCursorSub: IDisposable = term.onCursorMove(() => scheduleRecompute());
-    onCleanup(() => {
+    addCleanup(() => {
       acWriteSub.dispose();
       acCursorSub.dispose();
       if (acRaf) cancelAnimationFrame(acRaf);
@@ -745,7 +838,7 @@ export default function Terminal(props: TerminalProps) {
     containerRef.addEventListener("mousemove", onHostMove);
     containerRef.addEventListener("mouseleave", scheduleHideCopyBtn);
     const copyScrollSub = term.onScroll(() => hideCopyBtn());
-    onCleanup(() => {
+    addCleanup(() => {
       containerRef?.removeEventListener("mousemove", onHostMove);
       containerRef?.removeEventListener("mouseleave", scheduleHideCopyBtn);
       copyScrollSub.dispose();
@@ -792,7 +885,7 @@ export default function Terminal(props: TerminalProps) {
     };
     const ro = new ResizeObserver(scheduleRefit);
     ro.observe(containerRef);
-    onCleanup(() => {
+    addCleanup(() => {
       ro.disconnect();
       if (rafPending) cancelAnimationFrame(rafPending);
     });
@@ -835,6 +928,7 @@ export default function Terminal(props: TerminalProps) {
   createEffect(() => {
     if (!props.active()) {
       closeAcRef?.();
+      if (searchOpen()) closeSearchBar();
       return;
     }
     if (!term || !fit) return;
@@ -884,6 +978,71 @@ export default function Terminal(props: TerminalProps) {
               acceptAcRef?.();
             }}
           />
+        </Portal>
+      </Show>
+      <Show when={searchOpen()}>
+        <Portal>
+          <div
+            class="term-search"
+            style={{
+              top: `${searchPos().top}px`,
+              right: `${searchPos().right}px`,
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <input
+              ref={searchInputRef}
+              class="term-search-input"
+              type="text"
+              placeholder="Rechercher…"
+              value={searchQuery()}
+              onInput={(e) => {
+                setSearchQuery(e.currentTarget.value);
+                runSearch(true);
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runSearch(!e.shiftKey);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeSearchBar();
+                }
+              }}
+            />
+            <span class="term-search-count">
+              {searchResults().count
+                ? `${searchResults().index}/${searchResults().count}`
+                : searchQuery()
+                ? "0/0"
+                : ""}
+            </span>
+            <button
+              class="term-search-btn"
+              title="Précédent (Shift+Entrée)"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => runSearch(false)}
+            >
+              ↑
+            </button>
+            <button
+              class="term-search-btn"
+              title="Suivant (Entrée)"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => runSearch(true)}
+            >
+              ↓
+            </button>
+            <button
+              class="term-search-btn"
+              title="Fermer (Échap)"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={closeSearchBar}
+            >
+              ✕
+            </button>
+          </div>
         </Portal>
       </Show>
     </>
