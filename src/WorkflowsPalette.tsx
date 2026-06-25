@@ -228,56 +228,56 @@ export default function WorkflowsPalette(props: Props) {
 
                 <div class="wf-args">
                   <For each={effectiveArgs(wf())}>
-                {(arg, i) => (
-                  <label class="wf-arg">
-                    <span class="wf-arg-name">{arg.name}</span>
-                    <Show when={arg.description}>
-                      <span class="wf-arg-desc">{arg.description}</span>
+                    {(arg, i) => (
+                      <label class="wf-arg">
+                        <span class="wf-arg-name">{arg.name}</span>
+                        <Show when={arg.description}>
+                          <span class="wf-arg-desc">{arg.description}</span>
+                        </Show>
+                        <input
+                          ref={(el) => {
+                            if (i() === 0) firstArgRef = el;
+                          }}
+                          class="wf-arg-input"
+                          type="text"
+                          value={values()[arg.name] ?? ""}
+                          placeholder={arg.default_value ?? ""}
+                          onInput={(e) =>
+                            setValues((v) => ({
+                              ...v,
+                              [arg.name]: e.currentTarget.value,
+                            }))
+                          }
+                          onKeyDown={onFillKeyDown}
+                        />
+                      </label>
+                    )}
+                  </For>
+                </div>
+
+                <div class="wf-preview">
+                  <span class="wf-preview-label">Aperçu</span>
+                  <code>{preview()}</code>
+                </div>
+
+                <div class="palette-footer">
+                  <span class="palette-hint">
+                    <Show
+                      when={missing().length === 0}
+                      fallback={<>À compléter : {missing().join(", ")}</>}
+                    >
+                      <kbd>Enter</kbd> pour insérer dans le terminal
                     </Show>
-                    <input
-                      ref={(el) => {
-                        if (i() === 0) firstArgRef = el;
-                      }}
-                      class="wf-arg-input"
-                      type="text"
-                      value={values()[arg.name] ?? ""}
-                      placeholder={arg.default_value ?? ""}
-                      onInput={(e) =>
-                        setValues((v) => ({
-                          ...v,
-                          [arg.name]: e.currentTarget.value,
-                        }))
-                      }
-                      onKeyDown={onFillKeyDown}
-                    />
-                  </label>
-                )}
-              </For>
-            </div>
-
-            <div class="wf-preview">
-              <span class="wf-preview-label">Aperçu</span>
-              <code>{preview()}</code>
-            </div>
-
-            <div class="palette-footer">
-              <span class="palette-hint">
-                <Show
-                  when={missing().length === 0}
-                  fallback={<>À compléter : {missing().join(", ")}</>}
-                >
-                  <kbd>Enter</kbd> pour insérer dans le terminal
-                </Show>
-              </span>
-              <div class="palette-actions">
-                <button class="palette-btn ghost" onClick={backToList}>
-                  Retour
-                </button>
-                <button class="palette-btn primary" onClick={insert}>
-                  Insérer
-                </button>
-              </div>
-            </div>
+                  </span>
+                  <div class="palette-actions">
+                    <button class="palette-btn ghost" onClick={backToList}>
+                      Retour
+                    </button>
+                    <button class="palette-btn primary" onClick={insert}>
+                      Insérer
+                    </button>
+                  </div>
+                </div>
               </>
             )}
           </Show>
