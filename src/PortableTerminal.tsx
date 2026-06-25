@@ -13,6 +13,9 @@ type Props = {
   onExit: () => void;
   onBlock: (ev: PtyBlock) => void;
   onCwd: (cwd: string) => void;
+  onSelectionReady: (getSelection: () => string) => void;
+  onCopyBlock: (markerId: number) => void;
+  canCopyMarker: (markerId: number) => boolean;
   onFocusReady: (focus: () => void) => void;
   onScrollReady: (
     scrollTo: (startMarkerId: number, endMarkerIdHint: number | null) => void
@@ -131,10 +134,14 @@ export default function PortableTerminal(props: Props) {
       <Terminal
         active={props.active}
         appearance={props.appearance}
+        initialCwd={props.leaf.cwd}
         onSpawned={props.onSpawned}
         onExit={props.onExit}
         onBlock={props.onBlock}
         onCwd={props.onCwd}
+        onSelectionReady={props.onSelectionReady}
+        onCopyBlock={props.onCopyBlock}
+        canCopyMarker={props.canCopyMarker}
         onFocusReady={props.onFocusReady}
         onScrollReady={props.onScrollReady}
         onBlockLine={props.onBlockLine}

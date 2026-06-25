@@ -77,8 +77,9 @@ pub fn pty_spawn(
     cfg_state: State<'_, Arc<Config>>,
     rows: u16,
     cols: u16,
+    cwd: Option<String>,
 ) -> Result<u64, String> {
-    spawn_impl(app, pty_state, cfg_state, rows, cols).map_err(|e| e.to_string())
+    spawn_impl(app, pty_state, cfg_state, rows, cols, cwd).map_err(|e| e.to_string())
 }
 
 fn spawn_impl(
@@ -87,6 +88,7 @@ fn spawn_impl(
     cfg_state: State<'_, Arc<Config>>,
     rows: u16,
     cols: u16,
+    init_cwd: Option<String>,
 ) -> Result<u64> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -103,12 +105,14 @@ fn spawn_impl(
     for arg in args {
         cmd.arg(arg);
     }
-    // Default to $HOME so shells open in the user's home dir, not wherever
-    // the Tauri process happened to be launched from (src-tauri/ in dev,
-    // / or /usr when packaged). Override with config later if needed.
-    let cwd = std::env::var("HOME")
-        .ok()
+    // Prefer a restored cwd (session persistence) when it still exists, else
+    // default to $HOME so shells open in the user's home dir rather than wherever
+    // the Tauri process was launched from (src-tauri/ in dev, / when packaged).
+    let cwd = init_cwd
+        .filter(|c| !c.is_empty())
         .map(std::path::PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| std::env::var("HOME").ok().map(std::path::PathBuf::from))
         .or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = cwd {
         cmd.cwd(cwd);

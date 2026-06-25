@@ -111,6 +111,9 @@ function BlockAiPanel(props: {
 type Props = {
   blocks: () => Block[];
   totalBlocks: () => number;
+  /** True once OSC 133 markers have ever been seen — i.e. shell integration is
+   *  working. Drives the empty state: setup instructions vs. a neutral hint. */
+  integrationActive: () => boolean;
   selectedBlockId: () => number | null;
   navMode: () => boolean;
   visible: () => boolean;
@@ -166,8 +169,12 @@ function exitClass(b: Block): string {
   return "exit-pending";
 }
 
-function EmptyState() {
-  const [hint] = createResource(getShellSetupHint);
+function EmptyState(props: { active: () => boolean }) {
+  // Only fetch the setup hint when integration isn't active yet.
+  const [hint] = createResource(
+    () => (props.active() ? false : true),
+    getShellSetupHint
+  );
   const [copied, setCopied] = createSignal(false);
 
   const copy = async (line: string) => {
@@ -184,11 +191,22 @@ function EmptyState() {
     <div class="blocks-empty">
       <p class="blocks-empty-intro">
         Un <strong>bloc</strong> = une commande + sa sortie + son code retour.
-        L'historique apparaîtra ici dès que ton shell émet les markers OSC 133.
       </p>
-      <Show when={hint()} fallback={<p class="muted">Chargement…</p>}>
-        {(h) => (
-          <>
+      <Show
+        when={!props.active()}
+        fallback={
+          <p class="muted">
+            Aucune commande pour l'instant — lances-en une et elle apparaîtra
+            ici.
+          </p>
+        }
+      >
+        <p>
+          L'historique apparaîtra ici dès que ton shell émet les markers OSC 133.
+        </p>
+        <Show when={hint()} fallback={<p class="muted">Chargement…</p>}>
+          {(h) => (
+            <>
             <p>
               Ajoute cette ligne à <code>{h().rcFile}</code> puis ouvre un
               nouveau shell :
@@ -208,8 +226,9 @@ function EmptyState() {
               exporte <code>LUME_TERM=1</code> — le source ne s'active que dans
               Lume.
             </p>
-          </>
-        )}
+            </>
+          )}
+        </Show>
       </Show>
     </div>
   );
@@ -445,7 +464,10 @@ export default function BlocksPanel(props: Props) {
           </div>
         </div>
         <div class="blocks-list">
-          <For each={props.blocks()} fallback={<EmptyState />}>
+          <For
+            each={props.blocks()}
+            fallback={<EmptyState active={props.integrationActive} />}
+          >
             {(b) => (
               <div
                 class="block-row"

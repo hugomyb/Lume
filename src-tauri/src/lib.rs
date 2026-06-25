@@ -6,6 +6,7 @@ mod config;
 mod osc;
 mod pty;
 mod shell;
+mod ssh;
 mod workflows;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +26,7 @@ pub fn run() {
             shell::get_shell_setup_hint,
             complete::fs_complete,
             workflows::list_workflows,
+            ssh::list_ssh_hosts,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

@@ -6,6 +6,12 @@ export type LeafData = {
   blocks: Block[];
   nextBlockId: number;
   selectedBlockId: number | null;
+  /** Text to write to the PTY once it spawns (e.g. `ssh host\n` for a leaf
+   *  opened from the SSH manager). Cleared after it's sent. */
+  pendingInput: string | null;
+  /** Last-known working directory (OSC 7). Persisted so the pane reopens in the
+   *  same place after a Lume restart. Also used as the spawn cwd on restore. */
+  cwd: string | null;
 };
 
 export type TreeNode =
@@ -28,7 +34,34 @@ export function makeLeaf(): LeafData {
     blocks: [],
     nextBlockId: 0,
     selectedBlockId: null,
+    pendingInput: null,
+    cwd: null,
   };
+}
+
+/** Build a leaf with a specific id (used when restoring a persisted session). */
+export function makeLeafWithId(id: number, cwd: string | null): LeafData {
+  return {
+    id,
+    ptyId: null,
+    blocks: [],
+    nextBlockId: 0,
+    selectedBlockId: null,
+    pendingInput: null,
+    cwd,
+  };
+}
+
+/** Current id counters, for persisting the session. */
+export function paneCounters(): { nextLeafId: number; nextSplitId: number } {
+  return { nextLeafId, nextSplitId };
+}
+
+/** Advance the id counters so freshly-created leaves/splits never collide with
+ *  ids restored from a persisted session. */
+export function seedPaneCounters(leafId: number, splitId: number) {
+  if (Number.isFinite(leafId) && leafId > nextLeafId) nextLeafId = leafId;
+  if (Number.isFinite(splitId) && splitId > nextSplitId) nextSplitId = splitId;
 }
 
 export function makeSplit(

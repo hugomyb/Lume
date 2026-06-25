@@ -14,7 +14,7 @@ import PaneNode from "./PaneNode";
 import PortableTerminal from "./PortableTerminal";
 import { loadConfig, type Config } from "./config";
 import type { Block, PtyBlock } from "./blocks";
-import { b64ToString } from "./blocks";
+import { b64ToString, stripAnsi } from "./blocks";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   aiCancel,
@@ -30,12 +30,17 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import CommandPalette from "./CommandPalette";
 import WorkflowsPalette from "./WorkflowsPalette";
+import SshPalette from "./SshPalette";
+import { sshCommand } from "./ssh";
 import {
   leafIds,
   makeLeaf,
+  makeLeafWithId,
   makeSplit,
   neighbourLeaf,
+  paneCounters,
   removeLeaf,
+  seedPaneCounters,
   setSplitRatio,
   splitAt,
   type LeafData,
@@ -49,6 +54,10 @@ type TabState = {
   tree: TreeNode;
   leaves: Record<number, LeafData>;
   activeLeafId: number;
+  /** When set, OSC 7 cwd updates don't rewrite the tab title — used for SSH
+   *  tabs whose title is the host (the local shell's cwd is irrelevant, and the
+   *  remote shell won't emit OSC 7). */
+  lockTitle?: boolean;
 };
 
 let nextTabId = 0;
@@ -63,19 +72,72 @@ function applyCssVars(cfg: Config) {
   root.setProperty("--accent", t.accent);
 }
 
+type PersistedLeaf = { id: number; cwd: string | null };
+type PersistedTab = {
+  id: number;
+  title: string;
+  lockTitle: boolean;
+  tree: TreeNode;
+  activeLeafId: number;
+  leaves: PersistedLeaf[];
+};
 type PersistedSession = {
-  tabCount: number;
+  version: number;
+  activeId: number;
+  nextLeafId: number;
+  nextSplitId: number;
+  nextTabId: number;
+  tabs: PersistedTab[];
 };
 
-function loadSession(): PersistedSession {
+const SESSION_KEY = "lume.session.v2";
+
+/** Rebuild the full tab/pane state from a persisted session, or null if there's
+ *  nothing valid to restore. Restores tree structure (split ratios, layout),
+ *  titles, manual-rename lock, and each pane's last cwd. */
+function loadSession(): { tabs: TabState[]; activeId: number } | null {
   try {
-    const raw = localStorage.getItem("lume.session");
-    if (!raw) return { tabCount: 1 };
-    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
-    const tabCount = Math.max(1, Math.min(20, parsed.tabCount ?? 1));
-    return { tabCount };
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as PersistedSession;
+    if (!data || !Array.isArray(data.tabs) || data.tabs.length === 0) return null;
+
+    seedPaneCounters(data.nextLeafId ?? 0, data.nextSplitId ?? 0);
+    if (Number.isFinite(data.nextTabId)) nextTabId = data.nextTabId;
+
+    const tabs: TabState[] = [];
+    for (const pt of data.tabs) {
+      if (!pt || !pt.tree) continue;
+      const ids = leafIds(pt.tree);
+      if (ids.length === 0) continue;
+      const cwdById = new Map(
+        (pt.leaves ?? []).map((l) => [l.id, l.cwd ?? null] as const)
+      );
+      const leaves: Record<number, LeafData> = {};
+      for (const lid of ids) {
+        leaves[lid] = makeLeafWithId(lid, cwdById.get(lid) ?? null);
+      }
+      tabs.push({
+        id: pt.id,
+        title: pt.title || "Shell",
+        lockTitle: !!pt.lockTitle,
+        tree: pt.tree,
+        leaves,
+        activeLeafId: ids.includes(pt.activeLeafId) ? pt.activeLeafId : ids[0],
+      });
+    }
+    if (tabs.length === 0) return null;
+
+    // Make sure new tab ids won't collide with restored ones.
+    const maxTabId = tabs.reduce((m, t) => Math.max(m, t.id), 0);
+    if (nextTabId <= maxTabId) nextTabId = maxTabId + 1;
+
+    const activeId = tabs.some((t) => t.id === data.activeId)
+      ? data.activeId
+      : tabs[0].id;
+    return { tabs, activeId };
   } catch {
-    return { tabCount: 1 };
+    return null;
   }
 }
 
@@ -94,17 +156,37 @@ export default function Tabs() {
   const [config] = createResource<Config>(loadConfig);
   const [ai] = createResource<AiStatus>(aiStatus);
 
-  const session = loadSession();
-  const initialTabs: TabState[] = Array.from(
-    { length: session.tabCount },
-    makeEmptyTab
-  );
+  const restored = loadSession();
+  const initialTabs: TabState[] = restored?.tabs ?? [makeEmptyTab()];
   const [tabs, setTabs] = createStore<TabState[]>(initialTabs);
-  const [activeId, setActiveId] = createSignal(tabs[0].id);
-  const [panelVisible, setPanelVisible] = createSignal(true);
+  const [activeId, setActiveId] = createSignal(
+    restored?.activeId ?? initialTabs[0].id
+  );
+  const [panelVisible, setPanelVisible] = createSignal(
+    localStorage.getItem("lume.panelVisible") !== "0"
+  );
+  createEffect(() => {
+    try {
+      localStorage.setItem("lume.panelVisible", panelVisible() ? "1" : "0");
+    } catch {}
+  });
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [workflowsOpen, setWorkflowsOpen] = createSignal(false);
+  const [sshOpen, setSshOpen] = createSignal(false);
   const [blockNavMode, setBlockNavMode] = createSignal(false);
+  // True once any OSC 133 block event has been seen (this session or a past
+  // one, persisted). Confirms shell integration works → the blocks panel drops
+  // its setup instructions for a neutral empty state.
+  const [oscSeen, setOscSeen] = createSignal(
+    localStorage.getItem("lume.osc133Seen") === "1"
+  );
+  const markOscSeen = () => {
+    if (oscSeen()) return;
+    setOscSeen(true);
+    try {
+      localStorage.setItem("lume.osc133Seen", "1");
+    } catch {}
+  };
   const [searchOpen, setSearchOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [tabCtxMenu, setTabCtxMenu] = createSignal<
@@ -128,6 +210,9 @@ export default function Tabs() {
   const [paneCtxMenu, setPaneCtxMenu] = createSignal<
     { x: number; y: number; leafId: number } | null
   >(null);
+  /** Tab being renamed inline (double-click), with its draft title. */
+  const [editingTabId, setEditingTabId] = createSignal<number | null>(null);
+  const [editingTitle, setEditingTitle] = createSignal("");
   const [layoutsOpen, setLayoutsOpen] = createSignal(false);
   const [toast, setToast] = createSignal<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,14 +240,17 @@ export default function Tabs() {
     return t.leaves[t.activeLeafId] ?? null;
   };
 
+  // A "real" block is one that ran an actual command. Bare prompts (Enter on an
+  // empty line → command "" / null) are noise and never shown or navigated.
+  const hasCommand = (b: Block) => (b.command ?? "").trim() !== "";
+
   const visibleBlocks = createMemo(() => {
     const leaf = activeLeaf();
     if (!leaf) return [];
+    const real = leaf.blocks.filter(hasCommand);
     const q = searchQuery().trim().toLowerCase();
-    if (!q) return leaf.blocks;
-    return leaf.blocks.filter((b) =>
-      (b.command ?? "").toLowerCase().includes(q)
-    );
+    if (!q) return real;
+    return real.filter((b) => (b.command ?? "").toLowerCase().includes(q));
   });
 
   const initialWidth = (() => {
@@ -336,6 +424,7 @@ export default function Tabs() {
 
   // Per-leaf focus/scroll/refresh callbacks, registered by each Terminal on mount.
   const leafFocusFns = new Map<number, () => void>();
+  const leafSelectionFns = new Map<number, () => string>();
   const leafScrollFns = new Map<
     number,
     (startMarkerId: number, endMarkerIdHint: number | null) => void
@@ -382,6 +471,35 @@ export default function Tabs() {
       }
     }
     leafScrollFns.get(leaf.id)?.(block.markerId, nextMarkerId);
+  };
+
+  const ptyWriteText = (ptyId: number, text: string) => {
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode(
+        ...bytes.subarray(i, Math.min(i + chunk, bytes.length))
+      );
+    }
+    invoke("pty_write", { id: ptyId, dataB64: btoa(bin) }).catch(console.error);
+  };
+
+  /** Open a new tab whose freshly-spawned shell immediately runs `command`
+   *  (written once the PTY exists, via the leaf's pendingInput). */
+  const openCommandInNewTab = (title: string, command: string) => {
+    const leaf = makeLeaf();
+    leaf.pendingInput = command.endsWith("\n") ? command : command + "\n";
+    const tab: TabState = {
+      id: nextTabId++,
+      title,
+      tree: { type: "leaf", leafId: leaf.id },
+      leaves: { [leaf.id]: leaf },
+      activeLeafId: leaf.id,
+      lockTitle: true,
+    };
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
   };
 
   const insertIntoActiveTerminal = async (text: string) => {
@@ -478,6 +596,30 @@ export default function Tabs() {
     setActiveId(tab.id);
   };
 
+  // --- Inline tab rename ---
+
+  const startRename = (tabId: number) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    setEditingTitle(tab.title);
+    setEditingTabId(tabId);
+  };
+
+  const commitRename = () => {
+    const id = editingTabId();
+    if (id === null) return;
+    const idx = tabIndex(id);
+    const title = editingTitle().trim();
+    if (idx !== -1 && title) {
+      setTabs(idx, "title", title);
+      // Manual rename wins: stop auto-renaming this tab from its cwd.
+      setTabs(idx, "lockTitle", true);
+    }
+    setEditingTabId(null);
+  };
+
+  const cancelRename = () => setEditingTabId(null);
+
   const closeTab = (id: number) => {
     const tab = tabs.find((t) => t.id === id);
     if (tab) {
@@ -487,6 +629,7 @@ export default function Tabs() {
         leafFocusFns.delete(leafId);
         leafScrollFns.delete(leafId);
         leafRefreshFns.delete(leafId);
+        leafSelectionFns.delete(leafId);
       }
     }
     if (tabs.length === 1) {
@@ -560,6 +703,7 @@ export default function Tabs() {
     leafFocusFns.delete(toClose);
     leafScrollFns.delete(toClose);
     leafRefreshFns.delete(toClose);
+    leafSelectionFns.delete(toClose);
   };
 
   type LayoutKind =
@@ -631,6 +775,7 @@ export default function Tabs() {
       leafFocusFns.delete(oldId);
       leafScrollFns.delete(oldId);
       leafRefreshFns.delete(oldId);
+      leafSelectionFns.delete(oldId);
     }
 
     setTabs(tIdx, "tree", newTree);
@@ -647,6 +792,46 @@ export default function Tabs() {
       setTabs(i, "activeLeafId", leafId);
       closeActivePane();
       return;
+    }
+  };
+
+  const copyFromPane = async (leafId: number) => {
+    const text = leafSelectionFns.get(leafId)?.() ?? "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      console.error("copy failed", e);
+    }
+  };
+
+  const copyActiveSelection = () => {
+    const leaf = activeLeaf();
+    if (leaf) copyFromPane(leaf.id);
+  };
+
+  /** Whether the block at this marker has a command worth a copy button. */
+  const canCopyMarker = (leafId: number, markerId: number): boolean => {
+    const tab = tabs.find((t) => t.leaves[leafId]);
+    const block = tab?.leaves[leafId].blocks.find((b) => b.markerId === markerId);
+    return !!block?.command && block.command.trim() !== "";
+  };
+
+  /** Copy a block's command + output (clicked via the in-terminal overlay). */
+  const copyBlockByMarker = async (leafId: number, markerId: number) => {
+    const tab = tabs.find((t) => t.leaves[leafId]);
+    if (!tab) return;
+    const block = tab.leaves[leafId].blocks.find((b) => b.markerId === markerId);
+    if (!block) return;
+    const parts: string[] = [];
+    if (block.command) parts.push(stripAnsi(block.command).trimEnd());
+    if (block.output) parts.push(stripAnsi(block.output).trimEnd());
+    const text = parts.join("\n");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      console.error("copy block failed", e);
     }
   };
 
@@ -929,6 +1114,8 @@ export default function Tabs() {
     if (tIdx === -1) return;
     const leaf = tabs[tIdx].leaves[leafId];
     if (!leaf) return;
+    // Any block event means OSC 133 markers are flowing → integration works.
+    markOscSeen();
     switch (ev.kind) {
       case "promptStart": {
         const blockId = leaf.nextBlockId;
@@ -992,6 +1179,12 @@ export default function Tabs() {
   const handleCwd = (tabId: number, leafId: number, cwd: string) => {
     const tIdx = tabIndex(tabId);
     if (tIdx === -1) return;
+    // Always record each pane's cwd so the session can be restored to it.
+    if (tabs[tIdx].leaves[leafId]) {
+      setTabs(tIdx, "leaves", leafId, "cwd", cwd);
+    }
+    // SSH tabs keep their host as title — don't overwrite with the local cwd.
+    if (tabs[tIdx].lockTitle) return;
     // Only update the tab title when this is the active leaf of the tab.
     if (tabs[tIdx].activeLeafId !== leafId) return;
     const home = "/home/hugo";
@@ -1038,7 +1231,10 @@ export default function Tabs() {
           k === "p" ||
           k === "d" ||
           k === "e" ||
-          k === "r"
+          k === "r" ||
+          k === "s" ||
+          k === "c" ||
+          k === "v"
         );
       }
       // Ctrl (no Shift):
@@ -1157,6 +1353,19 @@ export default function Tabs() {
     } else if (e.shiftKey && (e.key === "R" || e.key === "r")) {
       e.preventDefault();
       setWorkflowsOpen(true);
+    } else if (e.shiftKey && (e.key === "S" || e.key === "s")) {
+      e.preventDefault();
+      setSshOpen(true);
+    } else if (e.shiftKey && (e.key === "C" || e.key === "c")) {
+      // stopPropagation so xterm doesn't also see it and emit ^C to the shell.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      copyActiveSelection();
+    } else if (e.shiftKey && (e.key === "V" || e.key === "v")) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const leaf = activeLeaf();
+      if (leaf) pasteIntoPane(leaf.id);
     } else if (e.key >= "1" && e.key <= "9") {
       const i = parseInt(e.key, 10) - 1;
       if (i < tabs.length) {
@@ -1264,12 +1473,52 @@ export default function Tabs() {
     });
   });
 
+  const serializeSession = (): PersistedSession => {
+    const { nextLeafId, nextSplitId } = paneCounters();
+    return {
+      version: 2,
+      activeId: activeId(),
+      nextLeafId,
+      nextSplitId,
+      nextTabId,
+      tabs: tabs.map((t) => ({
+        id: t.id,
+        title: t.title,
+        lockTitle: !!t.lockTitle,
+        tree: t.tree,
+        activeLeafId: t.activeLeafId,
+        leaves: leafIds(t.tree).map((lid) => ({
+          id: lid,
+          cwd: t.leaves[lid]?.cwd ?? null,
+        })),
+      })),
+    };
+  };
+
+  // Persist the whole session (tabs, titles, manual-rename lock, tree/layout,
+  // per-pane cwd) on any change, debounced. Building the snapshot here reads all
+  // the relevant store fields, so the effect re-runs whenever they change.
+  let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(() => {
-    const count = tabs.length;
-    try {
-      localStorage.setItem("lume.session", JSON.stringify({ tabCount: count }));
-    } catch {}
+    const json = JSON.stringify(serializeSession());
+    if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = setTimeout(() => {
+      sessionSaveTimer = null;
+      try {
+        localStorage.setItem(SESSION_KEY, json);
+      } catch {}
+    }, 400);
   });
+
+  // Belt-and-suspenders: flush the latest session synchronously when the window
+  // is closing, in case a change happened within the debounce window.
+  const saveSessionNow = () => {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(serializeSession()));
+    } catch {}
+  };
+  window.addEventListener("beforeunload", saveSessionNow);
+  onCleanup(() => window.removeEventListener("beforeunload", saveSessionNow));
 
   return (
     <Show
@@ -1293,8 +1542,16 @@ export default function Tabs() {
                       reorderHover()?.idx === idx() &&
                       reorderHover()?.side === "after",
                   }}
-                  draggable={true}
+                  draggable={editingTabId() !== tab.id}
                   onClick={() => setActiveId(tab.id)}
+                  onDblClick={() => startRename(tab.id)}
+                  onAuxClick={(e) => {
+                    // Middle-click closes the tab.
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      closeTab(tab.id);
+                    }
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setTabCtxMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
@@ -1352,10 +1609,40 @@ export default function Tabs() {
                     setDraggingTabId(null);
                     setReorderHover(null);
                   }}
-                  title={`${tab.title}  (Ctrl+${idx() + 1})  ·  right-click pour split`}
+                  title={`${tab.title}  (Ctrl+${idx() + 1})  ·  double-clic pour renommer · clic-molette pour fermer · clic-droit pour split`}
                 >
                   <span class="tab-index">{idx() + 1}</span>
-                  <span class="tab-title">{tab.title}</span>
+                  <Show
+                    when={editingTabId() === tab.id}
+                    fallback={<span class="tab-title">{tab.title}</span>}
+                  >
+                    <input
+                      class="tab-title-input"
+                      value={editingTitle()}
+                      ref={(el) =>
+                        queueMicrotask(() => {
+                          el.focus();
+                          el.select();
+                        })
+                      }
+                      draggable={false}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      onDblClick={(e) => e.stopPropagation()}
+                      onInput={(e) => setEditingTitle(e.currentTarget.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitRename();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          cancelRename();
+                        }
+                      }}
+                    />
+                  </Show>
                   <Show when={leafIds(tab.tree).length > 1}>
                     <span
                       class="tab-panes-badge"
@@ -1385,6 +1672,13 @@ export default function Tabs() {
               +
             </button>
             <div class="tab-bar-spacer" />
+            <button
+              class="workflows-toggle"
+              title="SSH (Ctrl+Shift+S)"
+              onClick={() => setSshOpen(true)}
+            >
+              ⇆
+            </button>
             <button
               class="workflows-toggle"
               title="Workflows (Ctrl+Shift+R)"
@@ -1501,11 +1795,20 @@ export default function Tabs() {
                   <button
                     class="ctx-item"
                     onClick={() => {
+                      copyFromPane(m.leafId);
+                      setPaneCtxMenu(null);
+                    }}
+                  >
+                    ⧉ Copier (Ctrl+Shift+C)
+                  </button>
+                  <button
+                    class="ctx-item"
+                    onClick={() => {
                       pasteIntoPane(m.leafId);
                       setPaneCtxMenu(null);
                     }}
                   >
-                    ⎘ Coller
+                    ⎘ Coller (Ctrl+Shift+V)
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -1572,6 +1875,16 @@ export default function Tabs() {
                   <button
                     class="ctx-item"
                     onClick={() => {
+                      startRename(m.tabId);
+                      setTabCtxMenu(null);
+                    }}
+                  >
+                    ✎ Renommer (double-clic)
+                  </button>
+                  <div class="ctx-sep" />
+                  <button
+                    class="ctx-item"
+                    onClick={() => {
                       splitTab(m.tabId, "row");
                       setTabCtxMenu(null);
                     }}
@@ -1597,19 +1910,6 @@ export default function Tabs() {
                   >
                     + Nouveau tab (Ctrl+Shift+T)
                   </button>
-                  <Show when={paneCount > 1}>
-                    <div class="ctx-sep" />
-                    <button
-                      class="ctx-item danger"
-                      onClick={() => {
-                        setActiveId(m.tabId);
-                        closeActivePane();
-                        setTabCtxMenu(null);
-                      }}
-                    >
-                      × Fermer le pane actif ({paneCount} panes)
-                    </button>
-                  </Show>
                   <div class="ctx-sep" />
                   <button
                     class="ctx-item danger"
@@ -1676,6 +1976,20 @@ export default function Tabs() {
                                     "ptyId",
                                     ptyId
                                   );
+                                  // Run any queued command (e.g. ssh from the
+                                  // SSH manager) now that the PTY exists.
+                                  const pending =
+                                    tabs[idx].leaves[leafId]?.pendingInput;
+                                  if (pending) {
+                                    setTabs(
+                                      idx,
+                                      "leaves",
+                                      leafId,
+                                      "pendingInput",
+                                      null
+                                    );
+                                    ptyWriteText(ptyId, pending);
+                                  }
                                 }}
                                 onExit={() => {
                                   const idx = tabIndex(tab.id);
@@ -1688,6 +2002,15 @@ export default function Tabs() {
                                 }
                                 onCwd={(cwd) =>
                                   handleCwd(tab.id, leafId, cwd)
+                                }
+                                onSelectionReady={(getSel) =>
+                                  leafSelectionFns.set(leafId, getSel)
+                                }
+                                onCopyBlock={(markerId) =>
+                                  copyBlockByMarker(leafId, markerId)
+                                }
+                                canCopyMarker={(markerId) =>
+                                  canCopyMarker(leafId, markerId)
                                 }
                                 onFocusReady={(focus) =>
                                   leafFocusFns.set(leafId, focus)
@@ -1742,9 +2065,22 @@ export default function Tabs() {
               }}
               onInsert={(cmd) => insertIntoActiveTerminal(cmd)}
             />
+            <SshPalette
+              open={sshOpen}
+              onClose={() => setSshOpen(false)}
+              onConnect={(target) => {
+                const title = target.includes("@")
+                  ? target.split("@").pop() || target
+                  : target;
+                openCommandInNewTab(title, sshCommand(target));
+              }}
+            />
             <BlocksPanel
               blocks={visibleBlocks}
-              totalBlocks={() => activeLeaf()?.blocks.length ?? 0}
+              totalBlocks={() =>
+                activeLeaf()?.blocks.filter(hasCommand).length ?? 0
+              }
+              integrationActive={oscSeen}
               selectedBlockId={() => activeLeaf()?.selectedBlockId ?? null}
               navMode={blockNavMode}
               visible={panelVisible}

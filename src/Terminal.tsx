@@ -30,6 +30,8 @@ type PtyExit = { id: number };
 type TerminalProps = {
   active: () => boolean;
   appearance: Appearance;
+  /** Directory to spawn the shell in (session restore). Falls back to $HOME. */
+  initialCwd?: string | null;
   onExit?: () => void;
   onBlock?: (event: PtyBlock) => void;
   onSpawned?: (ptyId: number) => void;
@@ -45,6 +47,15 @@ type TerminalProps = {
   onBlockLine?: (markerId: number) => void;
   /** Called when the shell emits OSC 7 with a new working directory. */
   onCwd?: (cwd: string) => void;
+  /** Exposes a getter for the terminal's current text selection (for copy). */
+  onSelectionReady?: (getSelection: () => string) => void;
+  /** Fired when the per-block copy button is clicked, with the block's opaque
+   *  marker id (see `onBlockLine`). */
+  onCopyBlock?: (markerId: number) => void;
+  /** Whether a block (by marker id) has a command worth copying — the hover
+   *  copy button is suppressed otherwise (e.g. the bare prompt of a fresh
+   *  terminal). */
+  canCopyMarker?: (markerId: number) => boolean;
   /** Exposes a function that triggers fit() + refresh() — used by the parent
    * when a tab becomes visible (display:none → display:flex). xterm's WebGL
    * canvas doesn't paint while hidden, so we need an explicit kick after the
@@ -442,9 +453,14 @@ export default function Terminal(props: TerminalProps) {
     );
 
     const { cols, rows } = term;
-    ptyId = await invoke<number>("pty_spawn", { rows, cols });
+    ptyId = await invoke<number>("pty_spawn", {
+      rows,
+      cols,
+      cwd: props.initialCwd ?? null,
+    });
     props.onSpawned?.(ptyId);
     props.onFocusReady?.(() => term?.focus());
+    props.onSelectionReady?.(() => term?.getSelection() ?? "");
 
     // Flush any events that arrived between listener registration and PTY id
     // being assigned.
@@ -616,6 +632,101 @@ export default function Terminal(props: TerminalProps) {
     // past `await`, so there's no reactive owner anymore).
     closeAcRef = closeAutocomplete;
     acceptAcRef = acceptCurrent;
+
+    // --- Per-block copy button (hover affordance over the terminal) ---
+    // Rendered as a raw DOM child of the host (like the flash overlay) so it
+    // doesn't disturb the WebGL canvas; repositioned imperatively on hover.
+    let copyBtnEl: HTMLButtonElement | undefined;
+    let copyBtnMarkerId: number | null = null;
+    let copyHideTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearCopyHide = () => {
+      if (copyHideTimer) {
+        clearTimeout(copyHideTimer);
+        copyHideTimer = undefined;
+      }
+    };
+    const hideCopyBtn = () => {
+      clearCopyHide();
+      if (copyBtnEl) copyBtnEl.style.display = "none";
+      copyBtnMarkerId = null;
+    };
+    const scheduleHideCopyBtn = () => {
+      clearCopyHide();
+      copyHideTimer = setTimeout(hideCopyBtn, 160);
+    };
+    const ensureCopyBtn = () => {
+      if (copyBtnEl || !containerRef) return;
+      const btn = document.createElement("button");
+      btn.className = "lume-block-copy";
+      btn.title = "Copier la commande + sa sortie";
+      btn.textContent = "⎘";
+      btn.style.display = "none";
+      btn.addEventListener("mouseenter", clearCopyHide);
+      btn.addEventListener("mouseleave", scheduleHideCopyBtn);
+      btn.addEventListener("mousedown", (e) => e.stopPropagation());
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (copyBtnMarkerId !== null) props.onCopyBlock?.(copyBtnMarkerId);
+        btn.classList.add("copied");
+        setTimeout(() => btn.classList.remove("copied"), 1000);
+      });
+      containerRef.appendChild(btn);
+      copyBtnEl = btn;
+    };
+
+    // The block containing an absolute buffer row = the prompt marker with the
+    // greatest line still at or above that row.
+    const blockMarkerAtRow = (
+      absRow: number
+    ): { id: number; line: number } | null => {
+      let best: { id: number; line: number } | null = null;
+      for (const [id, marker] of markers) {
+        if (marker.isDisposed) continue;
+        const line = marker.line;
+        if (line <= absRow && (!best || line > best.line)) {
+          best = { id, line };
+        }
+      }
+      return best;
+    };
+
+    const onHostMove = (e: MouseEvent) => {
+      if (!term || !containerRef || markers.size === 0) {
+        hideCopyBtn();
+        return;
+      }
+      const rect = containerRef.getBoundingClientRect();
+      const { h: cellH } = cellSize();
+      if (cellH <= 0) return;
+      const viewTop = term.buffer.active.viewportY;
+      const absRow = viewTop + Math.floor((e.clientY - rect.top) / cellH);
+      const block = blockMarkerAtRow(absRow);
+      // No block under the cursor, or the block has no command yet (bare prompt)
+      // → no copy affordance.
+      if (!block || !(props.canCopyMarker?.(block.id) ?? true)) {
+        scheduleHideCopyBtn();
+        return;
+      }
+      clearCopyHide();
+      ensureCopyBtn();
+      if (!copyBtnEl) return;
+      copyBtnMarkerId = block.id;
+      const top = (block.line - viewTop) * cellH + 2;
+      copyBtnEl.style.top = `${Math.max(2, top)}px`;
+      copyBtnEl.style.display = "";
+    };
+
+    containerRef.addEventListener("mousemove", onHostMove);
+    containerRef.addEventListener("mouseleave", scheduleHideCopyBtn);
+    const copyScrollSub = term.onScroll(() => hideCopyBtn());
+    onCleanup(() => {
+      containerRef?.removeEventListener("mousemove", onHostMove);
+      containerRef?.removeEventListener("mouseleave", scheduleHideCopyBtn);
+      copyScrollSub.dispose();
+      clearCopyHide();
+    });
 
     const refit = () => {
       if (!fit || !term || !containerRef) return;
