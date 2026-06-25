@@ -77,12 +77,46 @@ let nextTabId = 0;
 
 const MAX_PANES_PER_TAB = 4;
 
+function hexToRgb(hex: string): [number, number, number] {
+  let h = hex.replace("#", "").trim();
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const n = parseInt(h.slice(0, 6) || "000000", 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  const h = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+/** Mix two hex colors: t=0 → a, t=1 → b. */
+function mix(a: string, b: string, t: number): string {
+  const [r1, g1, b1] = hexToRgb(a);
+  const [r2, g2, b2] = hexToRgb(b);
+  return rgbToHex(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
+}
+function luminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+// Drive the whole app chrome from the active theme so light themes look
+// consistent (tab bar, sidebar, settings, borders, dimmed text), not just the
+// terminal. `--*-rgb` feed the rgba() tints across the CSS.
 function applyCssVars(cfg: Config) {
   const t = cfg.appearance.theme;
   const root = document.documentElement.style;
-  root.setProperty("--bg", t.background);
-  root.setProperty("--fg", t.foreground);
-  root.setProperty("--accent", t.accent);
+  const { background: bg, foreground: fg, accent } = t;
+  root.setProperty("--bg", bg);
+  root.setProperty("--fg", fg);
+  root.setProperty("--accent", accent);
+  root.setProperty("--bg-soft", mix(bg, fg, 0.06));
+  root.setProperty("--border", mix(bg, fg, 0.16));
+  root.setProperty("--fg-dim", mix(fg, bg, 0.42));
+  root.setProperty("--accent-rgb", hexToRgb(accent).join(", "));
+  // Hover/overlay: light overlay on dark themes, dark overlay on light ones.
+  root.setProperty(
+    "--hover-rgb",
+    luminance(bg) < 0.5 ? "255, 255, 255" : "0, 0, 0"
+  );
 }
 
 type PersistedLeaf = { id: number; cwd: string | null };
