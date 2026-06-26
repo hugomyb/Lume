@@ -1,0 +1,317 @@
+import type { Dict } from "../i18n";
+
+export const ru: Dict = {
+  // --- Settings: nav + general ---
+  "settings.title": "Настройки",
+  "settings.close": "Закрыть (Esc)",
+  "nav.appearance": "Внешний вид",
+  "nav.shell": "Shell",
+  "nav.notifications": "Уведомления",
+  "nav.remote": "Удалённый доступ",
+  "nav.keys": "Сочетания клавиш",
+  "nav.general": "Общие",
+  "nav.about": "О программе",
+
+  // --- Appearance ---
+  "appearance.font": "Шрифт",
+  "appearance.import": "Импорт",
+  "appearance.importTitle": "Импортировать .ttf/.otf/.woff",
+  "appearance.fontHint":
+    "Для иконок в приглашении (Powerlevel10k, starship…) выберите <strong>Nerd Font</strong> — например, <code>MesloLGS NF</code>.",
+  "appearance.fontCurrent": "(текущий)",
+  "appearance.fontImported": "Импортированные",
+  "appearance.fontSystem": "Системный (моноширинный)",
+  "appearance.size": "Размер",
+  "appearance.cursorBlink": "Мигающий курсор",
+  "appearance.cursorStyle": "Стиль курсора",
+  "cursor.block": "Блок",
+  "cursor.bar": "Линия",
+  "cursor.underline": "Подчёркивание",
+  "appearance.scrollback": "Буфер прокрутки (строк)",
+  "appearance.theme": "Тема",
+  "appearance.ansi": "Цвета ANSI (16)",
+  "appearance.reset": "Сбросить внешний вид",
+
+  // --- Shell ---
+  "shell.program": "Программа",
+  "shell.programPlaceholder": "$SHELL (по умолчанию)",
+  "shell.args": "Аргументы",
+  "shell.argsPlaceholder": "например, -l",
+  "shell.note": "Применяется к <strong>новым</strong> терминалам.",
+
+  // --- Notifications ---
+  "notif.enable": "Уведомлять о долгих командах",
+  "notif.minDuration": "Минимальная длительность (с)",
+  "notif.sound": "Звук уведомления",
+  "notif.note":
+    "Системное уведомление появляется, когда команда превышает эту длительность <strong>и окно Lume неактивно</strong>.",
+
+  // --- Keys ---
+  "keys.hint":
+    "Нажмите на сочетание, затем введите нужную комбинацию (<kbd>Esc</kbd> для отмены).",
+  "keys.reset": "Сбросить сочетания клавиш",
+  "keys.recording": "Нажмите клавишу…",
+  "keys.fixed": "Фиксированные сочетания",
+
+  // --- General ---
+  "general.language": "Язык",
+  "general.backup": "Резервная копия настроек",
+  "general.exportImport": "Экспорт / импорт всей конфигурации",
+  "general.export": "Экспорт",
+  "general.import": "Импорт",
+  "general.exported": "Настройки экспортированы ✓",
+  "general.exportFailed": "Не удалось экспортировать",
+  "general.imported": "Настройки импортированы ✓",
+  "general.importFailed": "Недопустимый файл",
+
+  // --- About ---
+  "about.version": "Версия",
+  "about.updates": "Обновления",
+  "about.check": "Проверить",
+  "about.checking": "Проверка…",
+  "about.uptodate": "Lume обновлена до последней версии ✓",
+  "about.checkError": "Не удалось проверить (нет сети или нет релиза).",
+  "about.available": "Доступна <strong>Lume {version}</strong>.",
+  "about.installRestart": "Установить и перезапустить",
+  "about.downloading": "Загрузка… {percent}%",
+  "about.updateNote":
+    "Обновления подписаны и устанавливаются автоматически (сборка AppImage). Автопроверка при запуске.",
+
+  // --- Toolbar (tab bar) ---
+  "toolbar.fileTree": "Дерево файлов",
+  "toolbar.layouts": "Шаблоны раскладок",
+  "toolbar.blocks": "Блоки (Ctrl+B)",
+  "toolbar.workflows": "Workflows (Ctrl+Shift+R)",
+  "toolbar.ssh": "SSH (Ctrl+Shift+S)",
+  "toolbar.settings": "Настройки (Ctrl+,)",
+  "toolbar.newTab": "Новая (Ctrl+Shift+T)",
+  "toolbar.closeTab": "Закрыть (Ctrl+Shift+W)",
+  "toolbar.prevTabs": "Предыдущие вкладки",
+  "toolbar.nextTabs": "Следующие вкладки",
+  "toolbar.remoteActive": "Удалённое управление активно — нажмите для управления",
+
+  // --- Layouts popup ---
+  "layouts.title": "Применить раскладку",
+  "layouts.single": "Одна",
+  "layouts.twoCols": "2 столбца",
+  "layouts.twoRows": "2 строки",
+  "layouts.grid": "Сетка 2×2",
+  "layouts.mainSide": "Главная + 2",
+  "layouts.tripleCol": "3 столбца",
+  "layouts.note":
+    "Активный терминал остаётся в первом слоте. Остальные shell-сессии вкладки закрываются.",
+
+  // --- Pane context menu ---
+  "pane.copy": "⧉ Копировать (Ctrl+Shift+C)",
+  "pane.paste": "⎘ Вставить (Ctrl+Shift+V)",
+  "pane.splitH": "⬌ Разделить по горизонтали",
+  "pane.splitV": "⬍ Разделить по вертикали",
+  "pane.remote": "⇆ Управлять удалённо",
+  "pane.newTab": "+ Новая вкладка",
+  "pane.close": "× Закрыть эту панель",
+  "pane.closeTab": " (закрывает вкладку)",
+
+  // --- Tab context menu ---
+  "tab.rename": "✎ Переименовать (двойной клик)",
+  "tab.splitH": "⬌ Разделить по горизонтали (Ctrl+Shift+D)",
+  "tab.splitV": "⬍ Разделить по вертикали (Ctrl+Shift+E)",
+  "tab.newTab": "+ Новая вкладка (Ctrl+Shift+T)",
+  "tab.close": "× Закрыть эту вкладку",
+  "tab.panes": " ({n} панелей)",
+
+  // --- File tree ---
+  "ft.hidden": "Скрытые файлы",
+  "ft.refresh": "Обновить",
+  "ft.close": "Закрыть",
+  "ft.unknownDir": "Неизвестный каталог",
+  "ft.denied": "доступ запрещён",
+  "ft.empty": "пусто",
+  "ftctx.cd": "Открыть папку",
+  "ftctx.ls": "Список (ls -la)",
+  "ftctx.editor": "Открыть в редакторе",
+  "ftctx.cat": "Просмотр (cat)",
+  "ftctx.nano": "Редактировать (nano)",
+  "ftctx.openEditor": "Открыть ($EDITOR)",
+  "ftctx.copyPath": "Копировать путь",
+  "ftctx.insertPath": "Вставить путь",
+
+  // --- Update banner ---
+  "update.available": "Доступна <strong>Lume {version}</strong>",
+  "update.failed": "ошибка, повторить",
+  "update.install": "Установить и перезапустить",
+  "update.later": "Позже",
+  "update.downloading": "Загрузка… {percent}%",
+
+  // --- Remote dialog ---
+  "remote.title": "Удалённое управление",
+  "remote.connected": "Подключено устройств: {n}",
+  "remote.active": "Активно — нет подключений",
+  "remote.creatingTunnel": "Создание публичного туннеля… (несколько секунд)",
+  "remote.starting": "Запуск…",
+  "remote.scanPublic": "Отсканируйте QR или откройте URL откуда угодно:",
+  "remote.scanLan": "Та же локальная сеть — отсканируйте QR или откройте URL:",
+  "remote.copy": "Копировать",
+  "remote.installHint":
+    "Установите <code>cloudflared</code>, чтобы управлять извне локальной сети.",
+  "remote.warn": "⚠️ Любой, у кого есть эта ссылка, сможет управлять этим терминалом.",
+  "remote.installBtn": "Установить и включить туннель",
+  "remote.installing": "Установка…",
+  "remote.stop": "Остановить удалённое управление",
+
+  // --- Terminal search ---
+  "search.placeholder": "Поиск…",
+  "search.next": "Далее",
+  "search.prev": "Назад",
+  "search.close": "Закрыть",
+
+  // --- Blocks panel ---
+  "blocks.title": "Блоки",
+  "blocks.empty": "Пока нет блоков команд.",
+  "blocks.setupTitle": "Включить блоки команд",
+  "blocks.copyCmd": "Копировать команду",
+  "blocks.copyOutput": "Копировать вывод",
+  "blocks.rerun": "Запустить снова",
+  "blocks.remove": "Удалить",
+  "blocks.explain": "Объяснить (ИИ)",
+
+  // --- Terminal search (button titles with shortcuts) ---
+  "search.prevTitle": "Назад (Shift+Enter)",
+  "search.nextTitle": "Далее (Enter)",
+  "search.closeTitle": "Закрыть (Esc)",
+  "term.copyBlock": "Копировать команду + её вывод",
+
+  // --- Notifications (banner bodies) ---
+  "notif.cmdDone": "✓ Команда завершена",
+  "notif.cmdFailed": "✗ Ошибка (код {code})",
+
+  // --- AI explain seed prompt ---
+  "ai.seedHeader": "Вот блок терминала:",
+  "ai.seedCommand": "Команда: ",
+  "ai.seedOutput": "Вывод:",
+  "ai.seedExitCode": "Код возврата: ",
+  "ai.seedAsk": "Кратко объясните, что происходит.",
+
+  // --- Command palette (AI) ---
+  "cmd.placeholder": "Сгенерировать команду для…",
+  "cmd.escCancel": "Esc для отмены",
+  "cmd.noCli":
+    "Claude CLI не найден. Выполните <code>claude login</code> в терминале, затем перезапустите Lume.",
+  "cmd.cancel": "Отмена",
+  "cmd.insertHint": "<kbd>Enter</kbd> чтобы вставить в терминал",
+  "cmd.generateHint": "<kbd>Enter</kbd> чтобы сгенерировать",
+  "cmd.reformulate": "Переформулировать",
+  "cmd.insert": "Вставить",
+  "cmd.unknownError": "Неизвестная ошибка",
+  "cmd.retry": "Повторить",
+
+  // --- Workflows palette ---
+  "wf.searchPlaceholder": "Найти workflow…",
+  "wf.empty": "Нет workflow. <code>~/.config/lume/workflows/*.yaml</code>",
+  "wf.navHint": "<kbd>↑</kbd><kbd>↓</kbd> перемещение · <kbd>Enter</kbd> выбрать",
+  "wf.back": "Назад",
+  "wf.preview": "Предпросмотр",
+  "wf.toComplete": "Нужно заполнить: {fields}",
+  "wf.insertHint": "<kbd>Enter</kbd> чтобы вставить в терминал",
+  "wf.insert": "Вставить",
+
+  // --- SSH palette ---
+  "ssh.placeholder": "SSH-хост или user@server…",
+  "ssh.noMatch": "Подходящих хостов нет.",
+  "ssh.noHosts":
+    "Нет хостов в <code>~/.ssh/config</code>. Введите <code>user@server</code> для прямого подключения.",
+  "ssh.connectTo": "Подключиться к",
+  "ssh.directConnection": "прямое подключение",
+  "ssh.navHint":
+    "<kbd>↑</kbd><kbd>↓</kbd> перемещение · <kbd>Enter</kbd> подключиться (новая вкладка)",
+
+  // --- Blocks panel (extended) ---
+  "blocks.aiThinking": "Claude думает…",
+  "blocks.aiError": "Ошибка",
+  "blocks.aiClose": "Закрыть",
+  "blocks.followupPlaceholder": "Уточняющий вопрос…",
+  "blocks.followupWait": "Подождите…",
+  "blocks.send": "Отправить (Enter)",
+  "blocks.emptyIntro":
+    "<strong>Блок</strong> = команда + её вывод + её код возврата.",
+  "blocks.emptyActive": "Пока нет команд — запустите одну, и она появится здесь.",
+  "blocks.emptyHistory":
+    "История появится здесь, как только ваш shell начнёт выдавать маркеры OSC 133.",
+  "blocks.loading": "Загрузка…",
+  "blocks.addLinePre": "Добавьте эту строку в",
+  "blocks.addLinePost": "затем откройте новый shell:",
+  "blocks.copy": "Копировать",
+  "blocks.detected":
+    "Обнаружено: <code>{shell}</code>. PTY экспортирует <code>LUME_TERM=1</code> — источник активируется только внутри Lume.",
+  "blocks.shellUnknown": "неизвестный shell",
+  "blocks.help": "Что это?",
+  "blocks.helpIntro":
+    "Каждая строка = выполненная команда + её результат. Lume определяет границы через OSC 133 (маркеры, выдаваемые вашим shell).",
+  "blocks.exitOk": "exit 0",
+  "blocks.exitErr": "exit ≠ 0",
+  "blocks.exitRunning": "выполняется",
+  "blocks.helpKeys":
+    'Клик → прокрутка к приглашению в терминале.<br/>Правый клик → копировать, вставить, объяснить.<br/><kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> → перемещение, <kbd>↩</kbd> чтобы вставить в терминал.<br/><span style="color: var(--accent)">✨</span> → объяснение от Claude.',
+  "blocks.resize": "Потяните, чтобы изменить размер",
+  "blocks.filterPlaceholder": "Фильтр блоков…",
+  "blocks.searchClose": "Закрыть (Esc)",
+  "blocks.hide": "Скрыть (Ctrl+B)",
+  "blocks.clickScroll": "Клик → прокрутка к приглашению",
+  "blocks.promptNotTracked": "(строка приглашения не отслеживается)",
+  "blocks.rightClickActions": "Правый клик → копировать, вставить, объяснить…",
+  "blocks.promptNoCommand": "(приглашение без команды)",
+  "blocks.outputCopied": "Вывод скопирован ✓",
+  "blocks.commandCopied": "Команда скопирована ✓",
+  "blocks.outputCaptured": "Вывод захвачен — Shift+Click, чтобы скопировать его",
+  "blocks.aiNoCli": "Claude CLI не найден (claude login)",
+  "blocks.aiBlockNotDone": "Блок должен быть завершён",
+  "blocks.aiNoCommand": "Нет команды для объяснения",
+  "blocks.cancel": "Отмена",
+  "blocks.aiFixError": "Исправить эту ошибку с помощью Claude",
+  "blocks.aiExplainBlock": "Объяснить этот блок с помощью Claude",
+  "blocks.insertTerminal": "Вставить в терминал",
+  "blocks.gotoCommand": "Перейти к команде в терминале",
+  "blocks.explainClaude": "✨ Объяснить с помощью Claude",
+  "blocks.closeAiPanel": "Закрыть панель Claude",
+  "blocks.removeBlock": "Удалить этот блок",
+
+  // --- Keybindings (configurable actions) ---
+  "keys.action.newTab": "Новая вкладка",
+  "keys.action.closeTab": "Закрыть панель / вкладку",
+  "keys.action.nextTab": "Следующая вкладка",
+  "keys.action.prevTab": "Предыдущая вкладка",
+  "keys.action.splitH": "Разделить по горизонтали",
+  "keys.action.splitV": "Разделить по вертикали",
+  "keys.action.togglePanel": "Боковая панель блоков",
+  "keys.action.search": "Фильтр блоков",
+  "keys.action.termSearch": "Поиск в терминале",
+  "keys.action.paletteAI": "Палитра ИИ",
+  "keys.action.workflows": "Workflows",
+  "keys.action.ssh": "SSH",
+  "keys.action.copy": "Копировать",
+  "keys.action.paste": "Вставить",
+  "keys.action.settings": "Настройки",
+
+  // --- Keybindings (fixed shortcuts) ---
+  "keys.fixed.goToTab": "Перейти к вкладке N",
+  "keys.fixed.zoom": "Масштаб текста (размер +/-)",
+  "keys.fixed.zoomReset": "Размер текста по умолчанию",
+  "keys.fixed.navPanes": "Перемещение между панелями (по кругу)",
+  "keys.fixed.navBlocks": "Перемещение по блокам",
+
+  // --- Theme colors ---
+  "color.background": "Фон",
+  "color.foreground": "Текст",
+  "color.accent": "Акцент",
+  "color.cursor": "Курсор",
+  "color.selection": "Выделение",
+
+  // --- Pane ---
+  "pane.dragMove": "Потяните, чтобы переместить эту панель",
+  "pane.swap": "Поменять местами",
+  "pane.moveHere": "Переместить сюда",
+
+  // --- Autocomplete footer ---
+  "ac.complete": "<kbd>Tab</kbd> дополнить",
+  "ac.navigate": "<kbd>↑</kbd><kbd>↓</kbd> перемещение",
+  "ac.close": "<kbd>Esc</kbd> закрыть",
+};

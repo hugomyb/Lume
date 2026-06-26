@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { LeafData, TreeNode } from "./panes";
+import { t } from "./i18n";
 
 /** Shared registry of leaf placeholder DOM nodes. Filled by `LeafView` as
  *  cards mount/unmount; consumed by `TerminalPool` in Tabs to move Terminal
@@ -245,7 +246,7 @@ function LeafView(props: Props) {
             <div class={`pane-drop-zone ${zone()}`}>
               <Show when={isPaneDragFromOther()}>
                 <span class="pane-drop-label">
-                  {zone() === "swap" ? "Échanger" : "Déplacer ici"}
+                  {zone() === "swap" ? t("pane.swap") : t("pane.moveHere")}
                 </span>
               </Show>
             </div>

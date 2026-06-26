@@ -2,6 +2,7 @@ import { createEffect, createSignal, Show } from "solid-js";
 import QRCode from "qrcode";
 import { copyText } from "./clipboard";
 import type { RemoteInfo } from "./remote";
+import { t } from "./i18n";
 
 /** Slide-over panel (opened from the pane context menu) that shows the share
  *  URL + QR for remote control, a live connected-clients badge, and a stop
@@ -44,7 +45,7 @@ export default function RemoteDialog(props: {
       <div class="remote-overlay" onClick={() => props.onClose()}>
         <div class="remote-slideover" onClick={(e) => e.stopPropagation()}>
           <div class="remote-head">
-            <span class="remote-title">Contrôle à distance</span>
+            <span class="remote-title">{t("remote.title")}</span>
             <button class="remote-x" onClick={() => props.onClose()}>
               ×
             </button>
@@ -56,10 +57,8 @@ export default function RemoteDialog(props: {
           >
             <span class="remote-badge-dot" />
             {clients() > 0
-              ? `${clients()} appareil${clients() > 1 ? "s" : ""} connecté${
-                  clients() > 1 ? "s" : ""
-                }`
-              : "Actif — aucune connexion"}
+              ? t("remote.connected", { n: clients() })
+              : t("remote.active")}
           </div>
 
           <Show
@@ -67,8 +66,8 @@ export default function RemoteDialog(props: {
             fallback={
               <p class="remote-status">
                 {pending()
-                  ? "Création du tunnel public… (quelques secondes)"
-                  : "Démarrage…"}
+                  ? t("remote.creatingTunnel")
+                  : t("remote.starting")}
               </p>
             }
           >
@@ -77,8 +76,8 @@ export default function RemoteDialog(props: {
             </Show>
             <p class="remote-hint">
               {props.info()?.tunnelRequested
-                ? "Scanne le QR ou ouvre l'URL depuis n'importe où :"
-                : "Même réseau local — scanne le QR ou ouvre l'URL :"}
+                ? t("remote.scanPublic")
+                : t("remote.scanLan")}
             </p>
             <div class="remote-url-row">
               <code class="remote-url">{shareUrl()}</code>
@@ -86,7 +85,7 @@ export default function RemoteDialog(props: {
                 class="settings-import-btn"
                 onClick={() => copyText(shareUrl())}
               >
-                Copier
+                {t("remote.copy")}
               </button>
             </div>
           </Show>
@@ -98,29 +97,24 @@ export default function RemoteDialog(props: {
             }
           >
             <div class="remote-install">
-              <p class="remote-hint">
-                Accessible uniquement sur le réseau local. Pour piloter depuis
-                n'importe où (4G/5G), installe <code>cloudflared</code> :
-              </p>
+              <p class="remote-hint" innerHTML={t("remote.installHint")} />
               <button
                 class="remote-install-btn"
                 disabled={props.installing()}
                 onClick={() => props.onEnableTunnel()}
               >
                 {props.installing()
-                  ? "Installation en cours…"
-                  : "Installer et activer le tunnel"}
+                  ? t("remote.installing")
+                  : t("remote.installBtn")}
               </button>
             </div>
           </Show>
 
           <div class="remote-spacer" />
 
-          <p class="remote-warn">
-            ⚠️ Quiconque a ce lien peut piloter ce terminal.
-          </p>
+          <p class="remote-warn">{t("remote.warn")}</p>
           <button class="remote-stop" onClick={() => props.onStop()}>
-            Arrêter le contrôle à distance
+            {t("remote.stop")}
           </button>
         </div>
       </div>

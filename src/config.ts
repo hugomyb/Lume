@@ -53,6 +53,8 @@ export type Config = {
   appearance: Appearance;
   shell: ShellConfig;
   notifications: NotificationsConfig;
+  /** UI language code ("en", "fr", …). */
+  language: string;
   /** Action id → key combo overrides for remappable shortcuts. */
   keybindings: Record<string, string>;
 };
@@ -101,8 +103,17 @@ export const DEFAULT_CONFIG: Config = {
   },
   shell: { program: null, args: [] },
   notifications: { enabled: true, minDurationSec: 10, sound: true },
+  language: "en",
   keybindings: {},
 };
+
+export function exportConfig(config: Config, path: string): Promise<void> {
+  return invoke<void>("export_config", { path, config });
+}
+
+export function importConfig(path: string): Promise<Config> {
+  return invoke<Config>("import_config", { path });
+}
 
 import type { ITheme } from "@xterm/xterm";
 

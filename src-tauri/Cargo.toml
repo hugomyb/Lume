@@ -1,6 +1,6 @@
 [package]
 name = "lume"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fast, lightweight, open-source terminal — a private, local alternative to Warp"
 authors = ["Hugo Mayonobe"]
 license = "MIT"
@@ -41,6 +41,7 @@ futures-util = "0.3.32"
 getrandom = "0.3"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
+tauri-plugin-dialog = "2.7.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

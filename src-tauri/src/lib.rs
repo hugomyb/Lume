@@ -27,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(cfg)
         .manage(pty_manager)
@@ -35,6 +36,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             config::get_config,
             config::save_config,
+            config::export_config,
+            config::import_config,
             shell::get_shell_setup_hint,
             complete::fs_complete,
             complete::read_dir,

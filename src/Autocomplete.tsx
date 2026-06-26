@@ -1,5 +1,6 @@
 import { For } from "solid-js";
 import type { Suggestion } from "./autocomplete";
+import { t } from "./i18n";
 
 export type AcPosition = {
   x: number;
@@ -58,16 +59,9 @@ export default function Autocomplete(props: Props) {
         </For>
       </div>
       <div class="lume-ac-footer">
-        <span>
-          <kbd>Tab</kbd> compléter
-        </span>
-        <span>
-          <kbd>↑</kbd>
-          <kbd>↓</kbd> naviguer
-        </span>
-        <span>
-          <kbd>Esc</kbd> fermer
-        </span>
+        <span innerHTML={t("ac.complete")} />
+        <span innerHTML={t("ac.navigate")} />
+        <span innerHTML={t("ac.close")} />
       </div>
     </div>
   );

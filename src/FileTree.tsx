@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { IconChevronRight, IconFile, IconFolder } from "./icons";
+import { t } from "./i18n";
 
 type FsEntry = { name: string; isDir: boolean };
 
@@ -108,7 +109,7 @@ function TreeRow(props: {
           when={!error()}
           fallback={
             <div class="ft-note" style={{ "padding-left": indent }}>
-              accès refusé
+              {t("ft.denied")}
             </div>
           }
         >
@@ -128,7 +129,7 @@ function TreeRow(props: {
           </For>
           <Show when={children() !== null && children()!.length === 0}>
             <div class="ft-note" style={{ "padding-left": indent }}>
-              vide
+              {t("ft.empty")}
             </div>
           </Show>
         </Show>
@@ -208,21 +209,21 @@ export default function FileTree(props: {
   const actionsFor = (c: Ctx): Action[] => {
     const common: Action[] = [
       "sep",
-      { label: "Copier le chemin", run: (c) => props.onCopy(c.path) },
-      { label: "Insérer le chemin", run: (c) => props.onInsert(q(c.path) + " ") },
+      { label: t("ftctx.copyPath"), run: (c) => props.onCopy(c.path) },
+      { label: t("ftctx.insertPath"), run: (c) => props.onInsert(q(c.path) + " ") },
     ];
     if (c.isDir) {
       return [
-        { label: "Aller dans le dossier", run: (c) => props.onRun(`cd ${q(c.path)}`) },
-        { label: "Lister (ls -la)", run: (c) => props.onRun(`ls -la ${q(c.path)}`) },
-        { label: "Ouvrir dans l'éditeur", run: (c) => props.onRun(`\${EDITOR:-nano} ${q(c.path)}`) },
+        { label: t("ftctx.cd"), run: (c) => props.onRun(`cd ${q(c.path)}`) },
+        { label: t("ftctx.ls"), run: (c) => props.onRun(`ls -la ${q(c.path)}`) },
+        { label: t("ftctx.editor"), run: (c) => props.onRun(`\${EDITOR:-nano} ${q(c.path)}`) },
         ...common,
       ];
     }
     return [
-      { label: "Afficher (cat)", run: (c) => props.onRun(`cat ${q(c.path)}`) },
-      { label: "Éditer (nano)", run: (c) => props.onRun(`nano ${q(c.path)}`) },
-      { label: "Ouvrir ($EDITOR)", run: (c) => props.onRun(`\${EDITOR:-nano} ${q(c.path)}`) },
+      { label: t("ftctx.cat"), run: (c) => props.onRun(`cat ${q(c.path)}`) },
+      { label: t("ftctx.nano"), run: (c) => props.onRun(`nano ${q(c.path)}`) },
+      { label: t("ftctx.openEditor"), run: (c) => props.onRun(`\${EDITOR:-nano} ${q(c.path)}`) },
       ...common,
     ];
   };
@@ -236,19 +237,19 @@ export default function FileTree(props: {
             <button
               class="ft-btn"
               classList={{ active: showHidden() }}
-              title="Fichiers cachés"
+              title={t("ft.hidden")}
               onClick={() => setShowHidden(!showHidden())}
             >
               .*
             </button>
             <button
               class="ft-btn"
-              title="Rafraîchir"
+              title={t("ft.refresh")}
               onClick={() => setRefreshKey(refreshKey() + 1)}
             >
               ⟳
             </button>
-            <button class="ft-btn" title="Fermer" onClick={() => props.onToggle()}>
+            <button class="ft-btn" title={t("ft.close")} onClick={() => props.onToggle()}>
               ×
             </button>
           </div>
@@ -256,7 +257,7 @@ export default function FileTree(props: {
         <div class="file-tree-body">
           <Show
             when={props.cwd()}
-            fallback={<div class="ft-note">Dossier inconnu</div>}
+            fallback={<div class="ft-note">{t("ft.unknownDir")}</div>}
           >
             <For each={root() ?? []}>
               {(e) => (

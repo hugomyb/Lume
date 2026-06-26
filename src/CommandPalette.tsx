@@ -8,6 +8,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { aiCancel, type AiChunkEvent, type AiDoneEvent, type AiErrorEvent } from "./ai";
+import { t } from "./i18n";
 
 type Stage = "input" | "streaming" | "ready" | "error";
 
@@ -157,22 +158,19 @@ export default function CommandPalette(props: Props) {
               ref={inputRef}
               class="palette-input"
               type="text"
-              placeholder="Génère une commande pour…"
+              placeholder={t("cmd.placeholder")}
               value={query()}
               onInput={(e) => setQuery(e.currentTarget.value)}
               onKeyDown={onKeyDown}
               disabled={stage() === "streaming"}
             />
             <span class="palette-shortcut">
-              {stage() === "streaming" ? "Esc pour annuler" : "Esc"}
+              {stage() === "streaming" ? t("cmd.escCancel") : "Esc"}
             </span>
           </div>
 
           <Show when={!props.aiAvailable()}>
-            <div class="palette-warning">
-              Claude CLI introuvable. Lance <code>claude login</code> dans un
-              terminal puis relance Lume.
-            </div>
+            <div class="palette-warning" innerHTML={t("cmd.noCli")} />
           </Show>
 
           <Show when={stage() === "streaming"}>
@@ -182,7 +180,7 @@ export default function CommandPalette(props: Props) {
             </div>
             <div class="palette-footer">
               <button class="palette-btn ghost" onClick={cancelStreaming}>
-                Annuler
+                {t("cmd.cancel")}
               </button>
             </div>
           </Show>
@@ -192,15 +190,13 @@ export default function CommandPalette(props: Props) {
               <code>{cleanResponse(response())}</code>
             </div>
             <div class="palette-footer">
-              <span class="palette-hint">
-                <kbd>Enter</kbd> pour insérer dans le terminal
-              </span>
+              <span class="palette-hint" innerHTML={t("cmd.insertHint")} />
               <div class="palette-actions">
                 <button class="palette-btn ghost" onClick={() => setStage("input")}>
-                  Reformuler
+                  {t("cmd.reformulate")}
                 </button>
                 <button class="palette-btn primary" onClick={insertAndClose}>
-                  Insérer
+                  {t("cmd.insert")}
                 </button>
               </div>
             </div>
@@ -208,20 +204,18 @@ export default function CommandPalette(props: Props) {
 
           <Show when={stage() === "error"}>
             <div class="palette-response error">
-              {error() ?? "Erreur inconnue"}
+              {error() ?? t("cmd.unknownError")}
             </div>
             <div class="palette-footer">
               <button class="palette-btn ghost" onClick={() => setStage("input")}>
-                Réessayer
+                {t("cmd.retry")}
               </button>
             </div>
           </Show>
 
           <Show when={stage() === "input" && props.aiAvailable()}>
             <div class="palette-footer">
-              <span class="palette-hint">
-                <kbd>Enter</kbd> pour générer
-              </span>
+              <span class="palette-hint" innerHTML={t("cmd.generateHint")} />
             </div>
           </Show>
         </div>

@@ -4,6 +4,7 @@ import { placeholderMap, placeholderVer } from "./PaneNode";
 import type { Appearance } from "./config";
 import type { LeafData } from "./panes";
 import type { PtyBlock } from "./blocks";
+import { t } from "./i18n";
 
 type Props = {
   leaf: LeafData;
@@ -113,7 +114,7 @@ export default function PortableTerminal(props: Props) {
         <div
           class="pane-grip"
           draggable={true}
-          title="Glisser pour déplacer ce pane"
+          title={t("pane.dragMove")}
           onMouseDown={(e) => {
             // Don't trigger pane activation onto the underlying terminal-portal-host
             e.stopPropagation();

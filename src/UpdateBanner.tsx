@@ -1,5 +1,6 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { checkForUpdate, installUpdate, type Update } from "./updater";
+import { t } from "./i18n";
 
 /** A slim banner that appears when a new Lume version is available. Auto-checks
  *  shortly after launch; lets the user install + relaunch in one click. */
@@ -36,29 +37,29 @@ export default function UpdateBanner() {
     <Show when={update() && !dismissed()}>
       <div class="update-banner">
         <span class="update-banner-text">
-          <strong>Lume {update()!.version}</strong> est disponible
+          <span innerHTML={t("update.available", { version: update()!.version })} />
           <Show when={error()}>
             {" "}
-            — <span class="update-banner-err">échec, réessayer</span>
+            — <span class="update-banner-err">{t("update.failed")}</span>
           </Show>
         </span>
         <Show
           when={!installing()}
           fallback={
             <span class="update-banner-progress">
-              Téléchargement… {progress()}%
+              {t("update.downloading", { percent: progress() })}
             </span>
           }
         >
           <div class="update-banner-actions">
             <button class="update-banner-btn primary" onClick={install}>
-              Installer et redémarrer
+              {t("update.install")}
             </button>
             <button
               class="update-banner-btn"
               onClick={() => setDismissed(true)}
             >
-              Plus tard
+              {t("update.later")}
             </button>
           </div>
         </Show>

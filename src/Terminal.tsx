@@ -22,6 +22,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 import { type Appearance, toXtermTheme } from "./config";
+import { t } from "./i18n";
 import type { PtyBlock } from "./blocks";
 import Autocomplete, { type AcPosition } from "./Autocomplete";
 import {
@@ -796,7 +797,7 @@ export default function Terminal(props: TerminalProps) {
       if (copyBtnEl || !containerRef) return;
       const btn = document.createElement("button");
       btn.className = "lume-block-copy";
-      btn.title = "Copier la commande + sa sortie";
+      btn.title = t("term.copyBlock");
       btn.textContent = "⎘";
       btn.style.display = "none";
       btn.addEventListener("mouseenter", clearCopyHide);
@@ -1014,7 +1015,7 @@ export default function Terminal(props: TerminalProps) {
               ref={searchInputRef}
               class="term-search-input"
               type="text"
-              placeholder="Rechercher…"
+              placeholder={t("search.placeholder")}
               value={searchQuery()}
               onInput={(e) => {
                 setSearchQuery(e.currentTarget.value);
@@ -1040,7 +1041,7 @@ export default function Terminal(props: TerminalProps) {
             </span>
             <button
               class="term-search-btn"
-              title="Précédent (Shift+Entrée)"
+              title={t("search.prevTitle")}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => runSearch(false)}
             >
@@ -1048,7 +1049,7 @@ export default function Terminal(props: TerminalProps) {
             </button>
             <button
               class="term-search-btn"
-              title="Suivant (Entrée)"
+              title={t("search.nextTitle")}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => runSearch(true)}
             >
@@ -1056,7 +1057,7 @@ export default function Terminal(props: TerminalProps) {
             </button>
             <button
               class="term-search-btn"
-              title="Fermer (Échap)"
+              title={t("search.closeTitle")}
               onMouseDown={(e) => e.preventDefault()}
               onClick={closeSearchBar}
             >

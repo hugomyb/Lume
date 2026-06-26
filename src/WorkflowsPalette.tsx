@@ -12,6 +12,7 @@ import {
   placeholderNames,
   type Workflow,
 } from "./workflows";
+import { t } from "./i18n";
 
 type Props = {
   open: () => boolean;
@@ -150,7 +151,7 @@ export default function WorkflowsPalette(props: Props) {
                     ref={searchRef}
                     class="palette-input"
                     type="text"
-                    placeholder="Chercher un workflow…"
+                    placeholder={t("wf.searchPlaceholder")}
                     value={query()}
                     onInput={(e) => {
                       setQuery(e.currentTarget.value);
@@ -169,10 +170,7 @@ export default function WorkflowsPalette(props: Props) {
                   <Show
                     when={filtered().length}
                     fallback={
-                      <div class="wf-empty">
-                        Aucun workflow.{" "}
-                        <code>~/.config/lume/workflows/*.yaml</code>
-                      </div>
+                      <div class="wf-empty" innerHTML={t("wf.empty")} />
                     }
                   >
                     <For each={filtered()}>
@@ -193,7 +191,7 @@ export default function WorkflowsPalette(props: Props) {
                           <Show when={w.tags.length}>
                             <div class="wf-item-tags">
                               <For each={w.tags}>
-                                {(t) => <span class="wf-tag">{t}</span>}
+                                {(tag) => <span class="wf-tag">{tag}</span>}
                               </For>
                             </div>
                           </Show>
@@ -203,10 +201,7 @@ export default function WorkflowsPalette(props: Props) {
                   </Show>
                 </div>
                 <div class="palette-footer">
-                  <span class="palette-hint">
-                    <kbd>↑</kbd>
-                    <kbd>↓</kbd> naviguer · <kbd>Enter</kbd> choisir
-                  </span>
+                  <span class="palette-hint" innerHTML={t("wf.navHint")} />
                 </div>
               </>
             }
@@ -215,7 +210,7 @@ export default function WorkflowsPalette(props: Props) {
               <>
                 {/* Fill stage */}
                 <div class="palette-header">
-                  <button class="wf-back" onClick={backToList} title="Retour">
+                  <button class="wf-back" onClick={backToList} title={t("wf.back")}>
                     ‹
                   </button>
                   <span class="wf-fill-title">{wf().name}</span>
@@ -256,7 +251,7 @@ export default function WorkflowsPalette(props: Props) {
                 </div>
 
                 <div class="wf-preview">
-                  <span class="wf-preview-label">Aperçu</span>
+                  <span class="wf-preview-label">{t("wf.preview")}</span>
                   <code>{preview()}</code>
                 </div>
 
@@ -264,17 +259,17 @@ export default function WorkflowsPalette(props: Props) {
                   <span class="palette-hint">
                     <Show
                       when={missing().length === 0}
-                      fallback={<>À compléter : {missing().join(", ")}</>}
+                      fallback={<>{t("wf.toComplete", { fields: missing().join(", ") })}</>}
                     >
-                      <kbd>Enter</kbd> pour insérer dans le terminal
+                      <span innerHTML={t("wf.insertHint")} />
                     </Show>
                   </span>
                   <div class="palette-actions">
                     <button class="palette-btn ghost" onClick={backToList}>
-                      Retour
+                      {t("wf.back")}
                     </button>
                     <button class="palette-btn primary" onClick={insert}>
-                      Insérer
+                      {t("wf.insert")}
                     </button>
                   </div>
                 </div>

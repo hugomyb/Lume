@@ -51,6 +51,7 @@ import {
 import FileTree from "./FileTree";
 import RemoteDialog from "./RemoteDialog";
 import UpdateBanner from "./UpdateBanner";
+import { setLocale, t } from "./i18n";
 import {
   IconBlocks,
   IconChevronLeft,
@@ -517,12 +518,12 @@ export default function Tabs() {
     const seed: ChatMessage = {
       role: "user",
       content: [
-        "Voici un bloc de terminal :",
-        `Commande : ${block.command ?? ""}`,
-        block.output ? `Sortie :\n${block.output}` : "",
-        `Code retour : ${block.exitCode ?? 0}`,
+        t("ai.seedHeader"),
+        `${t("ai.seedCommand")}${block.command ?? ""}`,
+        block.output ? `${t("ai.seedOutput")}\n${block.output}` : "",
+        `${t("ai.seedExitCode")}${block.exitCode ?? 0}`,
         "",
-        "Explique brièvement ce qui se passe.",
+        t("ai.seedAsk"),
       ]
         .filter(Boolean)
         .join("\n"),
@@ -650,7 +651,7 @@ export default function Tabs() {
     // Include the finish time so two identical commands still each banner
     // (GNOME coalesces notifications with identical content).
     void sendNotify(
-      ok ? "✓ Commande terminée" : `✗ Échec (exit ${exitCode})`,
+      ok ? t("notif.cmdDone") : t("notif.cmdFailed", { code: exitCode ?? "?" }),
       `${(command ?? "").slice(0, 100)} · ${Math.round(
         durationMs / 1000
       )}s · ${new Date().toLocaleTimeString()}`
@@ -743,6 +744,9 @@ export default function Tabs() {
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
   };
+
+  // Apply the UI language from config (reactive — switching re-renders).
+  createEffect(() => setLocale(config.language || "en"));
 
   // Keep remote-control clients bridged to the active pane's pty.
   createEffect(() => {
@@ -1945,7 +1949,7 @@ export default function Tabs() {
             <div class="tab-lead">
               <button
                 class="tab-action"
-                title="Arborescence de fichiers"
+                title={t("toolbar.fileTree")}
                 classList={{ active: fileTreeVisible() }}
                 onClick={() => setFileTreeVisible(!fileTreeVisible())}
               >
@@ -1956,7 +1960,7 @@ export default function Tabs() {
               <Show when={tabScroll().left}>
                 <button
                   class="tab-scroll-btn left"
-                  title="Onglets précédents"
+                  title={t("toolbar.prevTabs")}
                   onClick={() => scrollTabs(-1)}
                 >
                   <IconChevronLeft size={14} />
@@ -2095,7 +2099,7 @@ export default function Tabs() {
                   </Show>
                   <button
                     class="tab-close"
-                    title="Fermer (Ctrl+Shift+W)"
+                    title={t("toolbar.closeTab")}
                     onClick={(e) => {
                       e.stopPropagation();
                       closeTab(tab.id);
@@ -2108,7 +2112,7 @@ export default function Tabs() {
             </For>
             <button
               class="tab-new"
-              title="Nouveau (Ctrl+Shift+T)"
+              title={t("toolbar.newTab")}
               onClick={addTab}
             >
               +
@@ -2117,7 +2121,7 @@ export default function Tabs() {
               <Show when={tabScroll().right}>
                 <button
                   class="tab-scroll-btn right"
-                  title="Onglets suivants"
+                  title={t("toolbar.nextTabs")}
                   onClick={() => scrollTabs(1)}
                 >
                   <IconChevronRight size={14} />
@@ -2129,7 +2133,7 @@ export default function Tabs() {
                 <button
                   class="remote-indicator"
                   classList={{ connected: (remoteInfo()?.clients ?? 0) > 0 }}
-                  title="Contrôle à distance actif — cliquer pour gérer"
+                  title={t("toolbar.remoteActive")}
                   onClick={() => setRemoteDialogOpen(true)}
                 >
                   <IconSmartphone size={15} />
@@ -2144,7 +2148,7 @@ export default function Tabs() {
               </Show>
               <button
                 class="tab-action layouts-toggle"
-                title="Layouts prédéfinis"
+                title={t("toolbar.layouts")}
                 classList={{ active: layoutsOpen() }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2155,7 +2159,7 @@ export default function Tabs() {
               </button>
               <button
                 class="tab-action"
-                title="Blocs (Ctrl+B)"
+                title={t("toolbar.blocks")}
                 classList={{ active: panelVisible() }}
                 onClick={() => setPanelVisible(!panelVisible())}
               >
@@ -2164,14 +2168,14 @@ export default function Tabs() {
               <span class="tab-actions-sep" />
               <button
                 class="tab-action"
-                title="Workflows (Ctrl+Shift+R)"
+                title={t("toolbar.workflows")}
                 onClick={() => setWorkflowsOpen(true)}
               >
                 <IconWorkflow />
               </button>
               <button
                 class="tab-action"
-                title="SSH (Ctrl+Shift+S)"
+                title={t("toolbar.ssh")}
                 onClick={() => setSshOpen(true)}
               >
                 <IconSsh />
@@ -2179,7 +2183,7 @@ export default function Tabs() {
               <span class="tab-actions-sep" />
               <button
                 class="tab-action"
-                title="Réglages (Ctrl+,)"
+                title={t("toolbar.settings")}
                 onClick={() => setSettingsOpen(true)}
               >
                 <IconSettings />
@@ -2187,7 +2191,7 @@ export default function Tabs() {
             </div>
             <Show when={layoutsOpen()}>
               <div class="layouts-popup" onClick={(e) => e.stopPropagation()}>
-                <div class="layouts-popup-title">Appliquer un layout</div>
+                <div class="layouts-popup-title">{t("layouts.title")}</div>
                 <div class="layouts-grid">
                   <button
                     class="layout-preset"
@@ -2197,7 +2201,7 @@ export default function Tabs() {
                     }}
                   >
                     <div class="layout-preview single" />
-                    <span>Simple</span>
+                    <span>{t("layouts.single")}</span>
                   </button>
                   <button
                     class="layout-preset"
@@ -2207,7 +2211,7 @@ export default function Tabs() {
                     }}
                   >
                     <div class="layout-preview side-by-side" />
-                    <span>2 colonnes</span>
+                    <span>{t("layouts.twoCols")}</span>
                   </button>
                   <button
                     class="layout-preset"
@@ -2217,7 +2221,7 @@ export default function Tabs() {
                     }}
                   >
                     <div class="layout-preview stacked" />
-                    <span>2 lignes</span>
+                    <span>{t("layouts.twoRows")}</span>
                   </button>
                   <button
                     class="layout-preset"
@@ -2227,7 +2231,7 @@ export default function Tabs() {
                     }}
                   >
                     <div class="layout-preview grid-2x2" />
-                    <span>Grille 2×2</span>
+                    <span>{t("layouts.grid")}</span>
                   </button>
                   <button
                     class="layout-preset"
@@ -2237,7 +2241,7 @@ export default function Tabs() {
                     }}
                   >
                     <div class="layout-preview main-side" />
-                    <span>Main + 2</span>
+                    <span>{t("layouts.mainSide")}</span>
                   </button>
                   <button
                     class="layout-preset"
@@ -2247,13 +2251,10 @@ export default function Tabs() {
                     }}
                   >
                     <div class="layout-preview triple-col" />
-                    <span>3 colonnes</span>
+                    <span>{t("layouts.tripleCol")}</span>
                   </button>
                 </div>
-                <p class="layouts-popup-note">
-                  Le terminal actif est conservé en premier slot. Les autres
-                  shells du tab sont fermés.
-                </p>
+                <p class="layouts-popup-note">{t("layouts.note")}</p>
               </div>
             </Show>
           </div>
@@ -2279,7 +2280,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    ⧉ Copier (Ctrl+Shift+C)
+                    {t("pane.copy")}
                   </button>
                   <button
                     class="ctx-item"
@@ -2288,7 +2289,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    ⎘ Coller (Ctrl+Shift+V)
+                    {t("pane.paste")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2302,7 +2303,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    ⬌ Split horizontal
+                    {t("pane.splitH")}
                   </button>
                   <button
                     class="ctx-item"
@@ -2314,7 +2315,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    ⬍ Split vertical
+                    {t("pane.splitV")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2327,7 +2328,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    ⇆ Contrôler à distance
+                    {t("pane.remote")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2337,7 +2338,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    + Nouveau tab
+                    {t("pane.newTab")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2347,8 +2348,8 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    × Fermer ce pane
-                    <Show when={paneCount === 1}> (ferme le tab)</Show>
+                    {t("pane.close")}
+                    <Show when={paneCount === 1}>{t("pane.closeTab")}</Show>
                   </button>
                 </div>
               );
@@ -2372,7 +2373,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
-                    ✎ Renommer (double-clic)
+                    {t("tab.rename")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2382,7 +2383,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
-                    ⬌ Split horizontal (Ctrl+Shift+D)
+                    {t("tab.splitH")}
                   </button>
                   <button
                     class="ctx-item"
@@ -2391,7 +2392,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
-                    ⬍ Split vertical (Ctrl+Shift+E)
+                    {t("tab.splitV")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2401,7 +2402,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
-                    + Nouveau tab (Ctrl+Shift+T)
+                    {t("tab.newTab")}
                   </button>
                   <div class="ctx-sep" />
                   <button
@@ -2411,8 +2412,8 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
-                    × Fermer ce tab
-                    <Show when={paneCount > 1}> ({paneCount} panes)</Show>
+                    {t("tab.close")}
+                    <Show when={paneCount > 1}>{t("tab.panes", { n: paneCount })}</Show>
                   </button>
                 </div>
               );

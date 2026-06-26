@@ -22,22 +22,24 @@ export type ActionId =
 
 export type ActionDef = { id: ActionId; label: string; default: string };
 
+// `label` is the i18n key (resolved via t() at render); kept on the def so the
+// id ↔ label mapping lives in one place.
 export const ACTIONS: ActionDef[] = [
-  { id: "newTab", label: "Nouvel onglet", default: "Ctrl+Shift+t" },
-  { id: "closeTab", label: "Fermer le pane / onglet", default: "Ctrl+Shift+w" },
-  { id: "nextTab", label: "Onglet suivant", default: "Ctrl+Tab" },
-  { id: "prevTab", label: "Onglet précédent", default: "Ctrl+Shift+Tab" },
-  { id: "splitH", label: "Split horizontal", default: "Ctrl+Shift+d" },
-  { id: "splitV", label: "Split vertical", default: "Ctrl+Shift+e" },
-  { id: "togglePanel", label: "Sidebar blocs", default: "Ctrl+b" },
-  { id: "search", label: "Filtrer les blocs", default: "Ctrl+f" },
-  { id: "termSearch", label: "Rechercher dans le terminal", default: "Ctrl+Shift+f" },
-  { id: "paletteAI", label: "Palette IA", default: "Ctrl+Shift+p" },
-  { id: "workflows", label: "Workflows", default: "Ctrl+Shift+r" },
-  { id: "ssh", label: "SSH", default: "Ctrl+Shift+s" },
-  { id: "copy", label: "Copier", default: "Ctrl+Shift+c" },
-  { id: "paste", label: "Coller", default: "Ctrl+Shift+v" },
-  { id: "settings", label: "Réglages", default: "Ctrl+," },
+  { id: "newTab", label: "keys.action.newTab", default: "Ctrl+Shift+t" },
+  { id: "closeTab", label: "keys.action.closeTab", default: "Ctrl+Shift+w" },
+  { id: "nextTab", label: "keys.action.nextTab", default: "Ctrl+Tab" },
+  { id: "prevTab", label: "keys.action.prevTab", default: "Ctrl+Shift+Tab" },
+  { id: "splitH", label: "keys.action.splitH", default: "Ctrl+Shift+d" },
+  { id: "splitV", label: "keys.action.splitV", default: "Ctrl+Shift+e" },
+  { id: "togglePanel", label: "keys.action.togglePanel", default: "Ctrl+b" },
+  { id: "search", label: "keys.action.search", default: "Ctrl+f" },
+  { id: "termSearch", label: "keys.action.termSearch", default: "Ctrl+Shift+f" },
+  { id: "paletteAI", label: "keys.action.paletteAI", default: "Ctrl+Shift+p" },
+  { id: "workflows", label: "keys.action.workflows", default: "Ctrl+Shift+r" },
+  { id: "ssh", label: "keys.action.ssh", default: "Ctrl+Shift+s" },
+  { id: "copy", label: "keys.action.copy", default: "Ctrl+Shift+c" },
+  { id: "paste", label: "keys.action.paste", default: "Ctrl+Shift+v" },
+  { id: "settings", label: "keys.action.settings", default: "Ctrl+," },
 ];
 
 const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta"]);

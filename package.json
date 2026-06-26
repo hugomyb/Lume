@@ -1,6 +1,6 @@
 {
   "name": "lume",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fast, lightweight, open-source terminal — a private, local alternative to Warp",
   "license": "MIT",
   "type": "module",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",

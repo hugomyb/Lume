@@ -11,6 +11,7 @@
     "notification:default",
     "window-state:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    "dialog:default"
   ]
 }

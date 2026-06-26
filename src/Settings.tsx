@@ -1,8 +1,12 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
-import type { SetStoreFunction } from "solid-js/store";
+import { reconcile, type SetStoreFunction } from "solid-js/store";
+import { save, open } from "@tauri-apps/plugin-dialog";
+import { LANGUAGES, t } from "./i18n";
 import {
   DEFAULT_CONFIG,
   DEFAULT_THEME,
+  exportConfig,
+  importConfig,
   type Config,
   type CursorStyle,
   type Theme,
@@ -16,6 +20,7 @@ import {
   IconBell,
   IconInfo,
   IconKeyboard,
+  IconSettings,
   IconSsh,
 } from "./icons";
 import {
@@ -64,14 +69,16 @@ type Section =
   | "shell"
   | "notifications"
   | "keys"
+  | "general"
   | "about";
 
-const MAIN_COLORS: { key: keyof Theme; label: string }[] = [
-  { key: "background", label: "Fond" },
-  { key: "foreground", label: "Texte" },
-  { key: "accent", label: "Accent" },
-  { key: "cursor", label: "Curseur" },
-  { key: "selection", label: "Sélection" },
+// Labels resolved via t(`color.${key}`); ANSI names below stay literal.
+const MAIN_COLORS: { key: keyof Theme }[] = [
+  { key: "background" },
+  { key: "foreground" },
+  { key: "accent" },
+  { key: "cursor" },
+  { key: "selection" },
 ];
 
 const ANSI_COLORS: { key: keyof Theme; label: string }[] = [
@@ -94,12 +101,12 @@ const ANSI_COLORS: { key: keyof Theme; label: string }[] = [
 ];
 
 // Non-remappable shortcuts (layout-special), shown for reference only.
-const FIXED_SHORTCUTS: { keys: string; label: string }[] = [
-  { keys: "Ctrl + 1…9", label: "Aller à l'onglet N" },
-  { keys: "Ctrl + / -", label: "Zoom du texte (taille +/-)" },
-  { keys: "Ctrl + 0", label: "Taille du texte par défaut" },
-  { keys: "Alt + ←↑↓→", label: "Naviguer entre panes (boucle)" },
-  { keys: "Ctrl + ↑/↓", label: "Naviguer dans les blocs" },
+const FIXED_SHORTCUTS: { keys: string; labelKey: string }[] = [
+  { keys: "Ctrl + 1…9", labelKey: "keys.fixed.goToTab" },
+  { keys: "Ctrl + / -", labelKey: "keys.fixed.zoom" },
+  { keys: "Ctrl + 0", labelKey: "keys.fixed.zoomReset" },
+  { keys: "Alt + ←↑↓→", labelKey: "keys.fixed.navPanes" },
+  { keys: "Ctrl + ↑/↓", labelKey: "keys.fixed.navBlocks" },
 ];
 
 export default function Settings(props: Props) {
@@ -167,6 +174,40 @@ export default function Settings(props: Props) {
     }
   };
 
+  // --- Export / import settings ---
+  const [backupMsg, setBackupMsg] = createSignal("");
+  const doExport = async () => {
+    try {
+      const path = await save({
+        defaultPath: "lume-settings.json",
+        filters: [{ name: "Lume settings", extensions: ["json"] }],
+      });
+      if (!path) return;
+      await exportConfig(props.config, path);
+      setBackupMsg(t("general.exported"));
+    } catch (e) {
+      console.error("export", e);
+      setBackupMsg(t("general.exportFailed"));
+    }
+  };
+  const doImport = async () => {
+    try {
+      const picked = await open({
+        multiple: false,
+        filters: [{ name: "Lume settings", extensions: ["json", "toml"] }],
+      });
+      const path = Array.isArray(picked) ? picked[0] : picked;
+      if (!path) return;
+      const imported = await importConfig(path);
+      props.setConfig(reconcile(imported));
+      props.onChange();
+      setBackupMsg(t("general.imported"));
+    } catch (e) {
+      console.error("import", e);
+      setBackupMsg(t("general.importFailed"));
+    }
+  };
+
   const resetAppearance = () => {
     props.setConfig("appearance", {
       ...DEFAULT_CONFIG.appearance,
@@ -214,14 +255,14 @@ export default function Settings(props: Props) {
       <div class="settings-overlay" onClick={() => props.onClose()}>
         <div class="settings-panel" onClick={(e) => e.stopPropagation()}>
           <div class="settings-sidebar">
-            <div class="settings-title">Réglages</div>
+            <div class="settings-title">{t("settings.title")}</div>
             <button
               class="settings-nav"
               classList={{ active: section() === "appearance" }}
               onClick={() => setSection("appearance")}
             >
               <IconAppearance size={15} />
-              <span>Apparence</span>
+              <span>{t("nav.appearance")}</span>
             </button>
             <button
               class="settings-nav"
@@ -229,7 +270,7 @@ export default function Settings(props: Props) {
               onClick={() => setSection("shell")}
             >
               <IconSsh size={15} />
-              <span>Shell</span>
+              <span>{t("nav.shell")}</span>
             </button>
             <button
               class="settings-nav"
@@ -237,7 +278,7 @@ export default function Settings(props: Props) {
               onClick={() => setSection("notifications")}
             >
               <IconBell size={15} />
-              <span>Notifications</span>
+              <span>{t("nav.notifications")}</span>
             </button>
             <button
               class="settings-nav"
@@ -245,7 +286,15 @@ export default function Settings(props: Props) {
               onClick={() => setSection("keys")}
             >
               <IconKeyboard size={15} />
-              <span>Raccourcis</span>
+              <span>{t("nav.keys")}</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "general" }}
+              onClick={() => setSection("general")}
+            >
+              <IconSettings size={15} />
+              <span>{t("nav.general")}</span>
             </button>
             <button
               class="settings-nav"
@@ -253,11 +302,11 @@ export default function Settings(props: Props) {
               onClick={() => setSection("about")}
             >
               <IconInfo size={15} />
-              <span>À propos</span>
+              <span>{t("nav.about")}</span>
             </button>
             <div class="settings-sidebar-spacer" />
             <button class="settings-close" onClick={() => props.onClose()}>
-              Fermer (Esc)
+              {t("settings.close")}
             </button>
           </div>
 
@@ -265,7 +314,7 @@ export default function Settings(props: Props) {
             <Show when={section() === "appearance"}>
               <div class="settings-section">
                 <div class="settings-row">
-                  <span class="settings-label">Police</span>
+                  <span class="settings-label">{t("appearance.font")}</span>
                   <div class="settings-font-controls">
                     <select
                       ref={fontSelectRef}
@@ -275,11 +324,11 @@ export default function Settings(props: Props) {
                     >
                       <Show when={!knownFamilies().includes(primaryFamily())}>
                         <option value={primaryFamily()}>
-                          {primaryFamily()} (actuelle)
+                          {primaryFamily()} {t("appearance.fontCurrent")}
                         </option>
                       </Show>
                       <Show when={customFamilies().length}>
-                        <optgroup label="Importées">
+                        <optgroup label={t("appearance.fontImported")}>
                           <For each={customFamilies()}>
                             {(f) => (
                               <option value={f} style={{ "font-family": `"${f}"` }}>
@@ -289,7 +338,7 @@ export default function Settings(props: Props) {
                           </For>
                         </optgroup>
                       </Show>
-                      <optgroup label="Système (monospace)">
+                      <optgroup label={t("appearance.fontSystem")}>
                         <For each={systemFonts() ?? []}>
                           {(f) => (
                             <option value={f} style={{ "font-family": `"${f}"` }}>
@@ -299,8 +348,8 @@ export default function Settings(props: Props) {
                         </For>
                       </optgroup>
                     </select>
-                    <label class="settings-import-btn" title="Importer un .ttf/.otf/.woff">
-                      ⬇ Importer
+                    <label class="settings-import-btn" title={t("appearance.importTitle")}>
+                      ⬇ {t("appearance.import")}
                       <input
                         type="file"
                         accept=".ttf,.otf,.woff,.woff2"
@@ -320,13 +369,10 @@ export default function Settings(props: Props) {
                 >
                   The quick brown fox · 0O1lI · {"=> != >= () [] {} && |"}
                 </div>
-                <p class="settings-note">
-                  Pour les icônes du prompt (Powerlevel10k, starship…), choisis
-                  une <strong>Nerd Font</strong> — ex&nbsp;: <code>MesloLGS NF</code>.
-                </p>
+                <p class="settings-note" innerHTML={t("appearance.fontHint")} />
 
                 <label class="settings-row">
-                  <span class="settings-label">Taille</span>
+                  <span class="settings-label">{t("appearance.size")}</span>
                   <input
                     class="settings-input narrow"
                     type="number"
@@ -346,7 +392,7 @@ export default function Settings(props: Props) {
                 </label>
 
                 <div class="settings-row">
-                  <span class="settings-label">Curseur clignotant</span>
+                  <span class="settings-label">{t("appearance.cursorBlink")}</span>
                   <Toggle
                     checked={a().cursorBlink}
                     onChange={(v) => setAppearance("cursorBlink", v)}
@@ -354,7 +400,7 @@ export default function Settings(props: Props) {
                 </div>
 
                 <label class="settings-row">
-                  <span class="settings-label">Style du curseur</span>
+                  <span class="settings-label">{t("appearance.cursorStyle")}</span>
                   <select
                     class="settings-input narrow"
                     value={a().cursorStyle}
@@ -365,14 +411,14 @@ export default function Settings(props: Props) {
                       )
                     }
                   >
-                    <option value="block">Bloc</option>
-                    <option value="bar">Barre</option>
-                    <option value="underline">Souligné</option>
+                    <option value="block">{t("cursor.block")}</option>
+                    <option value="bar">{t("cursor.bar")}</option>
+                    <option value="underline">{t("cursor.underline")}</option>
                   </select>
                 </label>
 
                 <label class="settings-row">
-                  <span class="settings-label">Scrollback (lignes)</span>
+                  <span class="settings-label">{t("appearance.scrollback")}</span>
                   <input
                     class="settings-input narrow"
                     type="number"
@@ -389,7 +435,7 @@ export default function Settings(props: Props) {
                   />
                 </label>
 
-                <div class="settings-subtitle">Thème</div>
+                <div class="settings-subtitle">{t("appearance.theme")}</div>
                 <div class="settings-presets">
                   <For each={THEME_PRESETS}>
                     {(p) => (
@@ -423,7 +469,7 @@ export default function Settings(props: Props) {
                             setTheme(c.key, e.currentTarget.value)
                           }
                         />
-                        <span>{c.label}</span>
+                        <span>{t(`color.${c.key}`)}</span>
                       </label>
                     )}
                   </For>
@@ -433,7 +479,7 @@ export default function Settings(props: Props) {
                   class="settings-collapse"
                   onClick={() => setAnsiOpen(!ansiOpen())}
                 >
-                  {ansiOpen() ? "▾" : "▸"} Couleurs ANSI (16)
+                  {ansiOpen() ? "▾" : "▸"} {t("appearance.ansi")}
                 </button>
                 <Show when={ansiOpen()}>
                   <div class="settings-colors ansi">
@@ -455,7 +501,7 @@ export default function Settings(props: Props) {
                 </Show>
 
                 <button class="settings-reset" onClick={resetAppearance}>
-                  Réinitialiser l'apparence
+                  {t("appearance.reset")}
                 </button>
               </div>
             </Show>
@@ -463,11 +509,11 @@ export default function Settings(props: Props) {
             <Show when={section() === "shell"}>
               <div class="settings-section">
                 <label class="settings-row">
-                  <span class="settings-label">Programme</span>
+                  <span class="settings-label">{t("shell.program")}</span>
                   <input
                     class="settings-input"
                     type="text"
-                    placeholder="$SHELL (défaut)"
+                    placeholder={t("shell.programPlaceholder")}
                     value={props.config.shell.program ?? ""}
                     onInput={(e) => {
                       const v = e.currentTarget.value.trim();
@@ -477,11 +523,11 @@ export default function Settings(props: Props) {
                   />
                 </label>
                 <label class="settings-row">
-                  <span class="settings-label">Arguments</span>
+                  <span class="settings-label">{t("shell.args")}</span>
                   <input
                     class="settings-input"
                     type="text"
-                    placeholder="ex : -l"
+                    placeholder={t("shell.argsPlaceholder")}
                     value={props.config.shell.args.join(" ")}
                     onInput={(e) => {
                       const args = e.currentTarget.value
@@ -492,23 +538,21 @@ export default function Settings(props: Props) {
                     }}
                   />
                 </label>
-                <p class="settings-note">
-                  S'applique aux <strong>nouveaux</strong> terminaux.
-                </p>
+                <p class="settings-note" innerHTML={t("shell.note")} />
               </div>
             </Show>
 
             <Show when={section() === "notifications"}>
               <div class="settings-section">
                 <div class="settings-row">
-                  <span class="settings-label">Notifier les commandes longues</span>
+                  <span class="settings-label">{t("notif.enable")}</span>
                   <Toggle
                     checked={props.config.notifications.enabled}
                     onChange={(v) => setNotif("enabled", v)}
                   />
                 </div>
                 <label class="settings-row">
-                  <span class="settings-label">Durée minimale (s)</span>
+                  <span class="settings-label">{t("notif.minDuration")}</span>
                   <input
                     class="settings-input narrow"
                     type="number"
@@ -525,32 +569,26 @@ export default function Settings(props: Props) {
                   />
                 </label>
                 <div class="settings-row">
-                  <span class="settings-label">Son de notification</span>
+                  <span class="settings-label">{t("notif.sound")}</span>
                   <Toggle
                     checked={props.config.notifications.sound}
                     disabled={!props.config.notifications.enabled}
                     onChange={(v) => setNotif("sound", v)}
                   />
                 </div>
-                <p class="settings-note">
-                  Une notification système s'affiche quand une commande dépasse
-                  cette durée <strong>et que Lume n'est pas au premier plan</strong>.
-                </p>
+                <p class="settings-note" innerHTML={t("notif.note")} />
               </div>
             </Show>
 
 
             <Show when={section() === "keys"}>
               <div class="settings-section">
-                <p class="settings-note">
-                  Clique sur un raccourci puis appuie sur la combinaison voulue
-                  (<kbd>Échap</kbd> pour annuler).
-                </p>
+                <p class="settings-note" innerHTML={t("keys.hint")} />
                 <div class="settings-keys">
                   <For each={ACTIONS}>
                     {(action) => (
                       <div class="settings-key-row">
-                        <span class="settings-key-label">{action.label}</span>
+                        <span class="settings-key-label">{t(action.label)}</span>
                         <button
                           class="settings-key-bind"
                           classList={{
@@ -559,7 +597,7 @@ export default function Settings(props: Props) {
                           onClick={() => props.onStartRecord(action.id)}
                         >
                           {props.recording() === action.id
-                            ? "Appuie sur une touche…"
+                            ? t("keys.recording")
                             : comboToLabel(bindings()[action.id])}
                         </button>
                       </div>
@@ -568,15 +606,15 @@ export default function Settings(props: Props) {
                 </div>
 
                 <button class="settings-reset" onClick={props.onResetBindings}>
-                  Réinitialiser les raccourcis
+                  {t("keys.reset")}
                 </button>
 
-                <div class="settings-subtitle">Raccourcis fixes</div>
+                <div class="settings-subtitle">{t("keys.fixed")}</div>
                 <div class="settings-keys">
                   <For each={FIXED_SHORTCUTS}>
                     {(k) => (
                       <div class="settings-key-row">
-                        <span class="settings-key-label">{k.label}</span>
+                        <span class="settings-key-label">{t(k.labelKey)}</span>
                         <kbd class="settings-key-combo">{k.keys}</kbd>
                       </div>
                     )}
@@ -585,14 +623,52 @@ export default function Settings(props: Props) {
               </div>
             </Show>
 
+            <Show when={section() === "general"}>
+              <div class="settings-section">
+                <label class="settings-row">
+                  <span class="settings-label">{t("general.language")}</span>
+                  <select
+                    class="settings-input narrow"
+                    value={props.config.language || "en"}
+                    onChange={(e) => {
+                      props.setConfig("language", e.currentTarget.value);
+                      props.onChange();
+                    }}
+                  >
+                    <For each={LANGUAGES}>
+                      {(lang) => (
+                        <option value={lang.code}>{lang.label}</option>
+                      )}
+                    </For>
+                  </select>
+                </label>
+
+                <div class="settings-subtitle">{t("general.backup")}</div>
+                <div class="settings-row">
+                  <span class="settings-label">{t("general.exportImport")}</span>
+                  <div class="settings-backup-btns">
+                    <button class="settings-import-btn" onClick={doExport}>
+                      {t("general.export")}
+                    </button>
+                    <button class="settings-import-btn" onClick={doImport}>
+                      {t("general.import")}
+                    </button>
+                  </div>
+                </div>
+                <Show when={backupMsg()}>
+                  <p class="settings-note">{backupMsg()}</p>
+                </Show>
+              </div>
+            </Show>
+
             <Show when={section() === "about"}>
               <div class="settings-section">
                 <div class="settings-row">
-                  <span class="settings-label">Version</span>
+                  <span class="settings-label">{t("about.version")}</span>
                   <span class="settings-value">{appVersion() || "—"}</span>
                 </div>
                 <div class="settings-row">
-                  <span class="settings-label">Mises à jour</span>
+                  <span class="settings-label">{t("about.updates")}</span>
                   <button
                     class="settings-import-btn"
                     disabled={
@@ -602,38 +678,35 @@ export default function Settings(props: Props) {
                     onClick={() => checkUpdate()}
                   >
                     {updateState() === "checking"
-                      ? "Vérification…"
-                      : "Vérifier"}
+                      ? t("about.checking")
+                      : t("about.check")}
                   </button>
                 </div>
                 <Show when={updateState() === "uptodate"}>
-                  <p class="settings-note">Lume est à jour ✓</p>
+                  <p class="settings-note">{t("about.uptodate")}</p>
                 </Show>
                 <Show when={updateState() === "error"}>
-                  <p class="settings-note">
-                    Impossible de vérifier (hors-ligne, ou pas de release).
-                  </p>
+                  <p class="settings-note">{t("about.checkError")}</p>
                 </Show>
                 <Show when={updateState() === "available"}>
                   <div class="settings-update-box">
-                    <p class="settings-note">
-                      <strong>Lume {foundUpdate()!.version}</strong> est
-                      disponible.
-                    </p>
+                    <p
+                      class="settings-note"
+                      innerHTML={t("about.available", {
+                        version: foundUpdate()!.version,
+                      })}
+                    />
                     <button class="settings-import-btn" onClick={applyUpdate}>
-                      Installer et redémarrer
+                      {t("about.installRestart")}
                     </button>
                   </div>
                 </Show>
                 <Show when={updateState() === "installing"}>
                   <p class="settings-note">
-                    Téléchargement… {updateProgress()}%
+                    {t("about.downloading", { percent: updateProgress() })}
                   </p>
                 </Show>
-                <p class="settings-note">
-                  Les mises à jour sont signées et installées automatiquement
-                  (build AppImage). Vérification auto au démarrage.
-                </p>
+                <p class="settings-note">{t("about.updateNote")}</p>
               </div>
             </Show>
           </div>

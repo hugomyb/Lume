@@ -12,9 +12,16 @@ pub struct Config {
     pub appearance: AppearanceConfig,
     pub shell: ShellConfig,
     pub notifications: NotificationsConfig,
+    /// UI language code ("en", "fr", …). Defaults to English.
+    #[serde(default = "default_language")]
+    pub language: String,
     /// Action id → key combo overrides for the remappable shortcuts. Missing
     /// entries fall back to the frontend defaults.
     pub keybindings: std::collections::HashMap<String, String>,
+}
+
+fn default_language() -> String {
+    "en".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +191,23 @@ pub fn save_config(
     std::fs::write(&path, body).map_err(|e| e.to_string())?;
     *state.lock() = config;
     Ok(())
+}
+
+/// Export the given config to a file as pretty JSON (for backup / sharing).
+#[tauri::command]
+pub fn export_config(path: String, config: Config) -> Result<(), String> {
+    let body = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+/// Read + parse a config file (our JSON export, or a raw `config.toml`).
+/// Tolerant to missing fields — serde defaults fill them in.
+#[tauri::command]
+pub fn import_config(path: String) -> Result<Config, String> {
+    let s = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str::<Config>(&s)
+        .or_else(|_| toml::from_str::<Config>(&s))
+        .map_err(|e| format!("invalid config file: {e}"))
 }
 
 fn write_default(path: &Path) -> Result<()> {

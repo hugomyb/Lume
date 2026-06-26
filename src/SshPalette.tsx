@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { hostTarget, listSshHosts, type SshHost } from "./ssh";
+import { t } from "./i18n";
 
 type Props = {
   open: () => boolean;
@@ -101,7 +102,7 @@ export default function SshPalette(props: Props) {
               ref={searchRef}
               class="palette-input"
               type="text"
-              placeholder="Host SSH ou user@serveur…"
+              placeholder={t("ssh.placeholder")}
               value={query()}
               onInput={(e) => {
                 setQuery(e.currentTarget.value);
@@ -119,10 +120,9 @@ export default function SshPalette(props: Props) {
                 <div class="ssh-empty">
                   <Show
                     when={loaded() && hosts().length === 0}
-                    fallback={<>Aucun host ne correspond.</>}
+                    fallback={<>{t("ssh.noMatch")}</>}
                   >
-                    Aucun host dans <code>~/.ssh/config</code>. Tape un{" "}
-                    <code>user@serveur</code> pour t'y connecter directement.
+                    <span innerHTML={t("ssh.noHosts")} />
                   </Show>
                 </div>
               }
@@ -140,10 +140,10 @@ export default function SshPalette(props: Props) {
                       fallback={
                         <div class="ssh-item-main">
                           <span class="ssh-item-name">
-                            Se connecter à{" "}
+                            {t("ssh.connectTo")}{" "}
                             <code>{(row as { target: string }).target}</code>
                           </span>
-                          <span class="ssh-item-sub">connexion directe</span>
+                          <span class="ssh-item-sub">{t("ssh.directConnection")}</span>
                         </div>
                       }
                     >
@@ -164,11 +164,7 @@ export default function SshPalette(props: Props) {
           </div>
 
           <div class="palette-footer">
-            <span class="palette-hint">
-              <kbd>↑</kbd>
-              <kbd>↓</kbd> naviguer · <kbd>Enter</kbd> se connecter (nouvel
-              onglet)
-            </span>
+            <span class="palette-hint" innerHTML={t("ssh.navHint")} />
           </div>
         </div>
       </div>

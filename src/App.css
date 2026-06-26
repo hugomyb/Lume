@@ -2782,6 +2782,11 @@ select.settings-input optgroup {
   border-radius: 8px;
   padding: 12px;
 }
+.settings-backup-btns {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
 
 .remote-overlay {
   position: fixed;

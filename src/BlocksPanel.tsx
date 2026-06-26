@@ -13,6 +13,7 @@ import type { AiState } from "./ai";
 import { getShellSetupHint } from "./shellSetup";
 import { copyText } from "./clipboard";
 import MarkdownRender from "./markdown";
+import { t } from "./i18n";
 
 function BlockAiPanel(props: {
   ai: Accessor<AiState>;
@@ -49,12 +50,12 @@ function BlockAiPanel(props: {
       <div class="block-ai-header">
         <span class="block-ai-label">
           {ai().status === "streaming"
-            ? "Claude réfléchit…"
+            ? t("blocks.aiThinking")
             : ai().status === "error"
-            ? "Erreur"
+            ? t("blocks.aiError")
             : "Claude"}
         </span>
-        <button class="block-ai-dismiss" title="Fermer" onClick={props.onDismiss}>
+        <button class="block-ai-dismiss" title={t("blocks.aiClose")} onClick={props.onDismiss}>
           ×
         </button>
       </div>
@@ -88,7 +89,7 @@ function BlockAiPanel(props: {
             type="text"
             class="block-ai-followup-input"
             placeholder={
-              canAsk() ? "Question de suivi…" : "Patiente…"
+              canAsk() ? t("blocks.followupPlaceholder") : t("blocks.followupWait")
             }
             value={draft()}
             onInput={(e) => setDraft(e.currentTarget.value)}
@@ -99,7 +100,7 @@ function BlockAiPanel(props: {
             class="block-ai-followup-send"
             disabled={!canAsk() || !draft().trim()}
             onClick={submit}
-            title="Envoyer (Enter)"
+            title={t("blocks.send")}
           >
             →
           </button>
@@ -190,43 +191,35 @@ function EmptyState(props: { active: () => boolean }) {
 
   return (
     <div class="blocks-empty">
-      <p class="blocks-empty-intro">
-        Un <strong>bloc</strong> = une commande + sa sortie + son code retour.
-      </p>
+      <p class="blocks-empty-intro" innerHTML={t("blocks.emptyIntro")} />
       <Show
         when={!props.active()}
-        fallback={
-          <p class="muted">
-            Aucune commande pour l'instant — lances-en une et elle apparaîtra
-            ici.
-          </p>
-        }
+        fallback={<p class="muted">{t("blocks.emptyActive")}</p>}
       >
-        <p>
-          L'historique apparaîtra ici dès que ton shell émet les markers OSC 133.
-        </p>
-        <Show when={hint()} fallback={<p class="muted">Chargement…</p>}>
+        <p>{t("blocks.emptyHistory")}</p>
+        <Show when={hint()} fallback={<p class="muted">{t("blocks.loading")}</p>}>
           {(h) => (
             <>
             <p>
-              Ajoute cette ligne à <code>{h().rcFile}</code> puis ouvre un
-              nouveau shell :
+              {t("blocks.addLinePre")} <code>{h().rcFile}</code>{" "}
+              {t("blocks.addLinePost")}
             </p>
             <div class="setup-code">
               <code>{h().sourceLine}</code>
               <button
                 class="copy-btn"
-                title="Copier"
+                title={t("blocks.copy")}
                 onClick={() => copy(h().sourceLine)}
               >
                 {copied() ? "✓" : "⎘"}
               </button>
             </div>
-            <p class="muted">
-              Détecté : <code>{h().shell || "shell inconnu"}</code>. Le PTY
-              exporte <code>LUME_TERM=1</code> — le source ne s'active que dans
-              Lume.
-            </p>
+            <p
+              class="muted"
+              innerHTML={t("blocks.detected", {
+                shell: h().shell || t("blocks.shellUnknown"),
+              })}
+            />
             </>
           )}
         </Show>
@@ -241,39 +234,26 @@ function HelpPopover() {
     <div class="help-popover-container">
       <button
         class="blocks-panel-help"
-        title="C'est quoi ?"
+        title={t("blocks.help")}
         onClick={() => setOpen(!open())}
       >
         ?
       </button>
       <Show when={open()}>
         <div class="help-popover" onClick={() => setOpen(false)}>
-          <p>
-            Chaque ligne = une commande exécutée + son résultat. Lume détecte
-            les bornes via OSC 133 (markers émis par ton shell).
-          </p>
+          <p>{t("blocks.helpIntro")}</p>
           <ul>
             <li>
-              <span class="block-exit exit-ok">✓</span> exit 0
+              <span class="block-exit exit-ok">✓</span> {t("blocks.exitOk")}
             </li>
             <li>
-              <span class="block-exit exit-err">1</span> exit ≠ 0
+              <span class="block-exit exit-err">1</span> {t("blocks.exitErr")}
             </li>
             <li>
-              <span class="block-exit exit-pending">▶</span> en cours
+              <span class="block-exit exit-pending">▶</span> {t("blocks.exitRunning")}
             </li>
           </ul>
-          <p class="muted">
-            Click → scroll au prompt dans le terminal.
-            <br />
-            Right-click → copier, insérer, expliquer.
-            <br />
-            <kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> → naviguer, <kbd>↩</kbd>{" "}
-            pour insérer dans le terminal.
-            <br />
-            <span style={{ color: "var(--accent)" }}>✨</span> → explication
-            Claude.
-          </p>
+          <p class="muted" innerHTML={t("blocks.helpKeys")} />
         </div>
       </Show>
     </div>
@@ -344,8 +324,8 @@ export default function BlocksPanel(props: Props) {
   createEffect(() => {
     if (!ctxMenu()) return;
     const onAnyClick = (e: MouseEvent) => {
-      const t = e.target as HTMLElement;
-      if (!t.closest(".block-context-menu")) closeContextMenu();
+      const el = e.target as HTMLElement;
+      if (!el.closest(".block-context-menu")) closeContextMenu();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeContextMenu();
@@ -399,12 +379,12 @@ export default function BlocksPanel(props: Props) {
   };
 
   const aiButtonTitle = (b: Block) => {
-    if (!props.aiAvailable()) return "Claude CLI introuvable (claude login)";
-    if (b.status !== "done") return "Le bloc doit être terminé";
-    if (!b.command) return "Pas de commande à expliquer";
-    if (b.ai?.status === "streaming") return "Annuler";
-    if (b.exitCode !== 0 && b.ai === null) return "Fixer cette erreur avec Claude";
-    return "Explique ce bloc avec Claude";
+    if (!props.aiAvailable()) return t("blocks.aiNoCli");
+    if (b.status !== "done") return t("blocks.aiBlockNotDone");
+    if (!b.command) return t("blocks.aiNoCommand");
+    if (b.ai?.status === "streaming") return t("blocks.cancel");
+    if (b.exitCode !== 0 && b.ai === null) return t("blocks.aiFixError");
+    return t("blocks.aiExplainBlock");
   };
 
   const isErrorSuggestion = (b: Block) =>
@@ -423,7 +403,7 @@ export default function BlocksPanel(props: Props) {
       >
         <div
           class="blocks-panel-resize"
-          title="Glisser pour redimensionner"
+          title={t("blocks.resize")}
           onMouseDown={onResizeDragStart}
           onDblClick={() => props.onResize(360)}
         />
@@ -434,7 +414,7 @@ export default function BlocksPanel(props: Props) {
               ref={searchInputRef}
               class="blocks-search-input"
               type="text"
-              placeholder="Filtrer les blocs…"
+              placeholder={t("blocks.filterPlaceholder")}
               value={props.searchQuery()}
               onInput={(e) => props.onSearchChange(e.currentTarget.value)}
               onKeyDown={onSearchKeyDown}
@@ -444,7 +424,7 @@ export default function BlocksPanel(props: Props) {
             </span>
             <button
               class="blocks-search-close"
-              title="Fermer (Esc)"
+              title={t("blocks.searchClose")}
               onClick={() => props.onSearchClose()}
             >
               ×
@@ -452,12 +432,12 @@ export default function BlocksPanel(props: Props) {
           </div>
         </Show>
         <div class="blocks-panel-header">
-          <span class="blocks-panel-title">Blocs</span>
+          <span class="blocks-panel-title">{t("blocks.title")}</span>
           <div class="blocks-panel-actions">
             <HelpPopover />
             <button
               class="blocks-panel-toggle"
-              title="Masquer (Ctrl+B)"
+              title={t("blocks.hide")}
               onClick={props.onToggle}
             >
               ›
@@ -490,10 +470,10 @@ export default function BlocksPanel(props: Props) {
                     b.command
                       ? `${b.command}\n\n${
                           b.markerId !== null
-                            ? "Click → scroll au prompt"
-                            : "(ligne du prompt non trackée)"
-                        }\nRight-click → copier, insérer, expliquer…`
-                      : "(prompt sans commande)"
+                            ? t("blocks.clickScroll")
+                            : t("blocks.promptNotTracked")
+                        }\n${t("blocks.rightClickActions")}`
+                      : t("blocks.promptNoCommand")
                   }
                   onClick={(e) => onClickBlock(e, b)}
                   onContextMenu={(e) => openContextMenu(e, b.id)}
@@ -504,14 +484,14 @@ export default function BlocksPanel(props: Props) {
                   <span class="block-command">
                     {copiedId() === b.id
                       ? copyKind() === "output"
-                        ? "Sortie copiée ✓"
-                        : "Commande copiée ✓"
+                        ? t("blocks.outputCopied")
+                        : t("blocks.commandCopied")
                       : formatCommand(b.command)}
                   </span>
                   <Show when={b.output && b.status === "done"}>
                     <span
                       class="block-output-hint"
-                      title="Sortie capturée — Shift+Click pour la copier"
+                      title={t("blocks.outputCaptured")}
                     >
                       ⤓
                     </span>
@@ -573,7 +553,7 @@ export default function BlocksPanel(props: Props) {
                   disabled={!b.command}
                   onClick={() => b.command && ctxCopy(b.command, "command")}
                 >
-                  Copier la commande
+                  {t("blocks.copyCmd")}
                 </button>
                 <button
                   class="ctx-item"
@@ -582,7 +562,7 @@ export default function BlocksPanel(props: Props) {
                     b.output && ctxCopy(stripAnsi(b.output), "output")
                   }
                 >
-                  Copier la sortie
+                  {t("blocks.copyOutput")}
                 </button>
                 <button
                   class="ctx-item"
@@ -592,7 +572,7 @@ export default function BlocksPanel(props: Props) {
                     closeContextMenu();
                   }}
                 >
-                  Insérer dans le terminal
+                  {t("blocks.insertTerminal")}
                 </button>
                 <button
                   class="ctx-item"
@@ -602,7 +582,7 @@ export default function BlocksPanel(props: Props) {
                     closeContextMenu();
                   }}
                 >
-                  Aller à la commande dans le terminal
+                  {t("blocks.gotoCommand")}
                 </button>
                 <div class="ctx-sep" />
                 <button
@@ -618,7 +598,7 @@ export default function BlocksPanel(props: Props) {
                     closeContextMenu();
                   }}
                 >
-                  ✨ Explique avec Claude
+                  {t("blocks.explainClaude")}
                 </button>
                 <Show when={b.ai !== null}>
                   <button
@@ -628,7 +608,7 @@ export default function BlocksPanel(props: Props) {
                       closeContextMenu();
                     }}
                   >
-                    Fermer le panneau Claude
+                    {t("blocks.closeAiPanel")}
                   </button>
                 </Show>
                 <div class="ctx-sep" />
@@ -639,7 +619,7 @@ export default function BlocksPanel(props: Props) {
                     closeContextMenu();
                   }}
                 >
-                  Supprimer ce bloc
+                  {t("blocks.removeBlock")}
                 </button>
               </div>
             );
