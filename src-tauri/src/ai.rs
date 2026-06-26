@@ -422,10 +422,10 @@ mod tests {
     fn generate_prompt_includes_cwd_and_listing() {
         let p = build_generate_prompt(
             "compte les lignes Rust",
-            Some("/home/hugo/projects/lume"),
+            Some("/home/user/project"),
             Some("dossiers : src-tauri/ src/\nfichiers : package.json"),
         );
-        assert!(p.contains("Répertoire courant : /home/hugo/projects/lume"));
+        assert!(p.contains("Répertoire courant : /home/user/project"));
         assert!(p.contains("src-tauri/"));
         assert!(p.contains("Quand tu fais référence à un chemin"));
     }

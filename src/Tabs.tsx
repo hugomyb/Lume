@@ -63,6 +63,7 @@ import {
   IconWorkflow,
 } from "./icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { homeDir } from "@tauri-apps/api/path";
 import {
   ACTIONS,
   comboToAction,
@@ -211,6 +212,13 @@ function loadSession(): { tabs: TabState[]; activeId: number } | null {
     return null;
   }
 }
+
+// User home dir (to abbreviate cwd → ~ in tab titles), resolved once at load.
+let _userHome = "";
+const userHome = () => _userHome;
+homeDir()
+  .then((h) => (_userHome = h.replace(/\/$/, "")))
+  .catch(() => {});
 
 function makeEmptyTab(): TabState {
   const leaf = makeLeaf();
@@ -1501,10 +1509,10 @@ export default function Tabs() {
     if (tabs[tIdx].lockTitle) return;
     // Only update the tab title when this is the active leaf of the tab.
     if (tabs[tIdx].activeLeafId !== leafId) return;
-    const home = "/home/hugo";
+    const home = userHome();
     let label = cwd;
-    if (cwd === home) label = "~";
-    else if (cwd.startsWith(home + "/"))
+    if (home && cwd === home) label = "~";
+    else if (home && cwd.startsWith(home + "/"))
       label = "~/" + cwd.slice(home.length + 1);
     const basename = label.split("/").filter(Boolean).pop() || label;
     setTabs(tIdx, "title", basename);

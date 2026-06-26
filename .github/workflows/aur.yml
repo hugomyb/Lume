@@ -1,0 +1,57 @@
+name: aur
+
+# Publishes / updates the `lume-bin` package on the AUR after each GitHub
+# Release, so Arch / Manjaro users get `yay -S lume-bin` with automatic updates.
+#
+# Required repo secrets (set them once to enable; until then the job no-ops):
+#   AUR_USERNAME         — your AUR account username
+#   AUR_EMAIL            — the email tied to it
+#   AUR_SSH_PRIVATE_KEY  — a private SSH key whose public key is added to your
+#                          AUR account (Account → My Account → SSH Public Key)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    steps:
+      - id: guard
+        run: |
+          if [ -n "${{ secrets.AUR_SSH_PRIVATE_KEY }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AUR secrets non configurés — étape ignorée."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ok == 'true'
+
+      - name: Prepare PKGBUILD for this release
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          DEB_URL="https://github.com/hugomyb/Lume/releases/download/v${VERSION}/Lume_${VERSION}_amd64.deb"
+          echo "Downloading $DEB_URL to compute its checksum…"
+          SHA=$(curl -fsSL "$DEB_URL" | sha256sum | cut -d' ' -f1)
+          cd packaging/aur
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s|sha256sums=('SKIP'|sha256sums=('${SHA}'|" PKGBUILD
+          echo "----- PKGBUILD -----"; cat PKGBUILD
+
+      - name: Publish to the AUR
+        if: steps.guard.outputs.ok == 'true'
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: lume-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.event.release.tag_name || github.ref_name }}"
+          updpkgsums: false

@@ -531,7 +531,7 @@ body,
   position: absolute;
   pointer-events: auto;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 5px;
   box-shadow: 0 0 0 1px var(--border);
   background: var(--bg);
   transition: box-shadow 160ms;
@@ -842,8 +842,13 @@ body,
   z-index: 30 !important;
 }
 .terminal-host .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  /* Keep Monaco's reserved track width, but render a thinner slider pinned to
+     the right edge so the scrollbar looks slimmer (still grabbable). */
+  width: 7px !important;
+  left: auto !important;
+  right: 1px !important;
   background: rgba(var(--hover-rgb), 0.28) !important;
-  border-radius: 6px !important;
+  border-radius: 4px !important;
   transition: background 120ms linear;
 }
 .terminal-host .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider:hover {
@@ -1005,7 +1010,7 @@ body,
   position: relative;
   flex-shrink: 0;
   background: var(--bg-soft);
-  border-radius: 8px;
+  border-radius: 5px;
   box-shadow: 0 0 0 1px var(--border);
   display: flex;
   flex-direction: column;
@@ -1036,7 +1041,7 @@ body,
   position: relative;
   flex-shrink: 0;
   background: var(--bg-soft);
-  border-radius: 8px;
+  border-radius: 5px;
   box-shadow: 0 0 0 1px var(--border);
   display: flex;
   flex-direction: column;

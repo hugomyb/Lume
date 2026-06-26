@@ -1,0 +1,19 @@
+pkgbase = lume-bin
+	pkgdesc = Fast, lightweight, open-source terminal — a private, local alternative to Warp
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/hugomyb/Lume
+	arch = x86_64
+	license = MIT
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	optdepends = cloudflared: remote control over the internet (cross-network)
+	provides = lume
+	conflicts = lume
+	options = !strip
+	source = Lume_0.1.0_amd64.deb::https://github.com/hugomyb/Lume/releases/download/v0.1.0/Lume_0.1.0_amd64.deb
+	source = LICENSE::https://raw.githubusercontent.com/hugomyb/Lume/v0.1.0/LICENSE
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = lume-bin

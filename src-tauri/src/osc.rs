@@ -365,10 +365,10 @@ mod tests {
     #[test]
     fn detects_cwd_from_osc7() {
         let mut p = OscParser::new();
-        let r = p.feed(b"\x1b]7;file://machine/home/hugo/projects\x07");
+        let r = p.feed(b"\x1b]7;file://machine/home/user/project\x07");
         assert_eq!(
             events_only(&r),
-            vec![OscEvent::Cwd("/home/hugo/projects".to_string())]
+            vec![OscEvent::Cwd("/home/user/project".to_string())]
         );
         // OSC 7 is forwarded to xterm even though we captured it.
         assert!(r.passthrough.starts_with(b"\x1b]7;"));

@@ -1,0 +1,62 @@
+<svg width="1200" height="340" viewBox="0 0 1200 340" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1018"/>
+      <stop offset="1" stop-color="#080a0f"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2433"/>
+      <stop offset="1" stop-color="#0a0d13"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#a7ecff"/>
+      <stop offset="0.5" stop-color="#4ea1ff"/>
+      <stop offset="1" stop-color="#7b7bff"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#bcd4ee"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4ea1ff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#4ea1ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="pageglow" cx="0.28" cy="0.5" r="0.55">
+      <stop offset="0" stop-color="#2a6cff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2a6cff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="340" fill="url(#page)"/>
+  <rect x="0" y="0" width="1200" height="340" fill="url(#pageglow)"/>
+
+  <!-- logo icon -->
+  <g transform="translate(64,58) scale(0.21875)">
+    <rect x="0" y="0" width="1024" height="1024" rx="236" fill="url(#bg)"/>
+    <rect x="2" y="2" width="1020" height="1020" rx="234" fill="none"
+          stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+    <ellipse cx="516" cy="512" rx="380" ry="320" fill="url(#glow)"/>
+    <g filter="url(#soft)" opacity="0.75">
+      <polyline points="352,352 566,512 352,672" fill="none" stroke="#4ea1ff"
+                stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="612" y="438" width="80" height="148" rx="20" fill="#4ea1ff"/>
+    </g>
+    <polyline points="352,352 566,512 352,672" fill="none" stroke="url(#mark)"
+              stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="612" y="438" width="80" height="148" rx="20" fill="url(#mark)"/>
+  </g>
+
+  <!-- wordmark + tagline -->
+  <text x="338" y="186" font-family="Ubuntu, 'DejaVu Sans', sans-serif"
+        font-size="118" font-weight="700" fill="url(#word)"
+        letter-spacing="-2">Lume</text>
+  <text x="344" y="244" font-family="Ubuntu, 'DejaVu Sans', sans-serif"
+        font-size="30" font-weight="400" fill="#8aa0b8">A private, local,
+    open-source alternative to Warp</text>
+  <text x="344" y="288" font-family="Ubuntu, 'DejaVu Sans', sans-serif"
+        font-size="22" font-weight="400" fill="#56708c">Command blocks · inline
+    AI · panes · themes · remote control · Rust + Tauri</text>
+</svg>
