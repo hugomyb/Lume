@@ -32,7 +32,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libxdo-dev patchelf rpm
+            libayatana-appindicator3-dev libxdo-dev patchelf rpm \
+            squashfs-tools
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -56,3 +57,35 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --bundles deb,rpm,appimage
+
+      # Tauri's AppImage bundler (linuxdeploy) embeds libnghttp2.so.* — libsoup
+      # (WebKit's HTTP lib) lists it as NEEDED and it isn't on the AppImage
+      # excludelist, whereas libcurl IS excluded and comes from the host. On any
+      # system with a newer libcurl, tools run *inside* the terminal (git, curl)
+      # load the host libcurl, which then resolves the stale BUNDLED libnghttp2
+      # first and dies with "undefined symbol: nghttp2_...". We drop the bundled
+      # copy so the host provides a matching libcurl/libnghttp2 pair, then re-sign
+      # and refresh the AppImage signature the in-app updater verifies.
+      # This must run on EVERY release: the bundler re-adds the lib each build.
+      # (See scripts/fix-appimage.sh for the why + how in full.)
+      - name: Drop bundled libnghttp2 from the AppImage, re-sign, refresh release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -euo pipefail
+          appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+          bash scripts/fix-appimage.sh "$appimage"
+          # Re-sign (tauri signer reads the key from TAURI_SIGNING_PRIVATE_KEY).
+          rm -f "$appimage.sig"
+          npm run tauri -- signer sign "$appimage"
+          # Refresh the AppImage signature in the manifest, then overwrite assets.
+          sig="$(cat "$appimage.sig")"
+          gh release download "${{ github.ref_name }}" --pattern latest.json --clobber
+          jq --arg s "$sig" \
+            '.platforms["linux-x86_64"].signature = $s
+             | .platforms["linux-x86_64-appimage"].signature = $s' \
+            latest.json > latest.json.tmp && mv latest.json.tmp latest.json
+          gh release upload "${{ github.ref_name }}" --clobber \
+            "$appimage" "$appimage.sig" latest.json

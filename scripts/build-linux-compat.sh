@@ -31,7 +31,7 @@ docker run --rm \
     apt-get install -y -qq \
       curl wget file ca-certificates git build-essential pkg-config \
       libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-      libayatana-appindicator3-dev libxdo-dev patchelf >/dev/null
+      libayatana-appindicator3-dev libxdo-dev patchelf squashfs-tools >/dev/null
 
     echo ">> Rust"
     curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1
@@ -55,6 +55,11 @@ docker run --rm \
 
     echo ">> tauri build (AppImage, best-effort)"
     npm run tauri build -- --bundles appimage || echo "!! AppImage step skipped"
+
+    echo ">> strip bundled libnghttp2 from the AppImage (see scripts/fix-appimage.sh)"
+    for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+      [ -e "$f" ] && bash scripts/fix-appimage.sh "$f"
+    done
 
     echo ">> export artifacts"
     cp -v src-tauri/target/release/bundle/deb/*.deb /out/ 2>/dev/null || true
