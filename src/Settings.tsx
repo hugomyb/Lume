@@ -9,18 +9,13 @@ import {
 } from "./config";
 import { customFamilies, importFontFile, listSystemFonts } from "./fonts";
 import { THEME_PRESETS } from "./themes";
-import {
-  remoteStart,
-  remoteStatus,
-  remoteStop,
-  type RemoteInfo,
-} from "./remote";
-import { copyText } from "./clipboard";
+import { getVersion } from "@tauri-apps/api/app";
+import { checkForUpdate, installUpdate, type Update } from "./updater";
 import {
   IconAppearance,
   IconBell,
+  IconInfo,
   IconKeyboard,
-  IconSmartphone,
   IconSsh,
 } from "./icons";
 import {
@@ -68,8 +63,8 @@ type Section =
   | "appearance"
   | "shell"
   | "notifications"
-  | "remote"
-  | "keys";
+  | "keys"
+  | "about";
 
 const MAIN_COLORS: { key: keyof Theme; label: string }[] = [
   { key: "background", label: "Fond" },
@@ -138,28 +133,40 @@ export default function Settings(props: Props) {
     props.onChange();
   };
 
-  // --- Remote control ---
-  const [remote, setRemote] = createSignal<RemoteInfo | null>(null);
-  const [remotePort, setRemotePort] = createSignal(
-    Number(localStorage.getItem("lume.remotePort")) || 4530
-  );
-  const [remoteBusy, setRemoteBusy] = createSignal(false);
-  // Refresh status whenever the panel opens.
-  createEffect(() => {
-    if (props.open()) remoteStatus().then(setRemote).catch(() => {});
-  });
-  const toggleRemote = async (on: boolean) => {
-    if (remoteBusy()) return;
-    setRemoteBusy(true);
+  // --- About / updates ---
+  const [appVersion, setAppVersion] = createSignal("");
+  getVersion().then(setAppVersion).catch(() => {});
+  const [updateState, setUpdateState] = createSignal<
+    "idle" | "checking" | "uptodate" | "available" | "installing" | "error"
+  >("idle");
+  const [foundUpdate, setFoundUpdate] = createSignal<Update | null>(null);
+  const [updateProgress, setUpdateProgress] = createSignal(0);
+  const checkUpdate = async () => {
+    if (updateState() === "checking" || updateState() === "installing") return;
+    setUpdateState("checking");
     try {
-      const info = on ? await remoteStart(remotePort(), false) : await remoteStop();
-      setRemote(info);
-    } catch (e) {
-      console.error("remote toggle", e);
-    } finally {
-      setRemoteBusy(false);
+      const u = await checkForUpdate();
+      if (u) {
+        setFoundUpdate(u);
+        setUpdateState("available");
+      } else {
+        setUpdateState("uptodate");
+      }
+    } catch {
+      setUpdateState("error");
     }
   };
+  const applyUpdate = async () => {
+    const u = foundUpdate();
+    if (!u) return;
+    setUpdateState("installing");
+    try {
+      await installUpdate(u, setUpdateProgress); // relaunches on success
+    } catch {
+      setUpdateState("error");
+    }
+  };
+
   const resetAppearance = () => {
     props.setConfig("appearance", {
       ...DEFAULT_CONFIG.appearance,
@@ -234,19 +241,19 @@ export default function Settings(props: Props) {
             </button>
             <button
               class="settings-nav"
-              classList={{ active: section() === "remote" }}
-              onClick={() => setSection("remote")}
-            >
-              <IconSmartphone size={15} />
-              <span>Remote</span>
-            </button>
-            <button
-              class="settings-nav"
               classList={{ active: section() === "keys" }}
               onClick={() => setSection("keys")}
             >
               <IconKeyboard size={15} />
               <span>Raccourcis</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "about" }}
+              onClick={() => setSection("about")}
+            >
+              <IconInfo size={15} />
+              <span>À propos</span>
             </button>
             <div class="settings-sidebar-spacer" />
             <button class="settings-close" onClick={() => props.onClose()}>
@@ -532,71 +539,6 @@ export default function Settings(props: Props) {
               </div>
             </Show>
 
-            <Show when={section() === "remote"}>
-              <div class="settings-section">
-                <div class="settings-row">
-                  <span class="settings-label">
-                    Activer le contrôle à distance
-                  </span>
-                  <Toggle
-                    checked={remote()?.running ?? false}
-                    disabled={remoteBusy()}
-                    onChange={(v) => toggleRemote(v)}
-                  />
-                </div>
-                <label class="settings-row">
-                  <span class="settings-label">Port</span>
-                  <input
-                    class="settings-input narrow"
-                    type="number"
-                    min="1024"
-                    max="65535"
-                    disabled={remote()?.running}
-                    value={remotePort()}
-                    onInput={(e) => {
-                      const p = Math.max(
-                        1,
-                        Math.min(65535, Number(e.currentTarget.value) || 4530)
-                      );
-                      setRemotePort(p);
-                      try {
-                        localStorage.setItem("lume.remotePort", String(p));
-                      } catch {}
-                    }}
-                  />
-                </label>
-
-                <Show
-                  when={remote()?.running}
-                  fallback={
-                    <p class="settings-note">
-                      Pilote le terminal du <strong>pane actif</strong> depuis un
-                      téléphone ou un autre PC du <strong>même réseau local</strong>.
-                      Désactivé par défaut.
-                    </p>
-                  }
-                >
-                  <div class="settings-subtitle">Connexion</div>
-                  <p class="settings-note">
-                    Ouvre cette adresse sur l'autre appareil (le <strong>pane
-                    actif</strong> est piloté en direct) :
-                  </p>
-                  <div class="remote-url-row">
-                    <code class="remote-url">{remote()!.url}</code>
-                    <button
-                      class="settings-import-btn"
-                      onClick={() => copyText(remote()!.url)}
-                    >
-                      Copier
-                    </button>
-                  </div>
-                  <p class="settings-note">
-                    ⚠️ Quiconque a cette adresse (jeton inclus) peut taper dans ton
-                    terminal. Coupe-le quand tu ne t'en sers pas.
-                  </p>
-                </Show>
-              </div>
-            </Show>
 
             <Show when={section() === "keys"}>
               <div class="settings-section">
@@ -640,6 +582,58 @@ export default function Settings(props: Props) {
                     )}
                   </For>
                 </div>
+              </div>
+            </Show>
+
+            <Show when={section() === "about"}>
+              <div class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">Version</span>
+                  <span class="settings-value">{appVersion() || "—"}</span>
+                </div>
+                <div class="settings-row">
+                  <span class="settings-label">Mises à jour</span>
+                  <button
+                    class="settings-import-btn"
+                    disabled={
+                      updateState() === "checking" ||
+                      updateState() === "installing"
+                    }
+                    onClick={() => checkUpdate()}
+                  >
+                    {updateState() === "checking"
+                      ? "Vérification…"
+                      : "Vérifier"}
+                  </button>
+                </div>
+                <Show when={updateState() === "uptodate"}>
+                  <p class="settings-note">Lume est à jour ✓</p>
+                </Show>
+                <Show when={updateState() === "error"}>
+                  <p class="settings-note">
+                    Impossible de vérifier (hors-ligne, ou pas de release).
+                  </p>
+                </Show>
+                <Show when={updateState() === "available"}>
+                  <div class="settings-update-box">
+                    <p class="settings-note">
+                      <strong>Lume {foundUpdate()!.version}</strong> est
+                      disponible.
+                    </p>
+                    <button class="settings-import-btn" onClick={applyUpdate}>
+                      Installer et redémarrer
+                    </button>
+                  </div>
+                </Show>
+                <Show when={updateState() === "installing"}>
+                  <p class="settings-note">
+                    Téléchargement… {updateProgress()}%
+                  </p>
+                </Show>
+                <p class="settings-note">
+                  Les mises à jour sont signées et installées automatiquement
+                  (build AppImage). Vérification auto au démarrage.
+                </p>
               </div>
             </Show>
           </div>

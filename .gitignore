@@ -7,3 +7,6 @@ dist
 .DS_Store
 
 graphify-out
+# Updater signing keys — NEVER commit
+*.key
+.tauri/

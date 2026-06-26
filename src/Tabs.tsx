@@ -50,6 +50,7 @@ import {
 } from "./remote";
 import FileTree from "./FileTree";
 import RemoteDialog from "./RemoteDialog";
+import UpdateBanner from "./UpdateBanner";
 import {
   IconBlocks,
   IconChevronLeft,
@@ -1931,6 +1932,7 @@ export default function Tabs() {
       fallback={<div class="loading">Chargement de la configuration…</div>}
     >
       <div class="app-shell">
+          <UpdateBanner />
           <div class="tab-bar">
             <div class="tab-lead">
               <button
