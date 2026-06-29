@@ -189,7 +189,11 @@ fn spawn_impl(
         let app = app.clone();
         thread::spawn(move || {
             const MAX_CAPTURE: usize = 1024 * 1024; // 1 MiB
-            let mut buf = [0u8; 8192];
+            // Large read buffer: under heavy output (cat, builds, `yes`) the
+            // kernel delivers more bytes per read, so we emit far fewer Tauri
+            // events (each event costs a base64 encode + IPC hop) for the same
+            // throughput — the dominant CPU cost of a terminal.
+            let mut buf = [0u8; 65536];
             let mut parser = OscParser::new();
             let mut capturing = false;
             let mut output_buf: Vec<u8> = Vec::new();
@@ -267,12 +271,16 @@ fn spawn_impl(
                             let _ = output_tx_reader.send(result.passthrough.clone());
                         }
 
-                        let payload = PtyOutputEvent {
-                            id,
-                            data_b64: B64.encode(&result.passthrough),
-                        };
-                        if app.emit("pty:output", payload).is_err() {
-                            break;
+                        // Reads that were pure OSC metadata (e.g. prompt markers)
+                        // leave no passthrough — skip the empty IPC round-trip.
+                        if !result.passthrough.is_empty() {
+                            let payload = PtyOutputEvent {
+                                id,
+                                data_b64: B64.encode(&result.passthrough),
+                            };
+                            if app.emit("pty:output", payload).is_err() {
+                                break;
+                            }
                         }
                     }
                     Err(_) => break,

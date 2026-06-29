@@ -102,6 +102,8 @@ type TabState = {
 let nextTabId = 0;
 
 const MAX_PANES_PER_TAB = 4;
+/** Cap on command blocks kept per pane — bounds memory on long-lived sessions. */
+const MAX_BLOCKS_PER_LEAF = 1000;
 
 function hexToRgb(hex: string): [number, number, number] {
   let h = hex.replace("#", "").trim();
@@ -1459,7 +1461,15 @@ export default function Tabs() {
           markerId: null,
         };
         setTabs(tIdx, "leaves", leafId, "nextBlockId", blockId + 1);
-        setTabs(tIdx, "leaves", leafId, "blocks", (b) => [...b, newBlock]);
+        // Keep only the most recent blocks so a long-lived session doesn't grow
+        // memory without bound (each block can hold up to ~1 MiB of captured
+        // output). Older blocks scroll out of xterm's scrollback anyway.
+        setTabs(tIdx, "leaves", leafId, "blocks", (b) => {
+          const next = [...b, newBlock];
+          return next.length > MAX_BLOCKS_PER_LEAF
+            ? next.slice(next.length - MAX_BLOCKS_PER_LEAF)
+            : next;
+        });
         break;
       }
       case "commandLine": {
