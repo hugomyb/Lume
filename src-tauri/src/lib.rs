@@ -53,6 +53,7 @@ pub fn run() {
             remote::remote_stop,
             remote::remote_status,
             remote::remote_set_target,
+            remote::remote_set_tabs,
             remote::remote_install_cloudflared,
             pty::pty_spawn,
             pty::pty_write,

@@ -21,15 +21,24 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::pty::{pty_cwd, PtyManager};
+
+/// One controllable terminal exposed to remote clients (a tab's active pane).
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TabInfo {
+    pub id: u64,
+    pub title: String,
+}
 
 pub struct RemoteState {
     inner: Mutex<RemoteInner>,
     /// The pty id the remote clients are bridged to (the app's active pane).
     target_tx: watch::Sender<Option<u64>>,
+    /// The list of tabs (terminals) the phone can switch between.
+    tabs_tx: watch::Sender<Vec<TabInfo>>,
     /// Number of currently-connected remote clients.
     clients: Arc<AtomicUsize>,
 }
@@ -49,7 +58,9 @@ struct RemoteInner {
 impl RemoteState {
     pub fn new() -> Self {
         let (target_tx, _rx) = watch::channel(None);
+        let (tabs_tx, _trx) = watch::channel(Vec::new());
         Self {
+            tabs_tx,
             inner: Mutex::new(RemoteInner {
                 running: false,
                 port: 0,
@@ -70,7 +81,10 @@ struct AppState {
     token: String,
     pty: Arc<PtyManager>,
     target_tx: watch::Sender<Option<u64>>,
+    tabs_tx: watch::Sender<Vec<TabInfo>>,
     clients: Arc<AtomicUsize>,
+    /// To signal the desktop frontend (e.g. "create a new tab" from the phone).
+    app: AppHandle,
 }
 
 /// Increments the live-client count for the lifetime of a connection.
@@ -418,6 +432,19 @@ pub fn remote_set_target(remote: State<'_, Arc<RemoteState>>, pty_id: Option<u64
     let _ = remote.target_tx.send_replace(pty_id);
 }
 
+/// Publish the list of tabs (terminals) the phone can switch between. Called by
+/// the desktop whenever tabs/titles/active panes change. If the current remote
+/// target no longer exists, fall back to the first tab so the phone isn't stuck.
+#[tauri::command]
+pub fn remote_set_tabs(remote: State<'_, Arc<RemoteState>>, tabs: Vec<TabInfo>) {
+    let cur = *remote.target_tx.borrow();
+    let still_valid = cur.is_some_and(|id| tabs.iter().any(|t| t.id == id));
+    if !still_valid {
+        let _ = remote.target_tx.send_replace(tabs.first().map(|t| t.id));
+    }
+    let _ = remote.tabs_tx.send_replace(tabs);
+}
+
 #[tauri::command]
 pub fn remote_stop(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
     let mut inner = remote.inner.lock();
@@ -435,6 +462,7 @@ pub fn remote_stop(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
 
 #[tauri::command]
 pub fn remote_start(
+    app: AppHandle,
     remote: State<'_, Arc<RemoteState>>,
     pty: State<'_, Arc<PtyManager>>,
     port: u16,
@@ -460,7 +488,9 @@ pub fn remote_start(
         token: token.clone(),
         pty: pty.inner().clone(),
         target_tx: remote.target_tx.clone(),
+        tabs_tx: remote.tabs_tx.clone(),
         clients: remote.clients.clone(),
+        app: app.clone(),
     };
     let app = Router::new()
         .route("/", get(index))
@@ -543,8 +573,17 @@ async fn output_task(
     mut ctrl_rx: mpsc::Receiver<String>,
 ) {
     let mut trx = st.target_tx.subscribe();
+    let mut tabs_rx = st.tabs_tx.subscribe();
     loop {
         let target = *trx.borrow_and_update();
+        // Send the current tab list + active selection so the phone can switch.
+        let json = {
+            let t = tabs_rx.borrow_and_update();
+            tabs_json(&t, target)
+        };
+        if sender.send(Message::Text(json.into())).await.is_err() {
+            return;
+        }
         match target.and_then(|id| st.pty.attach(id)) {
             Some((snapshot, mut rx)) => {
                 // Replay the current screen + recent scrollback so a (re)connecting
@@ -573,6 +612,18 @@ async fn output_task(
                             }
                         }
                     },
+                    ch = tabs_rx.changed() => {
+                        if ch.is_err() {
+                            return;
+                        }
+                        let json = {
+                            let t = tabs_rx.borrow();
+                            tabs_json(&t, *trx.borrow())
+                        };
+                        if sender.send(Message::Text(json.into())).await.is_err() {
+                            return;
+                        }
+                    },
                     ch = trx.changed() => {
                         if ch.is_err() {
                             return;
@@ -583,13 +634,23 @@ async fn output_task(
                 }
             },
             None => {
-                // No target (or it vanished): wait for the active pane to change.
-                if trx.changed().await.is_err() {
-                    return;
+                // No target: the client still sees the tab list and can pick one.
+                tokio::select! {
+                    ch = trx.changed() => { if ch.is_err() { return; } }
+                    ch = tabs_rx.changed() => { if ch.is_err() { return; } }
                 }
             }
         }
     }
+}
+
+/// JSON control frame: `{"t":"tabs","items":[{"id","title"}],"active":<id|null>}`.
+fn tabs_json(tabs: &[TabInfo], active: Option<u64>) -> String {
+    let items: Vec<serde_json::Value> = tabs
+        .iter()
+        .map(|t| serde_json::json!({ "id": t.id, "title": t.title }))
+        .collect();
+    serde_json::json!({ "t": "tabs", "items": items, "active": active }).to_string()
 }
 
 /// Handle one client→server message. A 2-byte sentinel (NUL, SOH) — which
@@ -626,6 +687,18 @@ async fn input_task(
             Message::Close(_) => break,
             _ => continue,
         };
+        // New tab: NUL,EOT → ask the desktop frontend to create one.
+        if bytes == [0x00u8, 0x04u8] {
+            let _ = st.app.emit("remote:new-tab", ());
+            continue;
+        }
+        // Tab switch: NUL,ETX + the target pty id → repoint the bridge.
+        if let Some(rest) = bytes.strip_prefix(&[0x00u8, 0x03u8]) {
+            if let Ok(id) = String::from_utf8_lossy(rest).parse::<u64>() {
+                let _ = st.target_tx.send_replace(Some(id));
+            }
+            continue;
+        }
         // Completion request: NUL,STX + the word being typed → reply with a
         // directory listing for the target pane's cwd (off-thread, best-effort).
         if let Some(tok) = bytes.strip_prefix(&[0x00u8, 0x02u8]) {
@@ -726,6 +799,11 @@ const INDEX_HTML: &str = r##"<!doctype html>
   #bar{flex:0 0 30px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#fff;background:#1b2330;padding:0 10px}
   #msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #dc{background:#3a2330;color:#ff9bb0;border:1px solid #6b3347;border-radius:5px;padding:3px 9px;font-size:12px}
+  #tabs{flex:0 0 auto;display:flex;gap:5px;overflow-x:auto;background:#11161f;padding:4px 6px;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  #tabs:empty{display:none}
+  .tab{flex:0 0 auto;background:#1a2230;color:#9aa4b2;border:1px solid #283242;border-radius:6px;padding:5px 11px;font-size:12.5px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab.on{background:#16243a;color:#e8f2ff;border-color:#4ea1ff;box-shadow:0 0 9px rgba(78,161,255,.35)}
+  .tab.add{display:flex;align-items:center;justify-content:center;width:30px;padding:0;color:#4ea1ff;border-color:#33405a;font-weight:700;font-size:17px}
   #term{flex:1 1 auto;min-height:0;padding:2px;overflow:hidden}
   .xterm{height:100%}
   #assist{flex:0 0 auto;background:#141a24;border-top:1px solid #232c3a}
@@ -750,6 +828,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 <body>
 <div id="app">
   <div id="bar"><span id="msg">Connexion…</span><button id="dc" style="display:none">Déconnecter</button></div>
+  <div id="tabs"></div>
   <div id="term"></div>
   <div id="assist"><div id="chips"></div><div id="keys"></div></div>
 </div>
@@ -760,7 +839,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
 (function(){
   var $=function(id){return document.getElementById(id);};
   var token = new URLSearchParams(location.search).get('t') || '';
-  var msg=$('msg'), dc=$('dc'), termEl=$('term'), app=$('app'), chipsEl=$('chips'), keysEl=$('keys');
+  var msg=$('msg'), dc=$('dc'), termEl=$('term'), app=$('app'), chipsEl=$('chips'), keysEl=$('keys'), tabsEl=$('tabs');
+  var lastActive=null;
   var closedByUser=false;
   var small = Math.min(window.innerWidth, window.innerHeight) < 480;
   var term = new Terminal({ cursorBlink:true, fontSize: small?12:14, fontFamily:'ui-monospace,monospace', scrollback:2000, theme:{background:'#0e1014',foreground:'#e6e6e6'} });
@@ -803,6 +883,20 @@ const INDEX_HTML: &str = r##"<!doctype html>
       });
       chipsEl.appendChild(c);
     });
+  }
+
+  // --- tab bar (switch between the desktop's terminals) ---
+  function onTabs(items, active){
+    if(active!==lastActive){ try{term.reset();}catch(e){} curLine=''; chipsEl.innerHTML=''; lastActive=active; }
+    tabsEl.innerHTML='';
+    (items||[]).forEach(function(it){
+      var b=document.createElement('div'); b.className='tab'+(it.id===active?' on':''); b.textContent=it.title||('#'+it.id);
+      bindTap(b, function(){ if(it.id!==active && ws.readyState===1) ws.send(String.fromCharCode(0,3)+it.id); });
+      tabsEl.appendChild(b);
+    });
+    var add=document.createElement('div'); add.className='tab add'; add.textContent='+';
+    bindTap(add, function(){ if(ws.readyState===1) ws.send(String.fromCharCode(0,4)); });
+    tabsEl.appendChild(add);
   }
 
   // --- extra keys (Termux-style) ---
@@ -864,12 +958,12 @@ const INDEX_HTML: &str = r##"<!doctype html>
   function connect(){
     closedByUser=false; hideOverlay(); msg.textContent='Connexion…';
     try{ term.reset(); }catch(e){}   // clear so the server's replay rebuilds cleanly
-    curLine='';
+    curLine=''; lastActive=null;
     ws = new WebSocket(proto + '://' + location.host + '/ws?t=' + encodeURIComponent(token));
     ws.binaryType = 'arraybuffer';
     ws.onmessage = function(e){
       if(typeof e.data === 'string'){
-        try{ var m=JSON.parse(e.data); if(m && m.t==='ls'){ renderChips(m.items||[]); return; } }catch(_){}
+        try{ var m=JSON.parse(e.data); if(m && m.t==='ls'){ renderChips(m.items||[]); return; } if(m && m.t==='tabs'){ onTabs(m.items, m.active); return; } }catch(_){}
         term.write(e.data); return;
       }
       term.write(new Uint8Array(e.data));

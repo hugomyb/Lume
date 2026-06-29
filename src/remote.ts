@@ -27,6 +27,13 @@ export const remoteStatus = () => invoke<RemoteInfo>("remote_status");
 export const remoteSetTarget = (ptyId: number | null) =>
   invoke("remote_set_target", { ptyId });
 
+/** A terminal the phone can switch to (a tab's active pane). */
+export type RemoteTab = { id: number; title: string };
+
+/** Publish the list of tabs the phone can switch between. */
+export const remoteSetTabs = (tabs: RemoteTab[]) =>
+  invoke("remote_set_tabs", { tabs });
+
 /** Download + install cloudflared (for cross-network tunnels). */
 export const remoteInstallCloudflared = () =>
   invoke<void>("remote_install_cloudflared");

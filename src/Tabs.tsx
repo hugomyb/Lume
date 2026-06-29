@@ -42,6 +42,7 @@ import { loadCustomFonts } from "./fonts";
 import { copyText, pasteText } from "./clipboard";
 import {
   remoteInstallCloudflared,
+  remoteSetTabs,
   remoteSetTarget,
   remoteStart,
   remoteStatus,
@@ -762,9 +763,29 @@ export default function Tabs() {
     refetchAi();
   });
 
-  // Keep remote-control clients bridged to the active pane's pty.
+  // Publish the tab list to remote clients so the phone can switch terminals.
+  // The phone picks its own target (decoupled from the desktop's focus); the
+  // initial target is set when remote control starts.
   createEffect(() => {
-    void remoteSetTarget(activeLeaf()?.ptyId ?? null).catch(() => {});
+    const list = tabs
+      .map((t) => ({ id: t.leaves[t.activeLeafId]?.ptyId, title: t.title }))
+      .filter((t): t is { id: number; title: string } => typeof t.id === "number");
+    void remoteSetTabs(list).catch(() => {});
+  });
+  // When the phone taps "+", switch the remote to the new tab once its pty
+  // spawns (a freshly-created leaf has ptyId === null for a moment).
+  const [remoteFocusTabId, setRemoteFocusTabId] = createSignal<number | null>(
+    null
+  );
+  createEffect(() => {
+    const tid = remoteFocusTabId();
+    if (tid === null) return;
+    const tab = tabs.find((t) => t.id === tid);
+    const pid = tab?.leaves[tab.activeLeafId]?.ptyId;
+    if (typeof pid === "number") {
+      void remoteSetTarget(pid).catch(() => {});
+      setRemoteFocusTabId(null);
+    }
   });
 
   // Remote-control dialog (opened from the pane context menu, not Settings).
@@ -922,6 +943,13 @@ export default function Tabs() {
     const tab = makeEmptyTab();
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
+  };
+  // Same as addTab, but flags the new tab so the remote (phone) follows it.
+  const addTabFromRemote = () => {
+    const tab = makeEmptyTab();
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
+    setRemoteFocusTabId(tab.id);
   };
 
   // --- Inline tab rename ---
@@ -1819,6 +1847,7 @@ export default function Tabs() {
   let unlistenAiChunk: UnlistenFn | undefined;
   let unlistenAiDone: UnlistenFn | undefined;
   let unlistenAiError: UnlistenFn | undefined;
+  let unlistenRemoteNewTab: UnlistenFn | undefined;
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown, true);
@@ -1830,7 +1859,12 @@ export default function Tabs() {
       unlistenAiChunk?.();
       unlistenAiDone?.();
       unlistenAiError?.();
+      unlistenRemoteNewTab?.();
     });
+
+    unlistenRemoteNewTab = await listen("remote:new-tab", () =>
+      addTabFromRemote()
+    );
 
     unlistenAiChunk = await listen<AiChunkEvent>("ai:chunk", (e) => {
       const loc = findBlockByRequest(e.payload.requestId);
