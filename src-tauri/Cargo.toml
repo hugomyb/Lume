@@ -38,7 +38,7 @@ notify-rust = "4"
 axum = { version = "0.8.9", features = ["ws"] }
 tokio = { version = "1.52.3", features = ["sync", "net", "rt-multi-thread", "macros", "io-util", "time"] }
 futures-util = "0.3.32"
-getrandom = "0.3"
+getrandom = "0.4"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-dialog = "2.7.1"

@@ -2210,13 +2210,13 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "lume"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
  "futures-util",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "notify-rust",
  "parking_lot",
  "portable-pty",
