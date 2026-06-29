@@ -22,9 +22,9 @@ use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tokio::sync::{broadcast, oneshot, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use crate::pty::PtyManager;
+use crate::pty::{pty_cwd, PtyManager};
 
 pub struct RemoteState {
     inner: Mutex<RemoteInner>,
@@ -446,8 +446,12 @@ pub fn remote_start(
     }
     remote.clients.store(0, Ordering::Relaxed);
 
-    let std_listener =
-        StdTcpListener::bind(("0.0.0.0", port)).map_err(|e| format!("bind {port}: {e}"))?;
+    // If the preferred port is taken (e.g. a leftover Lume instance still owns
+    // it), fall back to any free port instead of failing — the actual port is
+    // reported back and used to build the share URL.
+    let std_listener = StdTcpListener::bind(("0.0.0.0", port))
+        .or_else(|_| StdTcpListener::bind(("0.0.0.0", 0)))
+        .map_err(|e| format!("bind: {e}"))?;
     std_listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let actual_port = std_listener.local_addr().map_err(|e| e.to_string())?.port();
 
@@ -520,8 +524,11 @@ async fn ws_handler(
 async fn bridge(socket: WebSocket, st: AppState) {
     let _guard = ClientGuard::new(st.clients.clone());
     let (sender, receiver) = socket.split();
-    let mut out = tokio::spawn(output_task(sender, st.clone()));
-    let mut inp = tokio::spawn(input_task(receiver, st));
+    // Side channel for server→client control frames (completion listings),
+    // produced by the input task and forwarded as Text frames by the output task.
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<String>(16);
+    let mut out = tokio::spawn(output_task(sender, st.clone(), ctrl_rx));
+    let mut inp = tokio::spawn(input_task(receiver, st, ctrl_tx));
     // When either direction ends (client disconnects, pty closed), stop both.
     tokio::select! {
         _ = &mut out => inp.abort(),
@@ -533,12 +540,21 @@ async fn bridge(socket: WebSocket, st: AppState) {
 async fn output_task(
     mut sender: futures_util::stream::SplitSink<WebSocket, Message>,
     st: AppState,
+    mut ctrl_rx: mpsc::Receiver<String>,
 ) {
     let mut trx = st.target_tx.subscribe();
     loop {
         let target = *trx.borrow_and_update();
-        match target.and_then(|id| st.pty.subscribe(id)) {
-            Some(mut rx) => loop {
+        match target.and_then(|id| st.pty.attach(id)) {
+            Some((snapshot, mut rx)) => {
+                // Replay the current screen + recent scrollback so a (re)connecting
+                // client doesn't see a blank terminal.
+                if !snapshot.is_empty()
+                    && sender.send(Message::Binary(snapshot.into())).await.is_err()
+                {
+                    return;
+                }
+                loop {
                 tokio::select! {
                     msg = rx.recv() => match msg {
                         Ok(bytes) => {
@@ -549,12 +565,21 @@ async fn output_task(
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
                         Err(broadcast::error::RecvError::Closed) => break,
                     },
+                    ctl = ctrl_rx.recv() => {
+                        if let Some(txt) = ctl {
+                            // Text frame = control (PTY output is always Binary).
+                            if sender.send(Message::Text(txt.into())).await.is_err() {
+                                return;
+                            }
+                        }
+                    },
                     ch = trx.changed() => {
                         if ch.is_err() {
                             return;
                         }
                         break; // re-evaluate the target on the outer loop
                     }
+                }
                 }
             },
             None => {
@@ -586,21 +611,106 @@ fn handle_input(st: &AppState, id: u64, data: &[u8]) {
     st.pty.write_bytes(id, data);
 }
 
-/// websocket → pty input (and resize control messages).
+/// websocket → pty input (resize + completion control messages + raw input).
 async fn input_task(
     mut receiver: futures_util::stream::SplitStream<WebSocket>,
     st: AppState,
+    ctrl_tx: mpsc::Sender<String>,
 ) {
     let trx = st.target_tx.subscribe();
     while let Some(Ok(msg)) = receiver.next().await {
         let Some(id) = *trx.borrow() else { continue };
-        match msg {
-            Message::Text(t) => handle_input(&st, id, t.as_str().as_bytes()),
-            Message::Binary(b) => handle_input(&st, id, b.as_ref()),
+        let bytes: Vec<u8> = match msg {
+            Message::Text(t) => t.as_str().as_bytes().to_vec(),
+            Message::Binary(b) => b.as_ref().to_vec(),
             Message::Close(_) => break,
-            _ => {}
+            _ => continue,
+        };
+        // Completion request: NUL,STX + the word being typed → reply with a
+        // directory listing for the target pane's cwd (off-thread, best-effort).
+        if let Some(tok) = bytes.strip_prefix(&[0x00u8, 0x02u8]) {
+            let token = String::from_utf8_lossy(tok).into_owned();
+            let cwd = pty_cwd(&st.pty, id);
+            let tx = ctrl_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let _ = tx.try_send(build_listing_json(cwd.as_deref(), &token));
+            });
+            continue;
+        }
+        handle_input(&st, id, &bytes);
+    }
+}
+
+/// JSON listing of the cwd entries matching `token`'s directory + prefix.
+/// Shape: `{"t":"ls","items":[["name",isDir], …]}` (dirs first, capped).
+fn build_listing_json(cwd: Option<&str>, token: &str) -> String {
+    let items = list_entries(cwd, token);
+    let arr: Vec<serde_json::Value> = items
+        .into_iter()
+        .map(|(n, d)| serde_json::json!([n, d]))
+        .collect();
+    serde_json::json!({ "t": "ls", "items": arr }).to_string()
+}
+
+fn list_entries(cwd: Option<&str>, token: &str) -> Vec<(String, bool)> {
+    let cwd = match cwd {
+        Some(c) if !c.is_empty() => c,
+        _ => return vec![],
+    };
+    // Expand a leading ~ to $HOME.
+    let token = match token.strip_prefix('~') {
+        Some(rest) => match std::env::var("HOME") {
+            Ok(h) => format!("{h}{rest}"),
+            Err(_) => token.to_string(),
+        },
+        None => token.to_string(),
+    };
+    // Split into the directory to list and the name prefix to match.
+    let (dir_part, prefix) = if token.ends_with('/') {
+        (token.trim_end_matches('/').to_string(), String::new())
+    } else {
+        match token.rsplit_once('/') {
+            Some((d, p)) => (d.to_string(), p.to_string()),
+            None => (String::new(), token.clone()),
+        }
+    };
+    let dir_path = {
+        let p = std::path::Path::new(&dir_part);
+        if dir_part.is_empty() {
+            std::path::PathBuf::from(cwd)
+        } else if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            std::path::Path::new(cwd).join(p)
+        }
+    };
+    let Ok(rd) = std::fs::read_dir(&dir_path) else {
+        return vec![];
+    };
+    let show_hidden = prefix.starts_with('.');
+    let mut out: Vec<(String, bool)> = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') && !show_hidden {
+            continue;
+        }
+        // Case-sensitive prefix so the client can append the exact remainder.
+        if !prefix.is_empty() && !name.starts_with(&prefix) {
+            continue;
+        }
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        out.push((name, is_dir));
+        if out.len() >= 200 {
+            break;
         }
     }
+    // Directories first, then case-insensitive alphabetical.
+    out.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+    });
+    out.truncate(60);
+    out
 }
 
 const INDEX_HTML: &str = r##"<!doctype html>
@@ -611,46 +721,175 @@ const INDEX_HTML: &str = r##"<!doctype html>
 <title>Lume Remote</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"/>
 <style>
-  html,body{margin:0;height:100%;background:#0e1014;overflow:hidden}
-  #bar{position:absolute;top:0;left:0;right:0;height:30px;display:flex;align-items:center;justify-content:space-between;gap:8px;font:12px system-ui,sans-serif;color:#fff;background:#1b2330;padding:0 10px;z-index:10}
+  html,body{margin:0;height:100%;background:#0e1014;overflow:hidden;font:13px system-ui,sans-serif}
+  #app{position:fixed;left:0;top:0;right:0;display:flex;flex-direction:column;overflow:hidden}
+  #bar{flex:0 0 30px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#fff;background:#1b2330;padding:0 10px}
   #msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #dc{background:#3a2330;color:#ff9bb0;border:1px solid #6b3347;border-radius:5px;padding:3px 9px;font:12px system-ui;cursor:pointer}
-  #term{position:absolute;top:30px;left:0;right:0;padding:2px}
+  #dc{background:#3a2330;color:#ff9bb0;border:1px solid #6b3347;border-radius:5px;padding:3px 9px;font-size:12px}
+  #term{flex:1 1 auto;min-height:0;padding:2px;overflow:hidden}
   .xterm{height:100%}
+  #assist{flex:0 0 auto;background:#141a24;border-top:1px solid #232c3a}
+  #chips{display:flex;gap:6px;overflow-x:auto;padding:5px 6px;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  #chips:empty{display:none}
+  .chip{flex:0 0 auto;background:#1f2937;color:#cbd5e1;border:1px solid #2b3647;border-radius:6px;padding:5px 9px;font-size:13px;font-family:ui-monospace,monospace}
+  .chip.d{color:#8ab4ff;border-color:#33405a}
+  #keys{display:flex;gap:5px;overflow-x:auto;padding:5px 6px;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  .key{flex:0 0 auto;background:#222b39;color:#e6e6e6;border:1px solid #2f3a4c;border-radius:6px;padding:7px 11px;font-size:13px;min-width:30px;text-align:center;user-select:none;-webkit-user-select:none}
+  .key:active{background:#2d3a4d}
+  .key.on{background:#2b6cff;border-color:#2b6cff;color:#fff}
+  #overlay{display:none;position:fixed;inset:0;z-index:50;background:rgba(8,10,14,0.93);align-items:center;justify-content:center;padding:26px}
+  #overlay .box{max-width:330px;text-align:center;color:#e6e6e6}
+  #ov-icon{font-size:42px;margin-bottom:10px}
+  #ov-title{font-size:19px;font-weight:600;margin-bottom:6px}
+  #ov-sub{font-size:13px;color:#9aa4b2;margin-bottom:20px;line-height:1.45}
+  #reconnect{background:#101a2b;color:#e8f2ff;border:1px solid #4ea1ff;border-radius:10px;padding:12px 26px;font-size:15px;font-weight:600;letter-spacing:.02em;box-shadow:0 0 0 1px rgba(78,161,255,.25), 0 0 20px rgba(78,161,255,.45), inset 0 0 14px rgba(78,161,255,.12);animation:rcGlow 2.4s ease-in-out infinite;transition:background .15s}
+  #reconnect:active{background:#16243a;animation:none;box-shadow:0 0 0 1px rgba(78,161,255,.55), 0 0 30px rgba(78,161,255,.7), inset 0 0 16px rgba(78,161,255,.2)}
+  @keyframes rcGlow{0%,100%{box-shadow:0 0 0 1px rgba(78,161,255,.22), 0 0 14px rgba(78,161,255,.32), inset 0 0 12px rgba(78,161,255,.10)}50%{box-shadow:0 0 0 1px rgba(78,161,255,.4), 0 0 28px rgba(78,161,255,.62), inset 0 0 16px rgba(78,161,255,.16)}}
 </style>
 </head>
 <body>
-<div id="bar"><span id="msg">Connexion…</span><button id="dc" style="display:none">Déconnecter</button></div>
-<div id="term"></div>
+<div id="app">
+  <div id="bar"><span id="msg">Connexion…</span><button id="dc" style="display:none">Déconnecter</button></div>
+  <div id="term"></div>
+  <div id="assist"><div id="chips"></div><div id="keys"></div></div>
+</div>
+<div id="overlay"><div class="box"><div id="ov-icon">⚠️</div><div id="ov-title">Connexion perdue</div><div id="ov-sub"></div><button id="reconnect">Reconnecter</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script>
 (function(){
+  var $=function(id){return document.getElementById(id);};
   var token = new URLSearchParams(location.search).get('t') || '';
-  var msg = document.getElementById('msg');
-  var dc = document.getElementById('dc');
-  var termEl = document.getElementById('term');
-  var closedByUser = false;
+  var msg=$('msg'), dc=$('dc'), termEl=$('term'), app=$('app'), chipsEl=$('chips'), keysEl=$('keys');
+  var closedByUser=false;
   var small = Math.min(window.innerWidth, window.innerHeight) < 480;
-  var term = new Terminal({ cursorBlink:true, fontSize: small?12:14, fontFamily:'monospace', scrollback:2000, theme:{background:'#0e1014',foreground:'#e6e6e6'} });
+  var term = new Terminal({ cursorBlink:true, fontSize: small?12:14, fontFamily:'ui-monospace,monospace', scrollback:2000, theme:{background:'#0e1014',foreground:'#e6e6e6'} });
   var fit = new FitAddon.FitAddon();
-  term.loadAddon(fit);
-  term.open(termEl);
+  term.loadAddon(fit); term.open(termEl);
   var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(proto + '://' + location.host + '/ws?t=' + encodeURIComponent(token));
-  ws.binaryType = 'arraybuffer';
+  var ws;
+
+  // --- line tracking (best-effort, for path completion) ---
+  var curLine='';
+  function track(s){
+    if(s.indexOf('\x1b')>=0) return;            // escape seq (arrows...) — skip
+    for(var i=0;i<s.length;i++){
+      var code=s.charCodeAt(i);
+      if(code===13||code===10){ curLine=''; }                       // Enter
+      else if(code===127||code===8){ curLine=curLine.slice(0,-1); } // backspace
+      else if(code===3||code===21){ curLine=''; }                   // ^C / ^U
+      else if(code>=32){ curLine+=s[i]; }
+    }
+  }
+  function curToken(){ if(curLine.indexOf(' ')<0) return null; var p=curLine.split(/\s+/); return p[p.length-1]; }
+
+  // --- send helper (used by keyboard + buttons) ---
+  function send(s){ if(ws.readyState===1) ws.send(s); track(s); scheduleComplete(); }
+
+  // --- completion chips ---
+  var ct; function scheduleComplete(){ clearTimeout(ct); ct=setTimeout(reqComplete,140); }
+  function reqComplete(){ var t=curToken(); if(t===null){ chipsEl.innerHTML=''; return; } if(ws.readyState===1) ws.send(String.fromCharCode(0,2)+t); }
+  function renderChips(items){
+    chipsEl.innerHTML='';
+    var t=curToken(); var base = t===null?'':t.split('/').pop();
+    items.forEach(function(it){
+      var name=it[0], isDir=it[1];
+      var c=document.createElement('div'); c.className='chip'+(isDir?' d':''); c.textContent=name+(isDir?'/':'');
+      bindTap(c, function(){
+        var suffix = name.indexOf(base)===0 ? name.slice(base.length) : name;
+        suffix = suffix.replace(/ /g,'\\ ');
+        if(isDir) suffix += '/';
+        send(suffix); term.focus();
+      });
+      chipsEl.appendChild(c);
+    });
+  }
+
+  // --- extra keys (Termux-style) ---
+  var ctrlPending=false, ctrlBtn=null;
+  var KEYS=[['Esc','\x1b'],['Tab','\t'],['Ctrl','CTRL'],['←','\x1b[D'],['↑','\x1b[A'],['↓','\x1b[B'],['→','\x1b[C'],['Home','\x1b[H'],['End','\x1b[F'],['|','|'],['~','~'],['/','/'],['-','-'],['_','_'],['^C','\x03'],['^L','\x0c'],['^D','\x04']];
+  // Trigger on a tap, but let a horizontal drag scroll the row. touchstart/move
+  // stay passive (so native scroll works); only a no-move touchend fires the
+  // action (and preventDefault keeps the keyboard open). `touched` blocks the
+  // synthesized mouse events that follow a touch.
+  function bindTap(el, fn){
+    var sx=0, sy=0, moved=false, touched=false;
+    el.addEventListener('touchstart', function(e){ touched=true; var t=e.touches[0]; sx=t.clientX; sy=t.clientY; moved=false; }, {passive:true});
+    el.addEventListener('touchmove', function(e){ var t=e.touches[0]; if(Math.abs(t.clientX-sx)>8 || Math.abs(t.clientY-sy)>8) moved=true; }, {passive:true});
+    el.addEventListener('touchend', function(e){ if(!moved){ e.preventDefault(); fn(); } }, {passive:false});
+    el.addEventListener('mousedown', function(e){ if(touched) return; e.preventDefault(); fn(); });
+  }
+  KEYS.forEach(function(k){
+    var b=document.createElement('div'); b.className='key'; b.textContent=k[0];
+    if(k[1]==='CTRL'){ ctrlBtn=b; bindTap(b,function(){ ctrlPending=!ctrlPending; b.classList.toggle('on',ctrlPending); }); }
+    else bindTap(b,function(){ send(k[1]); term.focus(); });
+    keysEl.appendChild(b);
+  });
+
+  term.onData(function(d){
+    if(ctrlPending && d.length===1){
+      var code=d.toUpperCase().charCodeAt(0);
+      if(code>=64 && code<=95) d=String.fromCharCode(code & 0x1f);
+      ctrlPending=false; if(ctrlBtn) ctrlBtn.classList.remove('on');
+    }
+    send(d);
+  });
+
+  // Swipe horizontally on the terminal to move the cursor (←/→); vertical swipes
+  // still scroll the scrollback. Decide the axis on the first move, then lock it.
+  (function(){
+    var x0=0,y0=0,lastX=0,mode=0,STEP=16;   // mode: 0=undecided,1=horizontal,2=vertical
+    termEl.addEventListener('touchstart',function(e){ if(e.touches.length!==1) return; var t=e.touches[0]; x0=t.clientX; y0=t.clientY; lastX=t.clientX; mode=0; },{passive:true});
+    termEl.addEventListener('touchmove',function(e){
+      if(e.touches.length!==1) return;
+      var t=e.touches[0], dx=t.clientX-x0, dy=t.clientY-y0;
+      if(mode===0){ if(Math.abs(dx)>10 && Math.abs(dx)>Math.abs(dy)*1.3){ mode=1; lastX=t.clientX; } else if(Math.abs(dy)>10){ mode=2; } }
+      if(mode===1){
+        e.preventDefault();
+        var d=t.clientX-lastX;
+        while(d>=STEP){ if(ws.readyState===1) ws.send('\x1b[C'); lastX+=STEP; d-=STEP; }
+        while(d<=-STEP){ if(ws.readyState===1) ws.send('\x1b[D'); lastX-=STEP; d+=STEP; }
+      }
+    },{passive:false});
+  })();
+
+  var overlay=$('overlay'), ovTitle=$('ov-title'), ovSub=$('ov-sub'), ovIcon=$('ov-icon');
+  function showOverlay(byUser){
+    ovIcon.textContent = byUser ? '🔌' : '⚠️';
+    ovTitle.textContent = byUser ? 'Déconnecté' : 'Connexion perdue';
+    ovSub.textContent = byUser ? "Tu es déconnecté du terminal distant." : "Le tunnel ou le réseau s'est interrompu.";
+    overlay.style.display='flex';
+  }
+  function hideOverlay(){ overlay.style.display='none'; }
+  function connect(){
+    closedByUser=false; hideOverlay(); msg.textContent='Connexion…';
+    try{ term.reset(); }catch(e){}   // clear so the server's replay rebuilds cleanly
+    curLine='';
+    ws = new WebSocket(proto + '://' + location.host + '/ws?t=' + encodeURIComponent(token));
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = function(e){
+      if(typeof e.data === 'string'){
+        try{ var m=JSON.parse(e.data); if(m && m.t==='ls'){ renderChips(m.items||[]); return; } }catch(_){}
+        term.write(e.data); return;
+      }
+      term.write(new Uint8Array(e.data));
+    };
+    ws.onopen = function(){ msg.textContent='● Connecté'; dc.style.display=''; layout(); term.focus(); };
+    ws.onclose = function(){ msg.textContent = closedByUser ? 'Déconnecté' : 'Connexion perdue'; dc.style.display='none'; showOverlay(closedByUser); };
+    ws.onerror = function(){ msg.textContent='Erreur de connexion'; };
+  }
+  dc.onclick = function(){ closedByUser = true; if(ws) ws.close(); };
+  $('reconnect').onclick = function(){ connect(); };
+  connect();
+
   function sendResize(){ if(ws.readyState===1) ws.send(String.fromCharCode(0,1)+term.cols+'x'+term.rows); }
-  function layout(){ var vh=(window.visualViewport?window.visualViewport.height:window.innerHeight); termEl.style.height=Math.max(40,vh-30)+'px'; try{fit.fit();}catch(e){} sendResize(); }
+  function layout(){
+    var vv=window.visualViewport;
+    var h = vv?vv.height:window.innerHeight, top = vv?vv.offsetTop:0;
+    app.style.height=h+'px'; app.style.transform='translateY('+top+'px)';
+    try{fit.fit();}catch(e){} sendResize();
+  }
   var rt; function relayout(){ clearTimeout(rt); rt=setTimeout(layout,100); }
-  ws.onopen = function(){ msg.textContent='● Connecté'; dc.style.display=''; layout(); term.focus(); };
-  ws.onclose = function(){ msg.textContent = closedByUser ? 'Déconnecté' : 'Connexion perdue'; dc.style.display='none'; };
-  ws.onerror = function(){ msg.textContent='Erreur de connexion'; };
-  ws.onmessage = function(e){
-    if (typeof e.data === 'string') term.write(e.data);
-    else term.write(new Uint8Array(e.data));
-  };
-  dc.onclick = function(){ closedByUser = true; ws.close(); };
-  term.onData(function(d){ if(ws.readyState===1) ws.send(d); });
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
   if (window.visualViewport){ window.visualViewport.addEventListener('resize', relayout); window.visualViewport.addEventListener('scroll', relayout); }
@@ -660,3 +899,41 @@ const INDEX_HTML: &str = r##"<!doctype html>
 </script>
 </body>
 </html>"##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn list_entries_filters_orders_and_descends() {
+        let base = std::env::temp_dir().join("lume_remote_le_test");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src")).unwrap();
+        fs::create_dir_all(base.join("scripts")).unwrap();
+        fs::write(base.join("setup.txt"), b"x").unwrap();
+        fs::write(base.join("readme.md"), b"x").unwrap();
+        fs::write(base.join(".hidden"), b"x").unwrap();
+        fs::write(base.join("src").join("main.rs"), b"x").unwrap();
+        let cwd = base.to_string_lossy().to_string();
+
+        // prefix "s" → src, scripts (dirs first), then setup.txt; not readme.md
+        let items = list_entries(Some(&cwd), "s");
+        let names: Vec<&str> = items.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"src") && names.contains(&"scripts") && names.contains(&"setup.txt"));
+        assert!(!names.contains(&"readme.md"));
+        assert!(items[0].1 && items[1].1, "directories should sort first");
+
+        // hidden files only when the prefix starts with '.'
+        assert!(!list_entries(Some(&cwd), "").iter().any(|(n, _)| n == ".hidden"));
+        assert!(list_entries(Some(&cwd), ".").iter().any(|(n, _)| n == ".hidden"));
+
+        // trailing slash descends into the sub-directory
+        assert!(list_entries(Some(&cwd), "src/").iter().any(|(n, _)| n == "main.rs"));
+
+        // no cwd → empty
+        assert!(list_entries(None, "x").is_empty());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+}

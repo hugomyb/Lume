@@ -21,12 +21,27 @@ pub struct PtySession {
     cwd: Arc<Mutex<Option<String>>>,
     /// Raw terminal output, fanned out to remote-control subscribers.
     output_tx: broadcast::Sender<Vec<u8>>,
+    /// Recent raw output (capped ring) so a remote client that (re)connects can
+    /// reconstruct the current screen + scrollback instead of seeing a blank one.
+    replay: Arc<Mutex<Vec<u8>>>,
 }
 
+/// Cap on the per-session replay buffer (enough to rebuild the screen + recent
+/// scrollback on reattach).
+const MAX_REPLAY: usize = 256 * 1024;
+
 impl PtyManager {
-    /// Subscribe to a session's raw output stream (for remote control).
-    pub fn subscribe(&self, id: u64) -> Option<broadcast::Receiver<Vec<u8>>> {
-        self.sessions.lock().get(&id).map(|s| s.output_tx.subscribe())
+    /// Attach a remote client: snapshot the replay buffer AND subscribe to live
+    /// output under the replay lock, so the boundary is clean (no gap/dup). The
+    /// client replays the snapshot to reconstruct the current screen.
+    pub fn attach(&self, id: u64) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
+        let sessions = self.sessions.lock();
+        let s = sessions.get(&id)?;
+        let rb = s.replay.lock();
+        let snapshot = rb.clone();
+        let rx = s.output_tx.subscribe();
+        drop(rb);
+        Some((snapshot, rx))
     }
 
     /// Write raw bytes to a session. Returns false if the id is unknown.
@@ -174,6 +189,8 @@ fn spawn_impl(
     // here is dropped immediately; subscribers are created on demand.
     let (output_tx, _) = broadcast::channel::<Vec<u8>>(2048);
     let output_tx_reader = output_tx.clone();
+    let replay = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let replay_for_reader = replay.clone();
 
     pty_state.sessions.lock().insert(
         id,
@@ -182,6 +199,7 @@ fn spawn_impl(
             master: pair.master,
             cwd,
             output_tx,
+            replay,
         },
     );
 
@@ -265,15 +283,23 @@ fn spawn_impl(
                             append_capped(&mut output_buf, tail, MAX_CAPTURE);
                         }
 
-                        // Fan out raw bytes to any remote-control clients
-                        // (only clone when someone is actually listening).
-                        if output_tx_reader.receiver_count() > 0 {
-                            let _ = output_tx_reader.send(result.passthrough.clone());
-                        }
-
                         // Reads that were pure OSC metadata (e.g. prompt markers)
-                        // leave no passthrough — skip the empty IPC round-trip.
+                        // leave no passthrough — skip the work entirely.
                         if !result.passthrough.is_empty() {
+                            // Record into the capped replay buffer and fan out to
+                            // remote clients under the same lock, so a remote
+                            // attach gets a clean snapshot/live boundary.
+                            {
+                                let mut rb = replay_for_reader.lock();
+                                rb.extend_from_slice(&result.passthrough);
+                                let len = rb.len();
+                                if len > MAX_REPLAY {
+                                    rb.drain(..len - MAX_REPLAY);
+                                }
+                                if output_tx_reader.receiver_count() > 0 {
+                                    let _ = output_tx_reader.send(result.passthrough.clone());
+                                }
+                            }
                             let payload = PtyOutputEvent {
                                 id,
                                 data_b64: B64.encode(&result.passthrough),
