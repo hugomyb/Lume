@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Only run the latest commit per branch/PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libxdo-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      # --- Required checks ---
+      - name: Type-check (tsc)
+        run: npx tsc --noEmit
+
+      - name: Frontend build
+        run: npx vite build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      # --- Advisory (won't fail the build yet) ---
+      - name: rustfmt
+        working-directory: src-tauri
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        working-directory: src-tauri
+        continue-on-error: true
+        run: cargo clippy --all-targets -- -D warnings

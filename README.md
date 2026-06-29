@@ -76,6 +76,17 @@ npm run tauri dev      # run in dev
 npm run tauri build    # build bundles (target/release/bundle/)
 ```
 
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set
+up, build, run the checks, and open a pull request. By participating you agree to
+the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
+Do not open a public issue for security problems.
+
 ## License
 
 [MIT](LICENSE) © Hugo Mayonobe
