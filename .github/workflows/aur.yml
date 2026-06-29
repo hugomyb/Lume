@@ -27,7 +27,7 @@ jobs:
             echo "::notice::AUR secrets non configurés — étape ignorée."
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.guard.outputs.ok == 'true'
 
       - name: Prepare PKGBUILD for this release
