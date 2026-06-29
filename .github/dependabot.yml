@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Frontend (npm) — minor/patch only (grouped); majors are handled manually.
+  # Frontend (npm) — minor/patch only, grouped. Majors are handled manually.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -14,7 +14,7 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # Backend (Cargo) — minor/patch only (grouped); majors are handled manually.
+  # Backend (Cargo) — minor/patch only, grouped. Majors are handled manually.
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
     schedule:
@@ -28,9 +28,15 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # GitHub Actions (majors here are usually safe and worth keeping current).
+  # GitHub Actions — minor/patch only, grouped. Majors are handled manually.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     labels: ["dependencies", "ci"]
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
