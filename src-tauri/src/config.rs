@@ -12,6 +12,7 @@ pub struct Config {
     pub appearance: AppearanceConfig,
     pub shell: ShellConfig,
     pub notifications: NotificationsConfig,
+    pub ai: AiConfig,
     /// UI language code ("en", "fr", …). Defaults to English.
     #[serde(default = "default_language")]
     pub language: String,
@@ -22,6 +23,79 @@ pub struct Config {
 
 fn default_language() -> String {
     "en".to_string()
+}
+
+/// AI provider configuration. The assistant is driven by a local CLI (like
+/// `claude` today). `provider` selects which one; each known provider has a
+/// fixed invocation resolved in `ai.rs`, plus an optional API key injected into
+/// the child process environment. `custom` lets power users wire any CLI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AiConfig {
+    /// "claude" | "codex" | "custom" (CLI) | "openai" | "deepseek" | "api" (HTTP).
+    pub provider: String,
+    /// Optional model for Claude (e.g. "sonnet", "opus"); empty = provider default.
+    pub claude_model: String,
+    /// Optional model for Codex; empty = provider default.
+    pub codex_model: String,
+    /// API key for Codex, injected as `OPENAI_API_KEY` (optional — `codex
+    /// login` also works).
+    pub codex_api_key: String,
+    /// Custom provider: executable resolved via PATH.
+    pub custom_command: String,
+    /// Custom provider arguments; a literal `{prompt}` token is replaced by the
+    /// prompt (appended as a final arg if the token is absent).
+    pub custom_args: Vec<String>,
+    /// Optional API key for the custom provider.
+    pub custom_api_key: String,
+    /// Env var name that receives `custom_api_key` (e.g. "OPENAI_API_KEY").
+    pub custom_key_env: String,
+    // --- API (OpenAI-compatible) providers ---
+    pub openai_api_key: String,
+    pub openai_model: String,
+    pub deepseek_api_key: String,
+    pub deepseek_model: String,
+    /// Generic OpenAI-compatible endpoint (Ollama, Groq, OpenRouter, …).
+    pub api_base_url: String,
+    pub api_api_key: String,
+    pub api_model: String,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            provider: "claude".to_string(),
+            claude_model: String::new(),
+            codex_model: String::new(),
+            codex_api_key: String::new(),
+            custom_command: String::new(),
+            custom_args: vec!["{prompt}".to_string()],
+            custom_api_key: String::new(),
+            custom_key_env: String::new(),
+            openai_api_key: String::new(),
+            openai_model: String::new(),
+            deepseek_api_key: String::new(),
+            deepseek_model: String::new(),
+            api_base_url: String::new(),
+            api_api_key: String::new(),
+            api_model: String::new(),
+        }
+    }
+}
+
+impl AiConfig {
+    /// A copy with every secret blanked — used before exporting the config so
+    /// API keys never leak into a shared backup file.
+    pub fn without_secrets(&self) -> Self {
+        Self {
+            codex_api_key: String::new(),
+            custom_api_key: String::new(),
+            openai_api_key: String::new(),
+            deepseek_api_key: String::new(),
+            api_api_key: String::new(),
+            ..self.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,7 +270,10 @@ pub fn save_config(
 /// Export the given config to a file as pretty JSON (for backup / sharing).
 #[tauri::command]
 pub fn export_config(path: String, config: Config) -> Result<(), String> {
-    let body = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    // Never write API keys into a shared/backup file.
+    let mut safe = config;
+    safe.ai = safe.ai.without_secrets();
+    let body = serde_json::to_string_pretty(&safe).map_err(|e| e.to_string())?;
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
 

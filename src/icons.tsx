@@ -56,6 +56,16 @@ export function IconWorkflow(p: IconProps): JSX.Element {
   );
 }
 
+/** AI assistant (a sparkle). */
+export function IconSparkles(p: IconProps): JSX.Element {
+  return (
+    <Svg size={p.size}>
+      <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5 10.2 7.7 12 3z" />
+      <path d="M18.5 15l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
+    </Svg>
+  );
+}
+
 /** SSH / remote shell (a terminal prompt). */
 export function IconSsh(p: IconProps): JSX.Element {
   return (

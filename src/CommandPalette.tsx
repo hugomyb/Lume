@@ -16,6 +16,8 @@ type Props = {
   open: () => boolean;
   onClose: () => void;
   aiAvailable: () => boolean;
+  /** CLI command the active AI provider resolves to (for the "not found" hint). */
+  aiCommand?: () => string;
   ptyId: () => number | null;
   onInsert: (cmd: string) => void;
 };
@@ -170,7 +172,14 @@ export default function CommandPalette(props: Props) {
           </div>
 
           <Show when={!props.aiAvailable()}>
-            <div class="palette-warning" innerHTML={t("cmd.noCli")} />
+            <div
+              class="palette-warning"
+              innerHTML={
+                props.aiCommand?.()
+                  ? t("cmd.noCli", { cmd: props.aiCommand!() })
+                  : t("cmd.noProvider")
+              }
+            />
           </Show>
 
           <Show when={stage() === "streaming"}>

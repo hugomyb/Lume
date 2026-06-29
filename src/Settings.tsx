@@ -12,6 +12,7 @@ import {
   type Theme,
 } from "./config";
 import { customFamilies, importFontFile, listSystemFonts } from "./fonts";
+import { aiProbe, aiDefaultModel } from "./ai";
 import { THEME_PRESETS } from "./themes";
 import { getVersion } from "@tauri-apps/api/app";
 import { checkForUpdate, installUpdate, type Update } from "./updater";
@@ -21,6 +22,7 @@ import {
   IconInfo,
   IconKeyboard,
   IconSettings,
+  IconSparkles,
   IconSsh,
 } from "./icons";
 import {
@@ -68,6 +70,7 @@ type Section =
   | "appearance"
   | "shell"
   | "notifications"
+  | "ai"
   | "keys"
   | "general"
   | "about";
@@ -139,6 +142,47 @@ export default function Settings(props: Props) {
     props.setConfig("notifications", key, value);
     props.onChange();
   };
+  const setAi = <K extends keyof Config["ai"]>(
+    key: K,
+    value: Config["ai"][K]
+  ) => {
+    props.setConfig("ai", key, value);
+    props.onChange();
+  };
+  const isApiProvider = () =>
+    ["openai", "deepseek", "api"].includes(props.config.ai.provider);
+  // The CLI the selected provider resolves to (CLI providers only).
+  const aiCommand = () => {
+    const ai = props.config.ai;
+    if (isApiProvider()) return "";
+    return ai.provider === "codex"
+      ? "codex"
+      : ai.provider === "custom"
+      ? ai.customCommand.trim()
+      : "claude";
+  };
+  const [aiDetected] = createResource(aiCommand, (cmd) =>
+    cmd ? aiProbe(cmd) : Promise.resolve(null)
+  );
+  // API providers are "configured" once their key (+ url/model for generic) is set.
+  const apiConfigured = () => {
+    const a = props.config.ai;
+    if (a.provider === "openai") return a.openaiApiKey.trim().length > 0;
+    if (a.provider === "deepseek") return a.deepseekApiKey.trim().length > 0;
+    if (a.provider === "api")
+      return (
+        a.apiApiKey.trim().length > 0 &&
+        a.apiBaseUrl.trim().length > 0 &&
+        a.apiModel.trim().length > 0
+      );
+    return false;
+  };
+  // The provider's current default model — shown as the field placeholder so
+  // users see what an empty Model field will actually use (their Claude config).
+  const [defaultModel] = createResource(
+    () => props.config.ai.provider,
+    (p) => aiDefaultModel(p)
+  );
 
   // --- About / updates ---
   const [appVersion, setAppVersion] = createSignal("");
@@ -279,6 +323,14 @@ export default function Settings(props: Props) {
             >
               <IconBell size={15} />
               <span>{t("nav.notifications")}</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "ai" }}
+              onClick={() => setSection("ai")}
+            >
+              <IconSparkles size={15} />
+              <span>{t("nav.ai")}</span>
             </button>
             <button
               class="settings-nav"
@@ -580,6 +632,254 @@ export default function Settings(props: Props) {
               </div>
             </Show>
 
+            <Show when={section() === "ai"}>
+              <div class="settings-section">
+                <label class="settings-row">
+                  <span class="settings-label">{t("ai.provider")}</span>
+                  <select
+                    class="settings-input narrow"
+                    value={props.config.ai.provider}
+                    onChange={(e) => setAi("provider", e.currentTarget.value)}
+                  >
+                    <option value="claude">Claude (CLI)</option>
+                    <option value="codex">Codex (CLI)</option>
+                    <option value="openai">OpenAI (API)</option>
+                    <option value="deepseek">DeepSeek (API)</option>
+                    <option value="api">{t("ai.customApi")}</option>
+                    <option value="custom">{t("ai.custom")}</option>
+                  </select>
+                </label>
+
+                <div class="settings-row">
+                  <span class="settings-label">{t("ai.status")}</span>
+                  <Show
+                    when={isApiProvider()}
+                    fallback={
+                      <span
+                        class="settings-value"
+                        classList={{
+                          "ai-ok": aiDetected() === true,
+                          "ai-bad": aiDetected() === false,
+                        }}
+                      >
+                        {aiDetected() === undefined || aiDetected() === null
+                          ? "…"
+                          : aiDetected()
+                          ? t("ai.detected", { cmd: aiCommand() })
+                          : t("ai.notFound", { cmd: aiCommand() || "—" })}
+                      </span>
+                    }
+                  >
+                    <span
+                      class="settings-value"
+                      classList={{
+                        "ai-ok": apiConfigured(),
+                        "ai-bad": !apiConfigured(),
+                      }}
+                    >
+                      {apiConfigured() ? t("ai.configured") : t("ai.missingKey")}
+                    </span>
+                  </Show>
+                </div>
+
+                <Show when={props.config.ai.provider === "claude"}>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.model")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder={defaultModel() || "sonnet · opus"}
+                      value={props.config.ai.claudeModel}
+                      onInput={(e) => setAi("claudeModel", e.currentTarget.value)}
+                    />
+                  </label>
+                  <p class="settings-note" innerHTML={t("ai.claudeNote")} />
+                </Show>
+
+                <Show when={props.config.ai.provider === "codex"}>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.apiKey")}</span>
+                    <input
+                      class="settings-input"
+                      type="password"
+                      autocomplete="off"
+                      placeholder="OPENAI_API_KEY"
+                      value={props.config.ai.codexApiKey}
+                      onInput={(e) =>
+                        setAi("codexApiKey", e.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.model")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder={defaultModel() || t("ai.modelHint")}
+                      value={props.config.ai.codexModel}
+                      onInput={(e) => setAi("codexModel", e.currentTarget.value)}
+                    />
+                  </label>
+                  <p class="settings-note" innerHTML={t("ai.codexNote")} />
+                </Show>
+
+                <Show when={props.config.ai.provider === "openai"}>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.apiKey")}</span>
+                    <input
+                      class="settings-input"
+                      type="password"
+                      autocomplete="off"
+                      placeholder="sk-…"
+                      value={props.config.ai.openaiApiKey}
+                      onInput={(e) => setAi("openaiApiKey", e.currentTarget.value)}
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.model")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder={defaultModel() || "gpt-4o-mini"}
+                      value={props.config.ai.openaiModel}
+                      onInput={(e) => setAi("openaiModel", e.currentTarget.value)}
+                    />
+                  </label>
+                  <p class="settings-note" innerHTML={t("ai.openaiNote")} />
+                </Show>
+
+                <Show when={props.config.ai.provider === "deepseek"}>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.apiKey")}</span>
+                    <input
+                      class="settings-input"
+                      type="password"
+                      autocomplete="off"
+                      placeholder="sk-…"
+                      value={props.config.ai.deepseekApiKey}
+                      onInput={(e) =>
+                        setAi("deepseekApiKey", e.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.model")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder={defaultModel() || "deepseek-chat"}
+                      value={props.config.ai.deepseekModel}
+                      onInput={(e) =>
+                        setAi("deepseekModel", e.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <p class="settings-note" innerHTML={t("ai.deepseekNote")} />
+                </Show>
+
+                <Show when={props.config.ai.provider === "api"}>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.baseUrl")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder="https://api.example.com/v1"
+                      value={props.config.ai.apiBaseUrl}
+                      onInput={(e) => setAi("apiBaseUrl", e.currentTarget.value)}
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.apiKey")}</span>
+                    <input
+                      class="settings-input"
+                      type="password"
+                      autocomplete="off"
+                      value={props.config.ai.apiApiKey}
+                      onInput={(e) => setAi("apiApiKey", e.currentTarget.value)}
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.model")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder="llama3.1, mixtral, …"
+                      value={props.config.ai.apiModel}
+                      onInput={(e) => setAi("apiModel", e.currentTarget.value)}
+                    />
+                  </label>
+                  <p class="settings-note" innerHTML={t("ai.apiNote")} />
+                </Show>
+
+                <Show when={props.config.ai.provider === "custom"}>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.command")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder="my-llm-cli"
+                      value={props.config.ai.customCommand}
+                      onInput={(e) =>
+                        setAi("customCommand", e.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.args")}</span>
+                    <input
+                      class="settings-input"
+                      type="text"
+                      spellcheck={false}
+                      placeholder="-p {prompt}"
+                      value={props.config.ai.customArgs.join(" ")}
+                      onInput={(e) =>
+                        setAi(
+                          "customArgs",
+                          e.currentTarget.value.split(/\s+/).filter(Boolean)
+                        )
+                      }
+                    />
+                  </label>
+                  <label class="settings-row">
+                    <span class="settings-label">{t("ai.keyEnv")}</span>
+                    <input
+                      class="settings-input narrow"
+                      type="text"
+                      spellcheck={false}
+                      placeholder="OPENAI_API_KEY"
+                      value={props.config.ai.customKeyEnv}
+                      onInput={(e) =>
+                        setAi("customKeyEnv", e.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <Show when={props.config.ai.customKeyEnv.trim()}>
+                    <label class="settings-row">
+                      <span class="settings-label">{t("ai.apiKey")}</span>
+                      <input
+                        class="settings-input"
+                        type="password"
+                        autocomplete="off"
+                        value={props.config.ai.customApiKey}
+                        onInput={(e) =>
+                          setAi("customApiKey", e.currentTarget.value)
+                        }
+                      />
+                    </label>
+                  </Show>
+                  <p class="settings-note" innerHTML={t("ai.customNote")} />
+                </Show>
+
+                <p class="settings-note" innerHTML={t("ai.keysNote")} />
+              </div>
+            </Show>
 
             <Show when={section() === "keys"}>
               <div class="settings-section">

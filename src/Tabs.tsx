@@ -268,7 +268,12 @@ export default function Tabs() {
   const [recordingAction, setRecordingAction] = createSignal<ActionId | null>(
     null
   );
-  const [ai] = createResource<AiStatus>(aiStatus);
+  const [ai, { refetch: refetchAi }] = createResource<AiStatus>(aiStatus);
+  // Human-facing name of the active AI provider (for the blocks panel / labels).
+  const aiProviderLabel = () => {
+    const p = ai()?.provider;
+    return p === "codex" ? "Codex" : p === "custom" ? "AI" : "Claude";
+  };
 
   const restored = loadSession();
   const initialTabs: TabState[] = restored?.tabs ?? [makeEmptyTab()];
@@ -747,6 +752,13 @@ export default function Tabs() {
 
   // Apply the UI language from config (reactive — switching re-renders).
   createEffect(() => setLocale(config.language || "en"));
+  // Re-check AI availability when the active provider changes (claude → codex →
+  // custom), so the palette/blocks enable/disable for the newly selected CLI.
+  createEffect(() => {
+    config.ai?.provider;
+    config.ai?.customCommand;
+    refetchAi();
+  });
 
   // Keep remote-control clients bridged to the active pane's pty.
   createEffect(() => {
@@ -2561,6 +2573,7 @@ export default function Tabs() {
               open={paletteOpen}
               onClose={() => setPaletteOpen(false)}
               aiAvailable={() => ai()?.available ?? false}
+              aiCommand={() => ai()?.command ?? ""}
               ptyId={() => activeLeaf()?.ptyId ?? null}
               onInsert={async (cmd) => {
                 await insertIntoActiveTerminal(cmd);
@@ -2617,6 +2630,7 @@ export default function Tabs() {
                 if (andInsert) insertSelectedBlock();
               }}
               aiAvailable={() => ai()?.available ?? false}
+              aiProvider={aiProviderLabel}
               onExplain={(blockId) => {
                 const t = activeTab();
                 const l = activeLeaf();

@@ -58,6 +58,8 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             ai::ai_status,
+            ai::ai_probe,
+            ai::ai_default_model,
             ai::ai_explain_block,
             ai::ai_generate_command,
             ai::ai_chat,

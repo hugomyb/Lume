@@ -17,6 +17,7 @@ import { t } from "./i18n";
 
 function BlockAiPanel(props: {
   ai: Accessor<AiState>;
+  provider: string;
   onDismiss: () => void;
   onFollowUp: (q: string) => void;
 }) {
@@ -50,10 +51,10 @@ function BlockAiPanel(props: {
       <div class="block-ai-header">
         <span class="block-ai-label">
           {ai().status === "streaming"
-            ? t("blocks.aiThinking")
+            ? t("blocks.aiThinking", { provider: props.provider })
             : ai().status === "error"
             ? t("blocks.aiError")
-            : "Claude"}
+            : props.provider}
         </span>
         <button class="block-ai-dismiss" title={t("blocks.aiClose")} onClick={props.onDismiss}>
           ×
@@ -128,6 +129,8 @@ type Props = {
   onSearchClose: () => void;
   onSearchEnterNav: (andInsert: boolean) => void;
   aiAvailable: () => boolean;
+  /** Display name of the active AI provider (Claude / Codex / AI). */
+  aiProvider: () => string;
   onExplain: (blockId: number) => void;
   onCancelAi: (blockId: number) => void;
   onDismissAi: (blockId: number) => void;
@@ -379,12 +382,13 @@ export default function BlocksPanel(props: Props) {
   };
 
   const aiButtonTitle = (b: Block) => {
-    if (!props.aiAvailable()) return t("blocks.aiNoCli");
+    const provider = props.aiProvider();
+    if (!props.aiAvailable()) return t("blocks.aiNoCli", { provider });
     if (b.status !== "done") return t("blocks.aiBlockNotDone");
     if (!b.command) return t("blocks.aiNoCommand");
     if (b.ai?.status === "streaming") return t("blocks.cancel");
-    if (b.exitCode !== 0 && b.ai === null) return t("blocks.aiFixError");
-    return t("blocks.aiExplainBlock");
+    if (b.exitCode !== 0 && b.ai === null) return t("blocks.aiFixError", { provider });
+    return t("blocks.aiExplainBlock", { provider });
   };
 
   const isErrorSuggestion = (b: Block) =>
@@ -528,6 +532,7 @@ export default function BlocksPanel(props: Props) {
                   {(ai) => (
                     <BlockAiPanel
                       ai={ai}
+                      provider={props.aiProvider()}
                       onDismiss={() => props.onDismissAi(b.id)}
                       onFollowUp={(q) => props.onFollowUp(b.id, q)}
                     />
@@ -598,7 +603,7 @@ export default function BlocksPanel(props: Props) {
                     closeContextMenu();
                   }}
                 >
-                  {t("blocks.explainClaude")}
+                  {t("blocks.explainClaude", { provider: props.aiProvider() })}
                 </button>
                 <Show when={b.ai !== null}>
                   <button
@@ -608,7 +613,7 @@ export default function BlocksPanel(props: Props) {
                       closeContextMenu();
                     }}
                   >
-                    {t("blocks.closeAiPanel")}
+                    {t("blocks.closeAiPanel", { provider: props.aiProvider() })}
                   </button>
                 </Show>
                 <div class="ctx-sep" />

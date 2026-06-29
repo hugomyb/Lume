@@ -2772,6 +2772,12 @@ select.settings-input optgroup {
   font-size: 12.5px;
   font-family: ui-monospace, monospace;
 }
+.settings-value.ai-ok {
+  color: var(--green, #56d364);
+}
+.settings-value.ai-bad {
+  color: var(--red, #ff5c8d);
+}
 .settings-update-box {
   display: flex;
   flex-direction: column;

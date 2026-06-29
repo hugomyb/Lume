@@ -49,10 +49,35 @@ export type NotificationsConfig = {
   sound: boolean;
 };
 
+export type AiConfig = {
+  /** Active provider id: "claude" | "codex" | "custom". */
+  provider: string;
+  /** Optional model override for Claude (empty = default). */
+  claudeModel: string;
+  /** Optional model override for Codex (empty = default). */
+  codexModel: string;
+  /** API key for Codex, injected as OPENAI_API_KEY (optional). */
+  codexApiKey: string;
+  /** Custom CLI provider. */
+  customCommand: string;
+  customArgs: string[];
+  customApiKey: string;
+  customKeyEnv: string;
+  /** API (OpenAI-compatible) providers. */
+  openaiApiKey: string;
+  openaiModel: string;
+  deepseekApiKey: string;
+  deepseekModel: string;
+  apiBaseUrl: string;
+  apiApiKey: string;
+  apiModel: string;
+};
+
 export type Config = {
   appearance: Appearance;
   shell: ShellConfig;
   notifications: NotificationsConfig;
+  ai: AiConfig;
   /** UI language code ("en", "fr", …). */
   language: string;
   /** Action id → key combo overrides for remappable shortcuts. */
@@ -103,6 +128,23 @@ export const DEFAULT_CONFIG: Config = {
   },
   shell: { program: null, args: [] },
   notifications: { enabled: true, minDurationSec: 10, sound: true },
+  ai: {
+    provider: "claude",
+    claudeModel: "",
+    codexModel: "",
+    codexApiKey: "",
+    customCommand: "",
+    customArgs: ["{prompt}"],
+    customApiKey: "",
+    customKeyEnv: "",
+    openaiApiKey: "",
+    openaiModel: "",
+    deepseekApiKey: "",
+    deepseekModel: "",
+    apiBaseUrl: "",
+    apiApiKey: "",
+    apiModel: "",
+  },
   language: "en",
   keybindings: {},
 };

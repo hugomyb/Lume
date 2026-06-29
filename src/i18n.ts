@@ -44,6 +44,7 @@ const en: Dict = {
   "nav.shell": "Shell",
   "nav.notifications": "Notifications",
   "nav.remote": "Remote",
+  "nav.ai": "AI",
   "nav.keys": "Shortcuts",
   "nav.general": "General",
   "nav.about": "About",
@@ -99,6 +100,37 @@ const en: Dict = {
   "general.exportFailed": "Export failed",
   "general.imported": "Settings imported ✓",
   "general.importFailed": "Invalid file",
+
+  // --- AI provider ---
+  "ai.provider": "Provider",
+  "ai.custom": "Custom (CLI)",
+  "ai.model": "Model",
+  "ai.modelHint": "default",
+  "ai.status": "Status",
+  "ai.detected": "✓ {cmd} detected",
+  "ai.notFound": "✗ {cmd} not found in PATH",
+  "ai.apiKey": "API key",
+  "ai.command": "Command",
+  "ai.args": "Arguments",
+  "ai.keyEnv": "API key env var",
+  "ai.claudeNote":
+    "Uses the <code>claude</code> CLI (Claude Code). Run <code>claude login</code> once to authenticate.",
+  "ai.codexNote":
+    "Uses the <code>codex</code> CLI (OpenAI). Authenticate with <code>codex login</code>, or set an API key above (injected as <code>OPENAI_API_KEY</code>).",
+  "ai.customNote":
+    "Any CLI that takes a prompt and prints the answer to stdout. Put <code>{prompt}</code> in the arguments where the prompt should go.",
+  "ai.keysNote":
+    "API keys are stored locally in <code>~/.config/lume/config.toml</code> and are excluded from the settings export.",
+  "ai.customApi": "OpenAI-compatible API",
+  "ai.baseUrl": "Base URL",
+  "ai.configured": "✓ configured",
+  "ai.missingKey": "✗ API key required",
+  "ai.openaiNote":
+    "Uses the OpenAI API. Create a key at <code>platform.openai.com</code>.",
+  "ai.deepseekNote":
+    "Uses the DeepSeek API (OpenAI-compatible). Key at <code>platform.deepseek.com</code>.",
+  "ai.apiNote":
+    "Any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter…). Set the base URL, key and model.",
 
   // --- About ---
   "about.version": "Version",
@@ -231,7 +263,9 @@ const en: Dict = {
   "cmd.placeholder": "Generate a command for…",
   "cmd.escCancel": "Esc to cancel",
   "cmd.noCli":
-    "Claude CLI not found. Run <code>claude login</code> in a terminal then restart Lume.",
+    "<code>{cmd}</code> not found in PATH — configure a provider in Settings › AI.",
+  "cmd.noProvider":
+    "No AI provider configured — set one up in Settings › AI.",
   "cmd.cancel": "Cancel",
   "cmd.insertHint": "<kbd>Enter</kbd> to insert into the terminal",
   "cmd.generateHint": "<kbd>Enter</kbd> to generate",
@@ -261,7 +295,7 @@ const en: Dict = {
     "<kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> connect (new tab)",
 
   // --- Blocks panel (extended) ---
-  "blocks.aiThinking": "Claude is thinking…",
+  "blocks.aiThinking": "{provider} is thinking…",
   "blocks.aiError": "Error",
   "blocks.aiClose": "Close",
   "blocks.followupPlaceholder": "Follow-up question…",
@@ -286,7 +320,7 @@ const en: Dict = {
   "blocks.exitErr": "exit ≠ 0",
   "blocks.exitRunning": "running",
   "blocks.helpKeys":
-    'Click → scroll to the prompt in the terminal.<br/>Right-click → copy, insert, explain.<br/><kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> → navigate, <kbd>↩</kbd> to insert into the terminal.<br/><span style="color: var(--accent)">✨</span> → Claude explanation.',
+    'Click → scroll to the prompt in the terminal.<br/>Right-click → copy, insert, explain.<br/><kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> → navigate, <kbd>↩</kbd> to insert into the terminal.<br/><span style="color: var(--accent)">✨</span> → AI explanation.',
   "blocks.resize": "Drag to resize",
   "blocks.filterPlaceholder": "Filter blocks…",
   "blocks.searchClose": "Close (Esc)",
@@ -298,16 +332,16 @@ const en: Dict = {
   "blocks.outputCopied": "Output copied ✓",
   "blocks.commandCopied": "Command copied ✓",
   "blocks.outputCaptured": "Output captured — Shift+Click to copy it",
-  "blocks.aiNoCli": "Claude CLI not found (claude login)",
+  "blocks.aiNoCli": "{provider} CLI not found in PATH",
   "blocks.aiBlockNotDone": "The block must be finished",
   "blocks.aiNoCommand": "No command to explain",
   "blocks.cancel": "Cancel",
-  "blocks.aiFixError": "Fix this error with Claude",
-  "blocks.aiExplainBlock": "Explain this block with Claude",
+  "blocks.aiFixError": "Fix this error with {provider}",
+  "blocks.aiExplainBlock": "Explain this block with {provider}",
   "blocks.insertTerminal": "Insert into the terminal",
   "blocks.gotoCommand": "Go to the command in the terminal",
-  "blocks.explainClaude": "✨ Explain with Claude",
-  "blocks.closeAiPanel": "Close the Claude panel",
+  "blocks.explainClaude": "✨ Explain with {provider}",
+  "blocks.closeAiPanel": "Close the {provider} panel",
   "blocks.removeBlock": "Remove this block",
 
   // --- Keybindings (configurable actions) ---
@@ -359,6 +393,7 @@ const fr: Dict = {
   "nav.shell": "Shell",
   "nav.notifications": "Notifications",
   "nav.remote": "Remote",
+  "nav.ai": "IA",
   "nav.keys": "Raccourcis",
   "nav.general": "Général",
   "nav.about": "À propos",
@@ -409,6 +444,37 @@ const fr: Dict = {
   "general.exportFailed": "Échec de l'export",
   "general.imported": "Réglages importés ✓",
   "general.importFailed": "Fichier invalide",
+
+  // --- AI provider ---
+  "ai.provider": "Fournisseur",
+  "ai.custom": "Personnalisé (CLI)",
+  "ai.model": "Modèle",
+  "ai.modelHint": "par défaut",
+  "ai.status": "État",
+  "ai.detected": "✓ {cmd} détecté",
+  "ai.notFound": "✗ {cmd} introuvable dans le PATH",
+  "ai.apiKey": "Clé API",
+  "ai.command": "Commande",
+  "ai.args": "Arguments",
+  "ai.keyEnv": "Variable d'env de la clé",
+  "ai.claudeNote":
+    "Utilise le CLI <code>claude</code> (Claude Code). Lance <code>claude login</code> une fois pour t'authentifier.",
+  "ai.codexNote":
+    "Utilise le CLI <code>codex</code> (OpenAI). Authentifie-toi avec <code>codex login</code>, ou renseigne une clé API ci-dessus (injectée comme <code>OPENAI_API_KEY</code>).",
+  "ai.customNote":
+    "N'importe quel CLI qui prend un prompt et écrit la réponse sur stdout. Place <code>{prompt}</code> dans les arguments à l'emplacement du prompt.",
+  "ai.keysNote":
+    "Les clés API sont stockées localement dans <code>~/.config/lume/config.toml</code> et exclues de l'export des réglages.",
+  "ai.customApi": "API compatible OpenAI",
+  "ai.baseUrl": "URL de base",
+  "ai.configured": "✓ configuré",
+  "ai.missingKey": "✗ clé API requise",
+  "ai.openaiNote":
+    "Utilise l'API OpenAI. Crée une clé sur <code>platform.openai.com</code>.",
+  "ai.deepseekNote":
+    "Utilise l'API DeepSeek (compatible OpenAI). Clé sur <code>platform.deepseek.com</code>.",
+  "ai.apiNote":
+    "N'importe quel endpoint compatible OpenAI (Ollama, Groq, OpenRouter…). Renseigne l'URL de base, la clé et le modèle.",
 
   "about.version": "Version",
   "about.updates": "Mises à jour",
@@ -531,7 +597,9 @@ const fr: Dict = {
   "cmd.placeholder": "Génère une commande pour…",
   "cmd.escCancel": "Esc pour annuler",
   "cmd.noCli":
-    "Claude CLI introuvable. Lance <code>claude login</code> dans un terminal puis relance Lume.",
+    "<code>{cmd}</code> introuvable dans le PATH — configure un fournisseur dans Réglages › IA.",
+  "cmd.noProvider":
+    "Aucun fournisseur IA configuré — configures-en un dans Réglages › IA.",
   "cmd.cancel": "Annuler",
   "cmd.insertHint": "<kbd>Enter</kbd> pour insérer dans le terminal",
   "cmd.generateHint": "<kbd>Enter</kbd> pour générer",
@@ -561,7 +629,7 @@ const fr: Dict = {
     "<kbd>↑</kbd><kbd>↓</kbd> naviguer · <kbd>Enter</kbd> se connecter (nouvel onglet)",
 
   // --- Blocks panel (extended) ---
-  "blocks.aiThinking": "Claude réfléchit…",
+  "blocks.aiThinking": "{provider} réfléchit…",
   "blocks.aiError": "Erreur",
   "blocks.aiClose": "Fermer",
   "blocks.followupPlaceholder": "Question de suivi…",
@@ -587,7 +655,7 @@ const fr: Dict = {
   "blocks.exitErr": "exit ≠ 0",
   "blocks.exitRunning": "en cours",
   "blocks.helpKeys":
-    'Click → scroll au prompt dans le terminal.<br/>Right-click → copier, insérer, expliquer.<br/><kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> → naviguer, <kbd>↩</kbd> pour insérer dans le terminal.<br/><span style="color: var(--accent)">✨</span> → explication Claude.',
+    'Click → scroll au prompt dans le terminal.<br/>Right-click → copier, insérer, expliquer.<br/><kbd>Ctrl</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> → naviguer, <kbd>↩</kbd> pour insérer dans le terminal.<br/><span style="color: var(--accent)">✨</span> → explication IA.',
   "blocks.resize": "Glisser pour redimensionner",
   "blocks.filterPlaceholder": "Filtrer les blocs…",
   "blocks.searchClose": "Fermer (Échap)",
@@ -599,16 +667,16 @@ const fr: Dict = {
   "blocks.outputCopied": "Sortie copiée ✓",
   "blocks.commandCopied": "Commande copiée ✓",
   "blocks.outputCaptured": "Sortie capturée — Shift+Click pour la copier",
-  "blocks.aiNoCli": "Claude CLI introuvable (claude login)",
+  "blocks.aiNoCli": "CLI {provider} introuvable dans le PATH",
   "blocks.aiBlockNotDone": "Le bloc doit être terminé",
   "blocks.aiNoCommand": "Pas de commande à expliquer",
   "blocks.cancel": "Annuler",
-  "blocks.aiFixError": "Fixer cette erreur avec Claude",
-  "blocks.aiExplainBlock": "Explique ce bloc avec Claude",
+  "blocks.aiFixError": "Corriger cette erreur avec {provider}",
+  "blocks.aiExplainBlock": "Expliquer ce bloc avec {provider}",
   "blocks.insertTerminal": "Insérer dans le terminal",
   "blocks.gotoCommand": "Aller à la commande dans le terminal",
-  "blocks.explainClaude": "✨ Explique avec Claude",
-  "blocks.closeAiPanel": "Fermer le panneau Claude",
+  "blocks.explainClaude": "✨ Expliquer avec {provider}",
+  "blocks.closeAiPanel": "Fermer le panneau {provider}",
   "blocks.removeBlock": "Supprimer ce bloc",
 
   // --- Keybindings (configurable actions) ---
