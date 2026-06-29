@@ -66,6 +66,9 @@ node -e '
 ' "$NEW"
 # Cargo.toml: only the first `version = "..."` (the [package] one).
 sed -i -E "0,/^version = \"[0-9][^\"]*\"/s//version = \"$NEW\"/" src-tauri/Cargo.toml
+# Keep Cargo.lock's package version in sync so CI's `cargo --locked` stays green.
+( cd src-tauri && cargo update --offline -p lume --precise "$NEW" >/dev/null 2>&1 \
+    || cargo generate-lockfile >/dev/null 2>&1 || true )
 
 # --- commit, tag, push ---
 git add -A
