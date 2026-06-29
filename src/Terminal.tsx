@@ -220,6 +220,11 @@ export default function Terminal(props: TerminalProps) {
   let currentCwd = "";
   // Input we last dismissed with Esc; suppresses reopening until it changes.
   let dismissedInput: string | null = null;
+  // True once the user types a printable char at the current prompt. Line
+  // rewrites that aren't typing (history recall via ↑/↓, shell echo, output)
+  // may refresh an already-open popup but must never pop it open on their own —
+  // otherwise recalling a completable command steals the arrow keys.
+  let typedSincePrompt = false;
   // Monotonic counter to discard stale async path-completion responses.
   let acReqSeq = 0;
   let acRaf = 0;
@@ -410,6 +415,10 @@ export default function Terminal(props: TerminalProps) {
         closeAutocomplete();
         return;
       }
+      // Only a genuine keystroke may OPEN the popup. A closed popup stays closed
+      // when the line changes for any other reason (history recall, output) so
+      // arrow-key history navigation isn't hijacked.
+      if (!acOpen() && !typedSincePrompt) return;
       const input = r.text;
       if (dismissedInput !== null) {
         if (input === dismissedInput) return;
@@ -489,6 +498,7 @@ export default function Terminal(props: TerminalProps) {
       if (kind === "A") {
         anchorRow = null;
         awaitingFirstInput = true;
+        typedSincePrompt = false;
         closeAutocomplete();
         const buf = term.buffer.active;
         // Cursor mid-line? Most shells will emit a CR/LF before drawing the
@@ -700,6 +710,15 @@ export default function Terminal(props: TerminalProps) {
         awaitingFirstInput = false;
         dismissedInput = null;
         acLog("anchor set on first input", { anchorRow, anchorCol });
+      }
+      // Distinguish real typing from control/navigation sequences so only a
+      // keystroke can open the completion popup. Enter submits → reset for the
+      // next prompt; printable insert → mark as typed.
+      const code0 = data.charCodeAt(0);
+      if (data === "\r" || data === "\n") {
+        typedSincePrompt = false;
+      } else if (!data.startsWith("\x1b") && code0 >= 0x20 && code0 !== 0x7f) {
+        typedSincePrompt = true;
       }
       if (ptyId === undefined) return;
       const bytes = encoder.encode(data);
