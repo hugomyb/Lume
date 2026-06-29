@@ -5,6 +5,7 @@ use parking_lot::Mutex;
 mod ai;
 mod complete;
 mod config;
+mod env_fix;
 mod fonts;
 mod notify;
 mod osc;

@@ -326,6 +326,7 @@ export const ru: Dict = {
   "ai.status": "Статус",
   "ai.detected": "✓ {cmd} обнаружен",
   "ai.notFound": "✗ {cmd} не найден в PATH",
+  "ai.recheck": "Перепроверить",
   "ai.apiKey": "Ключ API",
   "ai.command": "Команда",
   "ai.args": "Аргументы",

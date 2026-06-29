@@ -326,6 +326,7 @@ export const nl: Dict = {
   "ai.status": "Status",
   "ai.detected": "✓ {cmd} gedetecteerd",
   "ai.notFound": "✗ {cmd} niet gevonden in PATH",
+  "ai.recheck": "Opnieuw controleren",
   "ai.apiKey": "API-sleutel",
   "ai.command": "Opdracht",
   "ai.args": "Argumenten",

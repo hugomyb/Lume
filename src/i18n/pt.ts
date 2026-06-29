@@ -327,6 +327,7 @@ export const pt: Dict = {
   "ai.status": "Estado",
   "ai.detected": "✓ {cmd} detectado",
   "ai.notFound": "✗ {cmd} não encontrado no PATH",
+  "ai.recheck": "Verificar de novo",
   "ai.apiKey": "Chave de API",
   "ai.command": "Comando",
   "ai.args": "Argumentos",

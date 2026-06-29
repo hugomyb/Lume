@@ -223,29 +223,35 @@ fn resolve_provider(cfg: &AiConfig) -> ResolvedProvider {
     }
 }
 
-/// Resolve a command name to its absolute path via the shell's `command -v`.
-/// The command is passed as `$1` (never interpolated) so it can't inject shell.
+/// Resolve a command to an absolute executable path, searching the user's
+/// *real* PATH (the login+interactive shell's, recovered in `env_fix`) — a
+/// GUI-launched app's inherited PATH usually lacks npm/nvm/`~/.local/bin`.
 fn which_command(cmd: &str) -> Option<String> {
-    if cmd.trim().is_empty() {
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
         return None;
     }
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("command -v \"$1\"")
-        .arg("sh") // $0
-        .arg(cmd) // $1
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    if cmd.contains('/') {
+        let p = std::path::Path::new(cmd);
+        return is_executable(p).then(|| p.display().to_string());
     }
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
+    for dir in crate::env_fix::user_path().split(':') {
+        if dir.is_empty() {
+            continue;
+        }
+        let p = std::path::Path::new(dir).join(cmd);
+        if is_executable(&p) {
+            return Some(p.display().to_string());
+        }
     }
+    None
+}
+
+fn is_executable(p: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 #[derive(Serialize, Clone)]
@@ -499,6 +505,10 @@ fn spawn_request(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Clean the AppImage pollution and hand the CLI the user's real PATH so it
+    // can find its own runtime (node, etc.), mirroring a terminal launch.
+    crate::env_fix::sanitize(&mut cmd);
+    cmd.env("PATH", crate::env_fix::user_path());
     if let Some(env_var) = &provider.key_env {
         if !provider.api_key.trim().is_empty() {
             cmd.env(env_var, &provider.api_key);

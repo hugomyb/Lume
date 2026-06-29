@@ -2778,6 +2778,35 @@ select.settings-input optgroup {
 .settings-value.ai-bad {
   color: var(--red, #ff5c8d);
 }
+.ai-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ai-recheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.ai-recheck:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+.ai-recheck.spinning {
+  animation: lume-spin 0.7s linear infinite;
+  color: var(--accent);
+}
+@keyframes lume-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .settings-update-box {
   display: flex;
   flex-direction: column;

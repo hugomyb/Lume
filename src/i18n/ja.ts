@@ -326,6 +326,7 @@ export const ja: Dict = {
   "ai.status": "ステータス",
   "ai.detected": "✓ {cmd} を検出しました",
   "ai.notFound": "✗ {cmd} が PATH に見つかりません",
+  "ai.recheck": "再チェック",
   "ai.apiKey": "API キー",
   "ai.command": "コマンド",
   "ai.args": "引数",

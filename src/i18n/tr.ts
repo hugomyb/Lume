@@ -326,6 +326,7 @@ export const tr: Dict = {
   "ai.status": "Durum",
   "ai.detected": "✓ {cmd} algılandı",
   "ai.notFound": "✗ {cmd} PATH içinde bulunamadı",
+  "ai.recheck": "Tekrar denetle",
   "ai.apiKey": "API anahtarı",
   "ai.command": "Komut",
   "ai.args": "Argümanlar",

@@ -155,6 +155,9 @@ fn spawn_impl(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("LUME_TERM", "1");
+    // Strip AppImage env pollution (PYTHONHOME/PYTHONPATH, mount paths) so tools
+    // and hooks run inside the terminal aren't broken by the bundle.
+    crate::env_fix::sanitize_pty(&mut cmd);
 
     let mut child = pair.slave.spawn_command(cmd).context("spawn shell")?;
     drop(pair.slave);

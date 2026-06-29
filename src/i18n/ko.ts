@@ -326,6 +326,7 @@ export const ko: Dict = {
   "ai.status": "상태",
   "ai.detected": "✓ {cmd} 감지됨",
   "ai.notFound": "✗ PATH에서 {cmd}를 찾을 수 없음",
+  "ai.recheck": "다시 확인",
   "ai.apiKey": "API 키",
   "ai.command": "명령",
   "ai.args": "인수",

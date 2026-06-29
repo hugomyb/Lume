@@ -326,6 +326,7 @@ export const zh: Dict = {
   "ai.status": "状态",
   "ai.detected": "✓ 已检测到 {cmd}",
   "ai.notFound": "✗ 在 PATH 中未找到 {cmd}",
+  "ai.recheck": "重新检测",
   "ai.apiKey": "API 密钥",
   "ai.command": "命令",
   "ai.args": "参数",

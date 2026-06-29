@@ -21,6 +21,7 @@ import {
   IconBell,
   IconInfo,
   IconKeyboard,
+  IconRefresh,
   IconSettings,
   IconSparkles,
   IconSsh,
@@ -161,7 +162,7 @@ export default function Settings(props: Props) {
       ? ai.customCommand.trim()
       : "claude";
   };
-  const [aiDetected] = createResource(aiCommand, (cmd) =>
+  const [aiDetected, { refetch: recheckAi }] = createResource(aiCommand, (cmd) =>
     cmd ? aiProbe(cmd) : Promise.resolve(null)
   );
   // API providers are "configured" once their key (+ url/model for generic) is set.
@@ -655,18 +656,28 @@ export default function Settings(props: Props) {
                   <Show
                     when={isApiProvider()}
                     fallback={
-                      <span
-                        class="settings-value"
-                        classList={{
-                          "ai-ok": aiDetected() === true,
-                          "ai-bad": aiDetected() === false,
-                        }}
-                      >
-                        {aiDetected() === undefined || aiDetected() === null
-                          ? "…"
-                          : aiDetected()
-                          ? t("ai.detected", { cmd: aiCommand() })
-                          : t("ai.notFound", { cmd: aiCommand() || "—" })}
+                      <span class="ai-status-line">
+                        <span
+                          class="settings-value"
+                          classList={{
+                            "ai-ok": aiDetected() === true,
+                            "ai-bad": aiDetected() === false,
+                          }}
+                        >
+                          {aiDetected() === undefined || aiDetected() === null
+                            ? "…"
+                            : aiDetected()
+                            ? t("ai.detected", { cmd: aiCommand() })
+                            : t("ai.notFound", { cmd: aiCommand() || "—" })}
+                        </span>
+                        <button
+                          class="ai-recheck"
+                          classList={{ spinning: aiDetected.loading }}
+                          title={t("ai.recheck")}
+                          onClick={() => recheckAi()}
+                        >
+                          <IconRefresh size={13} />
+                        </button>
                       </span>
                     }
                   >
