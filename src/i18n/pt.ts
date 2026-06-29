@@ -29,6 +29,7 @@ export const pt: Dict = {
   "cursor.underline": "Sublinhado",
   "appearance.scrollback": "Histórico de rolagem (linhas)",
   "appearance.theme": "Tema",
+  "appearance.customTheme": "Personalizado",
   "appearance.ansi": "Cores ANSI (16)",
   "appearance.reset": "Redefinir aparência",
 
@@ -126,12 +127,20 @@ export const pt: Dict = {
   "ft.unknownDir": "Diretório desconhecido",
   "ft.denied": "acesso negado",
   "ft.empty": "vazio",
+  "ft.cmdNote":
+    "Os comandos do menu de contexto são executados no terminal ativo. <code>{path}</code> é substituído pelo caminho do item.",
+  "ft.dirList": "Listar pasta",
+  "ft.dirOpen": "Abrir pasta no editor",
+  "ft.fileView": "Ver arquivo",
+  "ft.fileEdit": "Editar arquivo",
+  "ft.fileOpen": "Abrir arquivo no editor",
+  "ft.resetCmds": "Redefinir comandos",
   "ftctx.cd": "Abrir pasta",
-  "ftctx.ls": "Listar (ls -la)",
+  "ftctx.ls": "Listar",
   "ftctx.editor": "Abrir no editor",
-  "ftctx.cat": "Ver (cat)",
-  "ftctx.nano": "Editar (nano)",
-  "ftctx.openEditor": "Abrir ($EDITOR)",
+  "ftctx.cat": "Ver",
+  "ftctx.nano": "Editar",
+  "ftctx.openEditor": "Abrir no editor",
   "ftctx.copyPath": "Copiar caminho",
   "ftctx.insertPath": "Inserir caminho",
 
@@ -320,6 +329,7 @@ export const pt: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "IA",
+  "nav.fileTree": "Árvore de arquivos",
   "ai.provider": "Provedor",
   "ai.custom": "Personalizado (CLI)",
   "ai.model": "Modelo",

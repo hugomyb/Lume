@@ -29,6 +29,7 @@ export const es: Dict = {
   "cursor.underline": "Subrayado",
   "appearance.scrollback": "Historial (líneas)",
   "appearance.theme": "Tema",
+  "appearance.customTheme": "Personalizado",
   "appearance.ansi": "Colores ANSI (16)",
   "appearance.reset": "Restablecer apariencia",
 
@@ -126,12 +127,20 @@ export const es: Dict = {
   "ft.unknownDir": "Carpeta desconocida",
   "ft.denied": "acceso denegado",
   "ft.empty": "vacío",
+  "ft.cmdNote":
+    "Los comandos del menú contextual se ejecutan en la terminal activa. <code>{path}</code> se reemplaza por la ruta de la entrada.",
+  "ft.dirList": "Listar carpeta",
+  "ft.dirOpen": "Abrir carpeta en el editor",
+  "ft.fileView": "Ver archivo",
+  "ft.fileEdit": "Editar archivo",
+  "ft.fileOpen": "Abrir archivo en el editor",
+  "ft.resetCmds": "Restablecer comandos",
   "ftctx.cd": "Abrir carpeta",
-  "ftctx.ls": "Listar (ls -la)",
+  "ftctx.ls": "Listar",
   "ftctx.editor": "Abrir en el editor",
-  "ftctx.cat": "Ver (cat)",
-  "ftctx.nano": "Editar (nano)",
-  "ftctx.openEditor": "Abrir ($EDITOR)",
+  "ftctx.cat": "Ver",
+  "ftctx.nano": "Editar",
+  "ftctx.openEditor": "Abrir en el editor",
   "ftctx.copyPath": "Copiar ruta",
   "ftctx.insertPath": "Insertar ruta",
 
@@ -319,6 +328,7 @@ export const es: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "IA",
+  "nav.fileTree": "Árbol de archivos",
   "ai.provider": "Proveedor",
   "ai.custom": "Personalizado (CLI)",
   "ai.model": "Modelo",

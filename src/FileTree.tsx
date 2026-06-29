@@ -3,6 +3,7 @@ import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { IconChevronRight, IconFile, IconFolder } from "./icons";
 import { t } from "./i18n";
+import type { FileTreeConfig } from "./config";
 
 type FsEntry = { name: string; isDir: boolean };
 
@@ -30,6 +31,8 @@ function TreeRow(props: {
   onInsert: (path: string) => void;
   onRun: (command: string) => void;
   onContext: (c: Ctx) => void;
+  /** Path of the row whose context menu is open (keeps it highlighted). */
+  ctxPath: () => string | null;
 }) {
   const [open, setOpen] = createSignal(false);
   const [children, setChildren] = createSignal<FsEntry[] | null>(null);
@@ -77,7 +80,10 @@ function TreeRow(props: {
     <div>
       <div
         class="ft-row"
-        classList={{ dir: props.isDir }}
+        classList={{
+          dir: props.isDir,
+          "ctx-active": props.ctxPath() === props.path,
+        }}
         style={{ "padding-left": indent }}
         onClick={toggle}
         onContextMenu={(e) => {
@@ -124,6 +130,7 @@ function TreeRow(props: {
                 onInsert={props.onInsert}
                 onRun={props.onRun}
                 onContext={props.onContext}
+                ctxPath={props.ctxPath}
               />
             )}
           </For>
@@ -152,6 +159,8 @@ export default function FileTree(props: {
   onInsert: (text: string) => void;
   /** Copy text to the clipboard. */
   onCopy: (text: string) => void;
+  /** Customizable context-menu command templates. */
+  commands: () => FileTreeConfig;
 }) {
   // Hidden files (dotfiles) shown by default.
   const [showHidden, setShowHidden] = createSignal(true);
@@ -204,26 +213,30 @@ export default function FileTree(props: {
     document.addEventListener("mouseup", onUp);
   };
 
-  // Context-menu actions for the right-clicked entry.
-  type Action = { label: string; run: (c: Ctx) => void } | "sep";
+  // Context-menu actions for the right-clicked entry. `cmd` (the template minus
+  // its {path}) is rendered as a code chip next to the label.
+  type Action = { label: string; cmd?: string; run: (c: Ctx) => void } | "sep";
   const actionsFor = (c: Ctx): Action[] => {
     const common: Action[] = [
       "sep",
       { label: t("ftctx.copyPath"), run: (c) => props.onCopy(c.path) },
       { label: t("ftctx.insertPath"), run: (c) => props.onInsert(q(c.path) + " ") },
     ];
+    const cmds = props.commands();
+    const fill = (tpl: string, path: string) => tpl.split("{path}").join(q(path));
+    const cmdOf = (tpl: string) => tpl.split("{path}").join("").trim() || undefined;
     if (c.isDir) {
       return [
         { label: t("ftctx.cd"), run: (c) => props.onRun(`cd ${q(c.path)}`) },
-        { label: t("ftctx.ls"), run: (c) => props.onRun(`ls -la ${q(c.path)}`) },
-        { label: t("ftctx.editor"), run: (c) => props.onRun(`\${EDITOR:-nano} ${q(c.path)}`) },
+        { label: t("ftctx.ls"), cmd: cmdOf(cmds.dirList), run: (c) => props.onRun(fill(cmds.dirList, c.path)) },
+        { label: t("ftctx.editor"), cmd: cmdOf(cmds.dirOpen), run: (c) => props.onRun(fill(cmds.dirOpen, c.path)) },
         ...common,
       ];
     }
     return [
-      { label: t("ftctx.cat"), run: (c) => props.onRun(`cat ${q(c.path)}`) },
-      { label: t("ftctx.nano"), run: (c) => props.onRun(`nano ${q(c.path)}`) },
-      { label: t("ftctx.openEditor"), run: (c) => props.onRun(`\${EDITOR:-nano} ${q(c.path)}`) },
+      { label: t("ftctx.cat"), cmd: cmdOf(cmds.fileView), run: (c) => props.onRun(fill(cmds.fileView, c.path)) },
+      { label: t("ftctx.nano"), cmd: cmdOf(cmds.fileEdit), run: (c) => props.onRun(fill(cmds.fileEdit, c.path)) },
+      { label: t("ftctx.openEditor"), cmd: cmdOf(cmds.fileOpen), run: (c) => props.onRun(fill(cmds.fileOpen, c.path)) },
       ...common,
     ];
   };
@@ -270,6 +283,7 @@ export default function FileTree(props: {
                   onInsert={props.onInsert}
                   onRun={props.onRun}
                   onContext={setCtx}
+                  ctxPath={() => ctx()?.path ?? null}
                 />
               )}
             </For>
@@ -299,7 +313,10 @@ export default function FileTree(props: {
                         setCtx(null);
                       }}
                     >
-                      {a.label}
+                      <span class="ft-ctx-label">{a.label}</span>
+                      <Show when={a.cmd}>
+                        <code class="ft-ctx-cmd">{a.cmd}</code>
+                      </Show>
                     </button>
                   )
                 }

@@ -73,11 +73,22 @@ export type AiConfig = {
   apiModel: string;
 };
 
+export type FileTreeConfig = {
+  /** Command templates for the file-tree context menu. `{path}` is replaced
+   *  (POSIX-quoted) by the clicked entry's path. */
+  dirList: string;
+  dirOpen: string;
+  fileView: string;
+  fileEdit: string;
+  fileOpen: string;
+};
+
 export type Config = {
   appearance: Appearance;
   shell: ShellConfig;
   notifications: NotificationsConfig;
   ai: AiConfig;
+  fileTree: FileTreeConfig;
   /** UI language code ("en", "fr", …). */
   language: string;
   /** Action id → key combo overrides for remappable shortcuts. */
@@ -144,6 +155,13 @@ export const DEFAULT_CONFIG: Config = {
     apiBaseUrl: "",
     apiApiKey: "",
     apiModel: "",
+  },
+  fileTree: {
+    dirList: "ls -la {path}",
+    dirOpen: "${EDITOR:-nano} {path}",
+    fileView: "cat {path}",
+    fileEdit: "nano {path}",
+    fileOpen: "${EDITOR:-nano} {path}",
   },
   language: "en",
   keybindings: {},

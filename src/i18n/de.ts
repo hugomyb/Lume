@@ -29,6 +29,7 @@ export const de: Dict = {
   "cursor.underline": "Unterstrich",
   "appearance.scrollback": "Scrollback (Zeilen)",
   "appearance.theme": "Design",
+  "appearance.customTheme": "Benutzerdefiniert",
   "appearance.ansi": "ANSI-Farben (16)",
   "appearance.reset": "Darstellung zurücksetzen",
 
@@ -126,12 +127,20 @@ export const de: Dict = {
   "ft.unknownDir": "Unbekanntes Verzeichnis",
   "ft.denied": "Zugriff verweigert",
   "ft.empty": "leer",
+  "ft.cmdNote":
+    "Befehle des Kontextmenüs werden im aktiven Terminal ausgeführt. <code>{path}</code> wird durch den Pfad des Eintrags ersetzt.",
+  "ft.dirList": "Ordner auflisten",
+  "ft.dirOpen": "Ordner im Editor öffnen",
+  "ft.fileView": "Datei anzeigen",
+  "ft.fileEdit": "Datei bearbeiten",
+  "ft.fileOpen": "Datei im Editor öffnen",
+  "ft.resetCmds": "Befehle zurücksetzen",
   "ftctx.cd": "Ordner öffnen",
-  "ftctx.ls": "Auflisten (ls -la)",
+  "ftctx.ls": "Auflisten",
   "ftctx.editor": "Im Editor öffnen",
-  "ftctx.cat": "Anzeigen (cat)",
-  "ftctx.nano": "Bearbeiten (nano)",
-  "ftctx.openEditor": "Öffnen ($EDITOR)",
+  "ftctx.cat": "Anzeigen",
+  "ftctx.nano": "Bearbeiten",
+  "ftctx.openEditor": "Im Editor öffnen",
   "ftctx.copyPath": "Pfad kopieren",
   "ftctx.insertPath": "Pfad einfügen",
 
@@ -320,6 +329,7 @@ export const de: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "KI",
+  "nav.fileTree": "Dateibaum",
   "ai.provider": "Anbieter",
   "ai.custom": "Benutzerdefiniert (CLI)",
   "ai.model": "Modell",

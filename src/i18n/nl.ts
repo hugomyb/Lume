@@ -29,6 +29,7 @@ export const nl: Dict = {
   "cursor.underline": "Onderstreping",
   "appearance.scrollback": "Scrollback (regels)",
   "appearance.theme": "Thema",
+  "appearance.customTheme": "Aangepast",
   "appearance.ansi": "ANSI-kleuren (16)",
   "appearance.reset": "Weergave herstellen",
 
@@ -126,12 +127,20 @@ export const nl: Dict = {
   "ft.unknownDir": "Onbekende map",
   "ft.denied": "toegang geweigerd",
   "ft.empty": "leeg",
+  "ft.cmdNote":
+    "Opdrachten uit het contextmenu worden uitgevoerd in de actieve terminal. <code>{path}</code> wordt vervangen door het pad van het item.",
+  "ft.dirList": "Map weergeven",
+  "ft.dirOpen": "Map openen in editor",
+  "ft.fileView": "Bestand bekijken",
+  "ft.fileEdit": "Bestand bewerken",
+  "ft.fileOpen": "Bestand openen in editor",
+  "ft.resetCmds": "Opdrachten herstellen",
   "ftctx.cd": "Map openen",
-  "ftctx.ls": "Lijst (ls -la)",
+  "ftctx.ls": "Weergeven",
   "ftctx.editor": "Openen in editor",
-  "ftctx.cat": "Weergeven (cat)",
-  "ftctx.nano": "Bewerken (nano)",
-  "ftctx.openEditor": "Openen ($EDITOR)",
+  "ftctx.cat": "Bekijken",
+  "ftctx.nano": "Bewerken",
+  "ftctx.openEditor": "Openen in editor",
   "ftctx.copyPath": "Pad kopiëren",
   "ftctx.insertPath": "Pad invoegen",
 
@@ -319,6 +328,7 @@ export const nl: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "AI",
+  "nav.fileTree": "Bestandsboom",
   "ai.provider": "Provider",
   "ai.custom": "Aangepast (CLI)",
   "ai.model": "Model",

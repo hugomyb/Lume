@@ -29,6 +29,7 @@ export const hi: Dict = {
   "cursor.underline": "रेखांकित",
   "appearance.scrollback": "स्क्रॉलबैक (पंक्तियाँ)",
   "appearance.theme": "थीम",
+  "appearance.customTheme": "कस्टम",
   "appearance.ansi": "ANSI रंग (16)",
   "appearance.reset": "रूप रीसेट करें",
 
@@ -126,12 +127,20 @@ export const hi: Dict = {
   "ft.unknownDir": "अज्ञात निर्देशिका",
   "ft.denied": "पहुँच अस्वीकृत",
   "ft.empty": "खाली",
+  "ft.cmdNote":
+    "संदर्भ-मेनू कमांड सक्रिय टर्मिनल में चलते हैं। <code>{path}</code> को प्रविष्टि के पथ से बदल दिया जाता है।",
+  "ft.dirList": "फ़ोल्डर सूचीबद्ध करें",
+  "ft.dirOpen": "फ़ोल्डर को संपादक में खोलें",
+  "ft.fileView": "फ़ाइल देखें",
+  "ft.fileEdit": "फ़ाइल संपादित करें",
+  "ft.fileOpen": "फ़ाइल को संपादक में खोलें",
+  "ft.resetCmds": "कमांड रीसेट करें",
   "ftctx.cd": "फ़ोल्डर खोलें",
-  "ftctx.ls": "सूची (ls -la)",
+  "ftctx.ls": "सूचीबद्ध करें",
   "ftctx.editor": "एडिटर में खोलें",
-  "ftctx.cat": "देखें (cat)",
-  "ftctx.nano": "संपादित करें (nano)",
-  "ftctx.openEditor": "खोलें ($EDITOR)",
+  "ftctx.cat": "देखें",
+  "ftctx.nano": "संपादित करें",
+  "ftctx.openEditor": "एडिटर में खोलें",
   "ftctx.copyPath": "पथ कॉपी करें",
   "ftctx.insertPath": "पथ डालें",
 
@@ -319,6 +328,7 @@ export const hi: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "AI",
+  "nav.fileTree": "फ़ाइल ट्री",
   "ai.provider": "प्रदाता",
   "ai.custom": "कस्टम (CLI)",
   "ai.model": "मॉडल",

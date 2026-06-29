@@ -19,6 +19,7 @@ import { checkForUpdate, installUpdate, type Update } from "./updater";
 import {
   IconAppearance,
   IconBell,
+  IconFolder,
   IconInfo,
   IconKeyboard,
   IconRefresh,
@@ -72,6 +73,7 @@ type Section =
   | "shell"
   | "notifications"
   | "ai"
+  | "fileTree"
   | "keys"
   | "general"
   | "about";
@@ -119,6 +121,12 @@ export default function Settings(props: Props) {
 
   const a = () => props.config.appearance;
   const bindings = () => resolveBindings(props.config.keybindings);
+  // Which preset (if any) matches the current colors — for the active indicator.
+  const themeKeys = Object.keys(DEFAULT_THEME) as (keyof Theme)[];
+  const isActivePreset = (pt: Theme) =>
+    themeKeys.every((k) => a().theme[k] === pt[k]);
+  const activeThemeName = () =>
+    THEME_PRESETS.find((p) => isActivePreset(p.theme))?.name;
 
   const setAppearance = <K extends keyof Config["appearance"]>(
     key: K,
@@ -148,6 +156,17 @@ export default function Settings(props: Props) {
     value: Config["ai"][K]
   ) => {
     props.setConfig("ai", key, value);
+    props.onChange();
+  };
+  const setFileTree = <K extends keyof Config["fileTree"]>(
+    key: K,
+    value: Config["fileTree"][K]
+  ) => {
+    props.setConfig("fileTree", key, value);
+    props.onChange();
+  };
+  const resetFileTree = () => {
+    props.setConfig("fileTree", { ...DEFAULT_CONFIG.fileTree });
     props.onChange();
   };
   const isApiProvider = () =>
@@ -335,6 +354,14 @@ export default function Settings(props: Props) {
             </button>
             <button
               class="settings-nav"
+              classList={{ active: section() === "fileTree" }}
+              onClick={() => setSection("fileTree")}
+            >
+              <IconFolder size={15} />
+              <span>{t("nav.fileTree")}</span>
+            </button>
+            <button
+              class="settings-nav"
               classList={{ active: section() === "keys" }}
               onClick={() => setSection("keys")}
             >
@@ -488,12 +515,19 @@ export default function Settings(props: Props) {
                   />
                 </label>
 
-                <div class="settings-subtitle">{t("appearance.theme")}</div>
+                <div class="settings-subtitle">
+                  {t("appearance.theme")}
+                  <span class="settings-active-theme">
+                    {" — "}
+                    {activeThemeName() ?? t("appearance.customTheme")}
+                  </span>
+                </div>
                 <div class="settings-presets">
                   <For each={THEME_PRESETS}>
                     {(p) => (
                       <button
                         class="settings-preset"
+                        classList={{ active: isActivePreset(p.theme) }}
                         onClick={() => applyPreset(p.theme)}
                       >
                         <span
@@ -889,6 +923,40 @@ export default function Settings(props: Props) {
                 </Show>
 
                 <p class="settings-note" innerHTML={t("ai.keysNote")} />
+              </div>
+            </Show>
+
+            <Show when={section() === "fileTree"}>
+              <div class="settings-section">
+                <p class="settings-note" innerHTML={t("ft.cmdNote")} />
+                <For
+                  each={
+                    [
+                      ["dirList", "ft.dirList"],
+                      ["dirOpen", "ft.dirOpen"],
+                      ["fileView", "ft.fileView"],
+                      ["fileEdit", "ft.fileEdit"],
+                      ["fileOpen", "ft.fileOpen"],
+                    ] as [keyof Config["fileTree"], string][]
+                  }
+                >
+                  {([key, labelKey]) => (
+                    <label class="settings-row">
+                      <span class="settings-label">{t(labelKey)}</span>
+                      <input
+                        class="settings-input"
+                        type="text"
+                        spellcheck={false}
+                        placeholder={DEFAULT_CONFIG.fileTree[key]}
+                        value={props.config.fileTree[key]}
+                        onInput={(e) => setFileTree(key, e.currentTarget.value)}
+                      />
+                    </label>
+                  )}
+                </For>
+                <button class="settings-reset" onClick={resetFileTree}>
+                  {t("ft.resetCmds")}
+                </button>
               </div>
             </Show>
 

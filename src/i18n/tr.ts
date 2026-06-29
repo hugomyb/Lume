@@ -29,6 +29,7 @@ export const tr: Dict = {
   "cursor.underline": "Alt çizgi",
   "appearance.scrollback": "Geri kaydırma (satır)",
   "appearance.theme": "Tema",
+  "appearance.customTheme": "Özel",
   "appearance.ansi": "ANSI renkleri (16)",
   "appearance.reset": "Görünümü sıfırla",
 
@@ -126,12 +127,20 @@ export const tr: Dict = {
   "ft.unknownDir": "Bilinmeyen dizin",
   "ft.denied": "erişim reddedildi",
   "ft.empty": "boş",
+  "ft.cmdNote":
+    "Bağlam menüsü komutları etkin terminalde çalışır. <code>{path}</code>, ögenin yoluyla değiştirilir.",
+  "ft.dirList": "Klasörü listele",
+  "ft.dirOpen": "Klasörü düzenleyicide aç",
+  "ft.fileView": "Dosyayı görüntüle",
+  "ft.fileEdit": "Dosyayı düzenle",
+  "ft.fileOpen": "Dosyayı düzenleyicide aç",
+  "ft.resetCmds": "Komutları sıfırla",
   "ftctx.cd": "Klasörü aç",
-  "ftctx.ls": "Listele (ls -la)",
+  "ftctx.ls": "Listele",
   "ftctx.editor": "Düzenleyicide aç",
-  "ftctx.cat": "Görüntüle (cat)",
-  "ftctx.nano": "Düzenle (nano)",
-  "ftctx.openEditor": "Aç ($EDITOR)",
+  "ftctx.cat": "Görüntüle",
+  "ftctx.nano": "Düzenle",
+  "ftctx.openEditor": "Düzenleyicide aç",
   "ftctx.copyPath": "Yolu kopyala",
   "ftctx.insertPath": "Yolu ekle",
 
@@ -319,6 +328,7 @@ export const tr: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "YZ",
+  "nav.fileTree": "Dosya ağacı",
   "ai.provider": "Sağlayıcı",
   "ai.custom": "Özel (CLI)",
   "ai.model": "Model",

@@ -29,6 +29,7 @@ export const ar: Dict = {
   "cursor.underline": "خط سفلي",
   "appearance.scrollback": "سجل التمرير (أسطر)",
   "appearance.theme": "السمة",
+  "appearance.customTheme": "مخصص",
   "appearance.ansi": "ألوان ANSI (16)",
   "appearance.reset": "إعادة تعيين المظهر",
 
@@ -126,12 +127,20 @@ export const ar: Dict = {
   "ft.unknownDir": "مجلد غير معروف",
   "ft.denied": "تم رفض الوصول",
   "ft.empty": "فارغ",
+  "ft.cmdNote":
+    "تُنفَّذ أوامر قائمة السياق في الطرفية النشطة. يُستبدَل <code>{path}</code> بمسار العنصر.",
+  "ft.dirList": "عرض المجلد",
+  "ft.dirOpen": "فتح المجلد في المحرر",
+  "ft.fileView": "عرض الملف",
+  "ft.fileEdit": "تعديل الملف",
+  "ft.fileOpen": "فتح الملف في المحرر",
+  "ft.resetCmds": "إعادة تعيين الأوامر",
   "ftctx.cd": "فتح المجلد",
-  "ftctx.ls": "عرض القائمة (ls -la)",
+  "ftctx.ls": "عرض",
   "ftctx.editor": "فتح في المحرّر",
-  "ftctx.cat": "عرض (cat)",
-  "ftctx.nano": "تحرير (nano)",
-  "ftctx.openEditor": "فتح ($EDITOR)",
+  "ftctx.cat": "عرض المحتوى",
+  "ftctx.nano": "تعديل",
+  "ftctx.openEditor": "فتح في المحرّر",
   "ftctx.copyPath": "نسخ المسار",
   "ftctx.insertPath": "إدراج المسار",
 
@@ -319,6 +328,7 @@ export const ar: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "الذكاء الاصطناعي",
+  "nav.fileTree": "شجرة الملفات",
   "ai.provider": "المزوّد",
   "ai.custom": "مخصّص (CLI)",
   "ai.model": "النموذج",

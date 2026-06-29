@@ -13,6 +13,7 @@ pub struct Config {
     pub shell: ShellConfig,
     pub notifications: NotificationsConfig,
     pub ai: AiConfig,
+    pub file_tree: FileTreeConfig,
     /// UI language code ("en", "fr", …). Defaults to English.
     #[serde(default = "default_language")]
     pub language: String,
@@ -205,6 +206,30 @@ impl Default for ThemeConfig {
 pub struct ShellConfig {
     pub program: Option<String>,
     pub args: Vec<String>,
+}
+
+/// Command templates run by the file-tree context menu. `{path}` is replaced
+/// (POSIX-quoted) by the clicked entry's path before running in the terminal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FileTreeConfig {
+    pub dir_list: String,
+    pub dir_open: String,
+    pub file_view: String,
+    pub file_edit: String,
+    pub file_open: String,
+}
+
+impl Default for FileTreeConfig {
+    fn default() -> Self {
+        Self {
+            dir_list: "ls -la {path}".to_string(),
+            dir_open: "${EDITOR:-nano} {path}".to_string(),
+            file_view: "cat {path}".to_string(),
+            file_edit: "nano {path}".to_string(),
+            file_open: "${EDITOR:-nano} {path}".to_string(),
+        }
+    }
 }
 
 pub fn config_path() -> Option<PathBuf> {

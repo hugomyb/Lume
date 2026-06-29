@@ -29,6 +29,7 @@ export const zh: Dict = {
   "cursor.underline": "下划线",
   "appearance.scrollback": "回滚行数",
   "appearance.theme": "主题",
+  "appearance.customTheme": "自定义",
   "appearance.ansi": "ANSI 颜色（16 色）",
   "appearance.reset": "重置外观",
 
@@ -126,12 +127,20 @@ export const zh: Dict = {
   "ft.unknownDir": "未知目录",
   "ft.denied": "访问被拒绝",
   "ft.empty": "空",
+  "ft.cmdNote":
+    "右键菜单命令在当前活动终端中执行。<code>{path}</code> 会被替换为该条目的路径。",
+  "ft.dirList": "列出文件夹",
+  "ft.dirOpen": "在编辑器中打开文件夹",
+  "ft.fileView": "查看文件",
+  "ft.fileEdit": "编辑文件",
+  "ft.fileOpen": "在编辑器中打开文件",
+  "ft.resetCmds": "重置命令",
   "ftctx.cd": "打开文件夹",
-  "ftctx.ls": "列出 (ls -la)",
+  "ftctx.ls": "列出",
   "ftctx.editor": "在编辑器中打开",
-  "ftctx.cat": "查看 (cat)",
-  "ftctx.nano": "编辑 (nano)",
-  "ftctx.openEditor": "打开 ($EDITOR)",
+  "ftctx.cat": "查看",
+  "ftctx.nano": "编辑",
+  "ftctx.openEditor": "在编辑器中打开",
   "ftctx.copyPath": "复制路径",
   "ftctx.insertPath": "插入路径",
 
@@ -319,6 +328,7 @@ export const zh: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "AI",
+  "nav.fileTree": "文件树",
   "ai.provider": "提供商",
   "ai.custom": "自定义 (CLI)",
   "ai.model": "模型",

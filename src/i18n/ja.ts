@@ -29,6 +29,7 @@ export const ja: Dict = {
   "cursor.underline": "下線",
   "appearance.scrollback": "スクロールバック (行)",
   "appearance.theme": "テーマ",
+  "appearance.customTheme": "カスタム",
   "appearance.ansi": "ANSI カラー (16)",
   "appearance.reset": "外観をリセット",
 
@@ -126,12 +127,20 @@ export const ja: Dict = {
   "ft.unknownDir": "不明なディレクトリ",
   "ft.denied": "アクセスが拒否されました",
   "ft.empty": "空",
+  "ft.cmdNote":
+    "コンテキストメニューのコマンドはアクティブなターミナルで実行されます。<code>{path}</code> は項目のパスに置き換えられます。",
+  "ft.dirList": "フォルダーを一覧表示",
+  "ft.dirOpen": "フォルダーをエディターで開く",
+  "ft.fileView": "ファイルを表示",
+  "ft.fileEdit": "ファイルを編集",
+  "ft.fileOpen": "ファイルをエディターで開く",
+  "ft.resetCmds": "コマンドをリセット",
   "ftctx.cd": "フォルダを開く",
-  "ftctx.ls": "一覧 (ls -la)",
+  "ftctx.ls": "一覧表示",
   "ftctx.editor": "エディタで開く",
-  "ftctx.cat": "表示 (cat)",
-  "ftctx.nano": "編集 (nano)",
-  "ftctx.openEditor": "開く ($EDITOR)",
+  "ftctx.cat": "表示",
+  "ftctx.nano": "編集",
+  "ftctx.openEditor": "エディタで開く",
   "ftctx.copyPath": "パスをコピー",
   "ftctx.insertPath": "パスを挿入",
 
@@ -319,6 +328,7 @@ export const ja: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "AI",
+  "nav.fileTree": "ファイルツリー",
   "ai.provider": "プロバイダー",
   "ai.custom": "カスタム (CLI)",
   "ai.model": "モデル",

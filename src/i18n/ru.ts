@@ -29,6 +29,7 @@ export const ru: Dict = {
   "cursor.underline": "Подчёркивание",
   "appearance.scrollback": "Буфер прокрутки (строк)",
   "appearance.theme": "Тема",
+  "appearance.customTheme": "Свой",
   "appearance.ansi": "Цвета ANSI (16)",
   "appearance.reset": "Сбросить внешний вид",
 
@@ -126,12 +127,20 @@ export const ru: Dict = {
   "ft.unknownDir": "Неизвестный каталог",
   "ft.denied": "доступ запрещён",
   "ft.empty": "пусто",
+  "ft.cmdNote":
+    "Команды контекстного меню выполняются в активном терминале. <code>{path}</code> заменяется на путь к элементу.",
+  "ft.dirList": "Показать папку",
+  "ft.dirOpen": "Открыть папку в редакторе",
+  "ft.fileView": "Просмотреть файл",
+  "ft.fileEdit": "Редактировать файл",
+  "ft.fileOpen": "Открыть файл в редакторе",
+  "ft.resetCmds": "Сбросить команды",
   "ftctx.cd": "Открыть папку",
-  "ftctx.ls": "Список (ls -la)",
+  "ftctx.ls": "Показать",
   "ftctx.editor": "Открыть в редакторе",
-  "ftctx.cat": "Просмотр (cat)",
-  "ftctx.nano": "Редактировать (nano)",
-  "ftctx.openEditor": "Открыть ($EDITOR)",
+  "ftctx.cat": "Просмотреть",
+  "ftctx.nano": "Редактировать",
+  "ftctx.openEditor": "Открыть в редакторе",
   "ftctx.copyPath": "Копировать путь",
   "ftctx.insertPath": "Вставить путь",
 
@@ -319,6 +328,7 @@ export const ru: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "ИИ",
+  "nav.fileTree": "Дерево файлов",
   "ai.provider": "Провайдер",
   "ai.custom": "Пользовательский (CLI)",
   "ai.model": "Модель",

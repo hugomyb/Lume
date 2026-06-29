@@ -29,6 +29,7 @@ export const ko: Dict = {
   "cursor.underline": "밑줄",
   "appearance.scrollback": "스크롤백 (줄)",
   "appearance.theme": "테마",
+  "appearance.customTheme": "사용자 지정",
   "appearance.ansi": "ANSI 색상 (16)",
   "appearance.reset": "모양 초기화",
 
@@ -126,12 +127,20 @@ export const ko: Dict = {
   "ft.unknownDir": "알 수 없는 디렉터리",
   "ft.denied": "접근 거부됨",
   "ft.empty": "비어 있음",
+  "ft.cmdNote":
+    "컨텍스트 메뉴 명령은 활성 터미널에서 실행됩니다. <code>{path}</code>는 항목의 경로로 바뀝니다.",
+  "ft.dirList": "폴더 나열",
+  "ft.dirOpen": "편집기에서 폴더 열기",
+  "ft.fileView": "파일 보기",
+  "ft.fileEdit": "파일 편집",
+  "ft.fileOpen": "편집기에서 파일 열기",
+  "ft.resetCmds": "명령 초기화",
   "ftctx.cd": "폴더 열기",
-  "ftctx.ls": "목록 (ls -la)",
+  "ftctx.ls": "나열",
   "ftctx.editor": "편집기에서 열기",
-  "ftctx.cat": "보기 (cat)",
-  "ftctx.nano": "편집 (nano)",
-  "ftctx.openEditor": "열기 ($EDITOR)",
+  "ftctx.cat": "보기",
+  "ftctx.nano": "편집",
+  "ftctx.openEditor": "편집기에서 열기",
   "ftctx.copyPath": "경로 복사",
   "ftctx.insertPath": "경로 삽입",
 
@@ -319,6 +328,7 @@ export const ko: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "AI",
+  "nav.fileTree": "파일 트리",
   "ai.provider": "공급자",
   "ai.custom": "사용자 지정 (CLI)",
   "ai.model": "모델",

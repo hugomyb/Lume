@@ -1125,9 +1125,16 @@ body,
   white-space: nowrap;
   user-select: none;
 }
-.ft-row:hover {
+.ft-row:hover,
+.ft-row.ctx-active {
   background: rgba(var(--hover-rgb), 0.06);
   color: var(--fg);
+}
+/* A touch stronger than hover + an accent edge so the right-clicked row reads
+   as the context-menu target. */
+.ft-row.ctx-active {
+  background: rgba(var(--accent-rgb), 0.12);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .ft-row.dir .ft-name {
   color: var(--fg);
@@ -1194,7 +1201,10 @@ body,
   margin-bottom: 4px;
 }
 .ft-ctx-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -1207,6 +1217,19 @@ body,
 }
 .ft-ctx-item:hover {
   background: rgba(var(--accent-rgb), 0.16);
+}
+.ft-ctx-cmd {
+  flex: none;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.ft-ctx-item:hover .ft-ctx-cmd {
+  color: var(--fg);
 }
 .ft-ctx-sep {
   height: 1px;
@@ -2623,6 +2646,19 @@ select.settings-input optgroup {
 
 .settings-preset:hover {
   color: var(--fg);
+}
+.settings-preset.active {
+  color: var(--accent);
+}
+.settings-preset.active .settings-preset-swatch {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-active-theme {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .settings-preset-swatch {

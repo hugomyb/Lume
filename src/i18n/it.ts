@@ -29,6 +29,7 @@ export const it: Dict = {
   "cursor.underline": "Sottolineato",
   "appearance.scrollback": "Scrollback (righe)",
   "appearance.theme": "Tema",
+  "appearance.customTheme": "Personalizzato",
   "appearance.ansi": "Colori ANSI (16)",
   "appearance.reset": "Ripristina aspetto",
 
@@ -126,12 +127,20 @@ export const it: Dict = {
   "ft.unknownDir": "Cartella sconosciuta",
   "ft.denied": "accesso negato",
   "ft.empty": "vuota",
+  "ft.cmdNote":
+    "I comandi del menu contestuale vengono eseguiti nel terminale attivo. <code>{path}</code> viene sostituito dal percorso dell'elemento.",
+  "ft.dirList": "Elenca cartella",
+  "ft.dirOpen": "Apri cartella nell'editor",
+  "ft.fileView": "Visualizza file",
+  "ft.fileEdit": "Modifica file",
+  "ft.fileOpen": "Apri file nell'editor",
+  "ft.resetCmds": "Reimposta comandi",
   "ftctx.cd": "Apri cartella",
-  "ftctx.ls": "Elenca (ls -la)",
+  "ftctx.ls": "Elenca",
   "ftctx.editor": "Apri nell'editor",
-  "ftctx.cat": "Visualizza (cat)",
-  "ftctx.nano": "Modifica (nano)",
-  "ftctx.openEditor": "Apri ($EDITOR)",
+  "ftctx.cat": "Visualizza",
+  "ftctx.nano": "Modifica",
+  "ftctx.openEditor": "Apri nell'editor",
   "ftctx.copyPath": "Copia percorso",
   "ftctx.insertPath": "Inserisci percorso",
 
@@ -319,6 +328,7 @@ export const it: Dict = {
 
   // --- AI provider settings ---
   "nav.ai": "IA",
+  "nav.fileTree": "Albero dei file",
   "ai.provider": "Provider",
   "ai.custom": "Personalizzato (CLI)",
   "ai.model": "Modello",

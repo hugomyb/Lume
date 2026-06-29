@@ -2441,6 +2441,7 @@ export default function Tabs() {
               onRun={(command) => insertIntoActiveTerminal(command + "\n")}
               onInsert={(text) => insertIntoActiveTerminal(text)}
               onCopy={(text) => copyText(text)}
+              commands={() => config.fileTree}
             />
             <div class="terminals">
               <For each={tabs}>
