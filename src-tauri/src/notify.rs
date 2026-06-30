@@ -1,4 +1,7 @@
-use notify_rust::{Hint, Notification, Timeout};
+use notify_rust::Notification;
+// `Hint`/`Timeout` only exist in notify-rust's XDG (Linux) backend.
+#[cfg(all(unix, not(target_os = "macos")))]
+use notify_rust::{Hint, Timeout};
 
 /// Send a desktop notification reliably.
 ///
@@ -18,18 +21,28 @@ pub fn notify(
 ) -> Result<(), String> {
     let handle = std::thread::spawn(move || -> Result<(), String> {
         let mut n = Notification::new();
-        n.appname("Lume")
-            .summary(&title)
-            .body(&body)
-            .icon(icon.as_deref().unwrap_or("utilities-terminal"))
-            // Tells GNOME which app this is (matches com.lume.app.desktop), so
-            // it shows a banner instead of silently dropping it to the tray.
-            .hint(Hint::DesktopEntry("com.lume.app".to_string()))
-            .timeout(Timeout::Milliseconds(6000));
-        if sound.unwrap_or(false) {
-            // Freedesktop sound name played by the daemon (libcanberra on GNOME).
-            n.sound_name("complete");
+        n.summary(&title).body(&body);
+
+        // The XDG (Linux) backend supports app name, icon-by-name, the desktop-
+        // entry hint and a custom sound; macOS/Windows show a plain title+body.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            n.appname("Lume")
+                .icon(icon.as_deref().unwrap_or("utilities-terminal"))
+                // Tells GNOME which app this is (matches com.lume.app.desktop),
+                // so it shows a banner instead of dropping it to the tray.
+                .hint(Hint::DesktopEntry("com.lume.app".to_string()))
+                .timeout(Timeout::Milliseconds(6000));
+            if sound.unwrap_or(false) {
+                // Freedesktop sound name played by the daemon (libcanberra).
+                n.sound_name("complete");
+            }
         }
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        {
+            let _ = (&icon, &sound); // unused on macOS/Windows
+        }
+
         n.show().map(|_| ()).map_err(|e| e.to_string())
     });
     match handle.join() {
