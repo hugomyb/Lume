@@ -20,23 +20,19 @@ no account, no telemetry**.
 
 ## Screenshots
 
-> 📸 _Demo GIFs & screenshots land with the first stable release._
-
-<!--
-  To add them: drop images in assets/screenshots/ and replace the line above
-  with this grid (uncomment):
-
 <table>
   <tr>
     <td width="50%"><img src="assets/screenshots/blocks.png" alt="Command blocks"><br><sub>Command blocks — each command + output is a navigable block</sub></td>
     <td width="50%"><img src="assets/screenshots/ai.png" alt="Inline AI"><br><sub>Inline AI — explain a block or generate a command</sub></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/panes.png" alt="Panes & themes"><br><sub>Panes, tabs &amp; themes</sub></td>
+    <td><img src="assets/screenshots/panes.png" alt="Panes &amp; themes"><br><sub>Panes, tabs &amp; themes</sub></td>
     <td><img src="assets/screenshots/remote.png" alt="Remote control"><br><sub>Remote control from your phone</sub></td>
   </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="assets/screenshots/settings.png" alt="Settings"><br><sub>Settings — appearance, shell, AI providers, file tree, shortcuts &amp; more</sub></td>
+  </tr>
 </table>
--->
 
 ## Features
 
