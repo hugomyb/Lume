@@ -43,12 +43,9 @@ pub struct Workflow {
     pub source: String,
 }
 
-/// `$XDG_CONFIG_HOME/lume/workflows` (falls back to `~/.config/lume/workflows`).
+/// Lume's `workflows` dir under the per-user config directory.
 fn workflows_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("lume").join("workflows"))
+    crate::paths::config_dir().map(|d| d.join("workflows"))
 }
 
 #[tauri::command]

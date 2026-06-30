@@ -99,7 +99,7 @@ pub fn ai_default_model(provider: String) -> Option<String> {
 }
 
 fn home_join(rel: &str) -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(rel))
+    crate::paths::home_dir().map(|h| h.join(rel))
 }
 
 fn json_string_field(rel: &str, field: &str) -> Option<String> {
@@ -231,27 +231,43 @@ fn which_command(cmd: &str) -> Option<String> {
     if cmd.is_empty() {
         return None;
     }
-    if cmd.contains('/') {
+    if cmd.chars().any(std::path::is_separator) {
         let p = std::path::Path::new(cmd);
         return is_executable(p).then(|| p.display().to_string());
     }
-    for dir in crate::env_fix::user_path().split(':') {
-        if dir.is_empty() {
+    // `split_paths` honours the platform separator (`:` on Unix, `;` on Windows).
+    for dir in std::env::split_paths(&crate::env_fix::user_path()) {
+        if dir.as_os_str().is_empty() {
             continue;
         }
-        let p = std::path::Path::new(dir).join(cmd);
+        let p = dir.join(cmd);
         if is_executable(&p) {
             return Some(p.display().to_string());
+        }
+        // On Windows the command name often lacks its extension.
+        #[cfg(windows)]
+        for ext in ["exe", "cmd", "bat", "com"] {
+            let pe = dir.join(format!("{cmd}.{ext}"));
+            if is_executable(&pe) {
+                return Some(pe.display().to_string());
+            }
         }
     }
     None
 }
 
+#[cfg(unix)]
 fn is_executable(p: &std::path::Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p)
         .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_executable(p: &std::path::Path) -> bool {
+    // No POSIX execute bit on Windows; treat any regular file as runnable.
+    p.is_file()
 }
 
 #[derive(Serialize, Clone)]

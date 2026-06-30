@@ -18,19 +18,28 @@ pub struct CustomFont {
 }
 
 fn fonts_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("lume").join("fonts"))
+    crate::paths::config_dir().map(|d| d.join("fonts"))
 }
 
-/// Monospace font families available on the system, via `fc-list`.
+/// Monospace font families available on the system. Uses `fc-list` when present
+/// (Linux, and macOS if fontconfig is installed); otherwise falls back to a
+/// curated list of monospace families that ship with the OS. Users can always
+/// import their own font files on top of this.
 #[tauri::command]
 pub fn list_system_fonts() -> Vec<String> {
-    let out = std::process::Command::new("fc-list")
+    let families = fc_list_families();
+    if !families.is_empty() {
+        return families;
+    }
+    fallback_monospace_families()
+}
+
+/// Query `fc-list` for monospace families. Empty when `fc-list` is unavailable.
+fn fc_list_families() -> Vec<String> {
+    let Ok(out) = std::process::Command::new("fc-list")
         .args([":spacing=100", "family"])
-        .output();
-    let Ok(out) = out else {
+        .output()
+    else {
         return Vec::new();
     };
     let text = String::from_utf8_lossy(&out.stdout);
@@ -46,6 +55,42 @@ pub fn list_system_fonts() -> Vec<String> {
     families.sort_by_key(|s| s.to_lowercase());
     families.dedup();
     families
+}
+
+/// Common monospace families shipped with the OS, used when `fc-list` is absent.
+#[cfg(target_os = "windows")]
+fn fallback_monospace_families() -> Vec<String> {
+    [
+        "Cascadia Code",
+        "Cascadia Mono",
+        "Consolas",
+        "Courier New",
+        "Lucida Console",
+        "Lucida Sans Typewriter",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn fallback_monospace_families() -> Vec<String> {
+    [
+        "SF Mono",
+        "Menlo",
+        "Monaco",
+        "Andale Mono",
+        "Courier New",
+        "PT Mono",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn fallback_monospace_families() -> Vec<String> {
+    Vec::new()
 }
 
 /// Read the typographic family name out of a font file, falling back to the

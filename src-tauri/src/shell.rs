@@ -2,8 +2,11 @@ use serde::Serialize;
 
 // Shell integration scripts are embedded in the binary so the app is fully
 // self-contained — no dependency on the source checkout's location.
+#[cfg(not(windows))]
 const ZSH_INIT: &str = include_str!("../../scripts/lume-shell-init.zsh");
+#[cfg(not(windows))]
 const BASH_INIT: &str = include_str!("../../scripts/lume-shell-init.bash");
+#[cfg(not(windows))]
 const FISH_INIT: &str = include_str!("../../scripts/lume-shell-init.fish");
 
 #[derive(Serialize, Clone)]
@@ -15,20 +18,44 @@ pub struct ShellSetupHint {
     pub rc_file: String,
 }
 
-/// `~/.config/lume` (honouring XDG_CONFIG_HOME), where we drop the integration
-/// scripts so the snippet the user pastes is portable across machines.
+/// Lume's per-user config dir, where we drop the integration scripts so the
+/// snippet the user pastes is portable across machines.
 fn config_dir() -> String {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return format!("{xdg}/lume");
-        }
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    format!("{home}/.config/lume")
+    crate::paths::config_dir()
+        .map(|d| d.display().to_string())
+        .unwrap_or_else(|| ".".to_string())
 }
 
 #[tauri::command]
 pub fn get_shell_setup_hint() -> ShellSetupHint {
+    #[cfg(windows)]
+    {
+        powershell_hint()
+    }
+    #[cfg(not(windows))]
+    {
+        unix_hint()
+    }
+}
+
+/// PowerShell shell-integration setup (Windows default shell).
+#[cfg(windows)]
+fn powershell_hint() -> ShellSetupHint {
+    const PS_INIT: &str = include_str!("../../scripts/lume-shell-init.ps1");
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let script_path = format!("{dir}\\lume-shell-init.ps1");
+    let _ = std::fs::write(&script_path, PS_INIT);
+    ShellSetupHint {
+        shell: "powershell".to_string(),
+        source_line: format!(r#"if ($env:LUME_TERM) {{ . "{script_path}" }}"#),
+        script_path,
+        rc_file: "$PROFILE".to_string(),
+    }
+}
+
+#[cfg(not(windows))]
+fn unix_hint() -> ShellSetupHint {
     let shell_path = std::env::var("SHELL").unwrap_or_default();
     let shell_name = shell_path.rsplit('/').next().unwrap_or("").to_string();
 

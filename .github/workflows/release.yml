@@ -1,16 +1,22 @@
 name: release
 
-# Builds signed Linux bundles (.deb / .rpm / AppImage) on ubuntu-22.04
-# (glibc 2.35 — runs on the bulk of the install base, NOT ubuntu-latest), then
-# publishes a GitHub Release with the `latest.json` manifest the in-app updater
-# reads. The AppImage is the auto-updatable artifact.
+# Builds and publishes installers for all three desktop OSes on a vX.Y.Z tag:
+#   Linux   — .deb / .rpm / .AppImage   (+ in-app auto-update via latest.json)
+#   macOS   — .dmg  (universal: Intel + Apple Silicon)   [unsigned for now]
+#   Windows — .exe  (NSIS)                                [unsigned for now]
 #
-# To cut a release: bump `version` in src-tauri/tauri.conf.json + package.json,
-# commit, then push a tag `vX.Y.Z`.
+# Flow: create a DRAFT release, build each OS into it (matrix), then publish.
+# If any build fails the `publish` job is skipped, so the release stays a draft
+# and is never seen by users — the updater is never put at risk.
+#
+# All three OSes auto-update: each job merges its platform into the updater
+# manifest (latest.json). The matrix is serialized (max-parallel: 1) so those
+# read-modify-writes of latest.json can't race each other.
+#
+# To cut a release: bump the version (scripts/release.sh) and push a tag vX.Y.Z.
 #
 # Required repo secret:
-#   TAURI_SIGNING_PRIVATE_KEY  — content of ~/.tauri/lume_updater.key
-# (The key was generated without a password, so no password secret is needed.)
+#   TAURI_SIGNING_PRIVATE_KEY  — content of ~/.tauri/lume_updater.key (no password)
 
 on:
   push:
@@ -22,12 +28,54 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  # 1) Create the draft release up-front so every matrix job uploads into the
+  #    same release by id (no create-race between concurrent OS jobs).
+  create-release:
     runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - uses: actions/github-script@v7
+        id: create
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Lume ${tag}`,
+              draft: true,
+              prerelease: false,
+              target_commitish: context.sha,
+            });
+            return data.id;
+
+  # 2) Build each OS into the draft release.
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      # Serialized: every job merges its platform into latest.json via a
+      # read-modify-write, so they must not run concurrently.
+      max-parallel: 1
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            rust_targets: ""
+            args: --bundles deb,rpm,appimage
+          - platform: macos-latest
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --bundles dmg --target universal-apple-darwin
+          - platform: windows-latest
+            rust_targets: ""
+            args: --bundles nsis
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -36,15 +84,18 @@ jobs:
             squashfs-tools
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install JS dependencies
         run: npm ci
 
-      - name: Build, sign and release
+      - name: Build, sign and upload to the draft release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,23 +103,18 @@ jobs:
           # Key has no password; set empty (literal) so signing never prompts.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Lume ${{ github.ref_name }}"
-          releaseDraft: false
-          prerelease: false
-          args: --bundles deb,rpm,appimage
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          # Every platform merges its entry into latest.json (default behaviour).
+          # The serialized matrix keeps those merges from racing.
+          args: ${{ matrix.args }}
 
-      # Tauri's AppImage bundler (linuxdeploy) embeds libnghttp2.so.* — libsoup
-      # (WebKit's HTTP lib) lists it as NEEDED and it isn't on the AppImage
-      # excludelist, whereas libcurl IS excluded and comes from the host. On any
-      # system with a newer libcurl, tools run *inside* the terminal (git, curl)
-      # load the host libcurl, which then resolves the stale BUNDLED libnghttp2
-      # first and dies with "undefined symbol: nghttp2_...". We drop the bundled
-      # copy so the host provides a matching libcurl/libnghttp2 pair, then re-sign
-      # and refresh the AppImage signature the in-app updater verifies.
-      # This must run on EVERY release: the bundler re-adds the lib each build.
-      # (See scripts/fix-appimage.sh for the why + how in full.)
-      - name: Drop bundled libnghttp2 from the AppImage, re-sign, refresh release
+      # Linux only — same fix as before: the AppImage bundler (linuxdeploy)
+      # embeds libnghttp2.so.* which collides with the host libcurl on newer
+      # systems and breaks tools run inside the terminal (git/curl). Drop the
+      # bundled copy, re-sign, and refresh the signature in latest.json.
+      # (See scripts/fix-appimage.sh for the full rationale.)
+      - name: Drop bundled libnghttp2 from the AppImage, re-sign, refresh manifest
+        if: matrix.platform == 'ubuntu-22.04'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -77,10 +123,8 @@ jobs:
           set -euo pipefail
           appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
           bash scripts/fix-appimage.sh "$appimage"
-          # Re-sign (tauri signer reads the key from TAURI_SIGNING_PRIVATE_KEY).
           rm -f "$appimage.sig"
           npm run tauri -- signer sign "$appimage"
-          # Refresh the AppImage signature in the manifest, then overwrite assets.
           sig="$(cat "$appimage.sig")"
           gh release download "${{ github.ref_name }}" --pattern latest.json --clobber
           jq --arg s "$sig" \
@@ -89,3 +133,18 @@ jobs:
             latest.json > latest.json.tmp && mv latest.json.tmp latest.json
           gh release upload "${{ github.ref_name }}" --clobber \
             "$appimage" "$appimage.sig" latest.json
+
+  # 3) All builds succeeded — flip the draft to a published release.
+  publish-release:
+    needs: [create-release, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release_id }},
+              draft: false,
+            });

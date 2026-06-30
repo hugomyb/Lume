@@ -1,5 +1,5 @@
 import { For } from "solid-js";
-import type { Suggestion } from "./autocomplete";
+import type { Suggestion } from "./suggestions";
 import { t } from "./i18n";
 
 export type AcPosition = {

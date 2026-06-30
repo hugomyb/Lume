@@ -34,7 +34,7 @@ import {
   recordAliases,
   type AliasItem,
   type Suggestion,
-} from "./autocomplete";
+} from "./suggestions";
 
 type PtyOutput = { id: number; data_b64: string };
 type PtyExit = { id: number };

@@ -2,8 +2,6 @@
 //! browse. Connecting just opens a new terminal that runs `ssh <host>`, so the
 //! local shell handles auth/agent/known-hosts exactly as usual.
 
-use std::path::PathBuf;
-
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -22,8 +20,8 @@ pub fn list_ssh_hosts() -> Vec<SshHost> {
 }
 
 fn read_ssh_config() -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    std::fs::read_to_string(PathBuf::from(home).join(".ssh").join("config")).ok()
+    let home = crate::paths::home_dir()?;
+    std::fs::read_to_string(home.join(".ssh").join("config")).ok()
 }
 
 fn parse(content: &str) -> Vec<SshHost> {

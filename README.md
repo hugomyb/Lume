@@ -15,8 +15,10 @@ inline AI, panes, themes, remote control, and more. Built with
 **Rust + Tauri 2 + SolidJS + xterm.js**: a few-MB native binary, **fully local,
 no account, no telemetry**.
 
-> **Platforms:** cross-platform by design (Tauri). **Linux** builds (X11 &
-> Wayland) are shipping today; **macOS & Windows** are on the roadmap.
+> **Platforms:** **Linux** (X11 & Wayland), **macOS** (Intel & Apple Silicon)
+> and **Windows** — built for all three on every release. macOS & Windows
+> binaries are currently **unsigned** (a one-time first-launch prompt; see
+> [Install](#install)).
 
 ## Screenshots
 
@@ -54,42 +56,63 @@ no account, no telemetry**.
   remappable keybindings, text zoom.
 - **14 languages** — fully translated UI, switchable in settings (English default).
 - **Desktop notifications** when long commands finish in the background.
-- **Self-updating** (AppImage) with signed updates.
+- **Self-updating** on every platform, with signature-verified updates.
 
-## Install (Linux x86_64)
+## Install
 
-### AppImage (any distro, auto-updating) — recommended
+Grab the installer for your OS from the [latest release](https://github.com/hugomyb/Lume/releases/latest).
+
+### Linux x86_64
+
+#### AppImage (any distro, auto-updating) — recommended
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hugomyb/Lume/main/scripts/install.sh | bash
 ```
 This installs the latest AppImage and adds a menu entry. If it doesn't launch,
 install FUSE 2: `sudo apt install -y libfuse2`.
 
-### Debian / Ubuntu
+#### Debian / Ubuntu
 Download `Lume_*_amd64.deb` from the [latest release](https://github.com/hugomyb/Lume/releases/latest):
 ```bash
 sudo apt install ./Lume_*_amd64.deb
 ```
 
-### Fedora / RHEL / openSUSE
+#### Fedora / RHEL / openSUSE
 ```bash
 sudo dnf install ./Lume-*.x86_64.rpm
 ```
 
-### Arch / Manjaro (AUR)
+#### Arch / Manjaro (AUR)
 ```bash
 yay -S lume-bin       # or: paru -S lume-bin
 ```
 
+### macOS (Intel & Apple Silicon)
+Download the universal `Lume_*_universal.dmg`, open it, and drag **Lume** to
+Applications. It's **unsigned** for now, so on first launch macOS will block it —
+**right-click the app → Open** (or System Settings → Privacy & Security →
+*Open Anyway*). After that it launches normally and auto-updates.
+
+### Windows
+Download and run `Lume_*_x64-setup.exe` (NSIS installer). It's **unsigned** for
+now, so SmartScreen may warn — click **More info → Run anyway**. Updates install
+in-app afterwards.
+
 ## Shell integration
 
-For command blocks, autocomplete and cwd tracking, add this to your shell rc
-(Lume shows the exact line on first launch; the script is written to
-`~/.config/lume/`):
+For command blocks, autocomplete and cwd tracking, add the integration line to
+your shell config (Lume shows the exact line on first launch; the script is
+written to your config dir — `~/.config/lume/` on Linux/macOS, `%APPDATA%\lume\`
+on Windows):
 
 ```bash
 # ~/.zshrc  (or .bashrc / fish config.fish)
 [[ -n "$LUME_TERM" ]] && source "$HOME/.config/lume/lume-shell-init.zsh"
+```
+
+```powershell
+# PowerShell — $PROFILE  (Windows)
+if ($env:LUME_TERM) { . "$env:APPDATA\lume\lume-shell-init.ps1" }
 ```
 
 ## Build from source

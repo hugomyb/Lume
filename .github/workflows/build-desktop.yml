@@ -1,0 +1,62 @@
+name: build-desktop
+
+# On-demand macOS (.dmg, universal) and Windows (.exe / NSIS) installers,
+# uploaded as downloadable artifacts. Handy for testing a branch without cutting
+# a release — actual releases are built by release.yml (all OSes, on a tag).
+#
+# Run it manually: Actions → build-desktop → Run workflow (pick the branch).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --bundles dmg --target universal-apple-darwin
+            artifacts: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - platform: windows-latest
+            rust_targets: ""
+            args: --bundles nsis
+            artifacts: src-tauri/target/release/bundle/nsis/*-setup.exe
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build installers
+        env:
+          # The updater artifacts (createUpdaterArtifacts: true) need the signing
+          # key present, or the build aborts. We only upload the installer below.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npm run tauri build -- ${{ matrix.args }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: lume-${{ matrix.platform }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
