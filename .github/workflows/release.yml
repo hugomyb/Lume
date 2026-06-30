@@ -7,10 +7,11 @@ name: release
 #
 # Flow: create a DRAFT release, build each OS into it (matrix), then publish.
 # If any build fails the `publish` job is skipped, so the release stays a draft
-# and is never seen by users — the Linux updater is never put at risk.
+# and is never seen by users — the updater is never put at risk.
 #
-# Only Linux manages the updater manifest (latest.json); macOS/Windows ship as
-# manual downloads for now (no auto-update yet).
+# All three OSes auto-update: each job merges its platform into the updater
+# manifest (latest.json). The matrix is serialized (max-parallel: 1) so those
+# read-modify-writes of latest.json can't race each other.
 #
 # To cut a release: bump the version (scripts/release.sh) and push a tag vX.Y.Z.
 #
@@ -55,20 +56,20 @@ jobs:
     needs: create-release
     strategy:
       fail-fast: false
+      # Serialized: every job merges its platform into latest.json via a
+      # read-modify-write, so they must not run concurrently.
+      max-parallel: 1
       matrix:
         include:
           - platform: ubuntu-22.04
             rust_targets: ""
             args: --bundles deb,rpm,appimage
-            include_updater_json: true
           - platform: macos-latest
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --bundles dmg --target universal-apple-darwin
-            include_updater_json: false
           - platform: windows-latest
             rust_targets: ""
             args: --bundles nsis
-            include_updater_json: false
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -103,8 +104,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          # Only Linux writes latest.json (the auto-updater manifest).
-          includeUpdaterJson: ${{ matrix.include_updater_json }}
+          # Every platform merges its entry into latest.json (default behaviour).
+          # The serialized matrix keeps those merges from racing.
           args: ${{ matrix.args }}
 
       # Linux only — same fix as before: the AppImage bundler (linuxdeploy)
