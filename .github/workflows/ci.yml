@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `cross-platform` is temporary — it lets the macOS/Windows build run while
+    # the port lands, before a PR exists. Remove it once the PR is open.
+    branches: [main, cross-platform]
   pull_request:
 
 # Only run the latest commit per branch/PR.
