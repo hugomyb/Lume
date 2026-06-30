@@ -114,10 +114,20 @@ struct PtyAliasesEvent {
 }
 
 fn resolve_shell(cfg: &ShellConfig) -> (String, Vec<String>) {
-    let program = cfg.program.clone().unwrap_or_else(|| {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-    });
+    let program = cfg.program.clone().unwrap_or_else(default_shell);
     (program, cfg.args.clone())
+}
+
+#[cfg(windows)]
+fn default_shell() -> String {
+    // PowerShell ships on every supported Windows and gives a far nicer terminal
+    // experience than cmd.exe.
+    "powershell.exe".to_string()
+}
+
+#[cfg(not(windows))]
+fn default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
 }
 
 #[tauri::command]
@@ -162,7 +172,7 @@ fn spawn_impl(
         .filter(|c| !c.is_empty())
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_dir())
-        .or_else(|| std::env::var("HOME").ok().map(std::path::PathBuf::from))
+        .or_else(crate::paths::home_dir)
         .or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = cwd {
         cmd.cwd(cwd);

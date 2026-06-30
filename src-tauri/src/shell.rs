@@ -15,16 +15,12 @@ pub struct ShellSetupHint {
     pub rc_file: String,
 }
 
-/// `~/.config/lume` (honouring XDG_CONFIG_HOME), where we drop the integration
-/// scripts so the snippet the user pastes is portable across machines.
+/// Lume's per-user config dir, where we drop the integration scripts so the
+/// snippet the user pastes is portable across machines.
 fn config_dir() -> String {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return format!("{xdg}/lume");
-        }
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    format!("{home}/.config/lume")
+    crate::paths::config_dir()
+        .map(|d| d.display().to_string())
+        .unwrap_or_else(|| ".".to_string())
 }
 
 #[tauri::command]

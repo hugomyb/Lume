@@ -221,6 +221,18 @@ pub struct FileTreeConfig {
 }
 
 impl Default for FileTreeConfig {
+    #[cfg(windows)]
+    fn default() -> Self {
+        Self {
+            dir_list: "dir {path}".to_string(),
+            dir_open: "explorer {path}".to_string(),
+            file_view: "type {path}".to_string(),
+            file_edit: "notepad {path}".to_string(),
+            file_open: "notepad {path}".to_string(),
+        }
+    }
+
+    #[cfg(not(windows))]
     fn default() -> Self {
         Self {
             dir_list: "ls -la {path}".to_string(),
@@ -233,7 +245,7 @@ impl Default for FileTreeConfig {
 }
 
 pub fn config_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config/lume/config.toml"))
+    crate::paths::config_dir().map(|d| d.join("config.toml"))
 }
 
 pub fn load() -> Config {

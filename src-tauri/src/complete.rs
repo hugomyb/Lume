@@ -103,11 +103,10 @@ fn resolve_dir(cwd: &str, dir_part: &str) -> Option<PathBuf> {
         return Some(PathBuf::from(cwd));
     }
     if let Some(rest) = dir_part.strip_prefix("~/") {
-        let home = std::env::var("HOME").ok()?;
-        return Some(Path::new(&home).join(rest));
+        return crate::paths::home_dir().map(|h| h.join(rest));
     }
     if dir_part == "~" || dir_part == "~/" {
-        return std::env::var("HOME").ok().map(PathBuf::from);
+        return crate::paths::home_dir();
     }
     if dir_part.starts_with('/') {
         return Some(PathBuf::from(dir_part));

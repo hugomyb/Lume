@@ -9,6 +9,7 @@ mod env_fix;
 mod fonts;
 mod notify;
 mod osc;
+mod paths;
 mod pty;
 mod remote;
 mod shell;
