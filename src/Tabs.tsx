@@ -86,7 +86,7 @@ import {
   type LeafData,
   type TreeNode,
 } from "./panes";
-import { recordCommand } from "./autocomplete";
+import { recordCommand } from "./suggestions";
 
 type TabState = {
   id: number;
