@@ -1,19 +1,13 @@
 name: build-desktop
 
-# Builds the macOS (.dmg, universal) and Windows (.exe / NSIS) installers and
-# uploads them as downloadable artifacts. Kept separate from release.yml so it
-# never touches the Linux release pipeline or its auto-updater manifest.
+# On-demand macOS (.dmg, universal) and Windows (.exe / NSIS) installers,
+# uploaded as downloadable artifacts. Handy for testing a branch without cutting
+# a release — actual releases are built by release.yml (all OSes, on a tag).
 #
-# Unsigned for now: macOS shows a Gatekeeper warning (right-click → Open) and
-# Windows a SmartScreen one (More info → Run anyway). Code-signing comes later.
+# Run it manually: Actions → build-desktop → Run workflow (pick the branch).
 
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
-    # `cross-platform` is temporary — produces test installers while the port
-    # lands. Remove it once the branch merges.
-    branches: [cross-platform]
 
 permissions:
   contents: read
