@@ -19,6 +19,9 @@ mod workflows;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let cfg = Arc::new(Mutex::new(config::load()));
+    // Make sure the shell-integration scripts exist on disk from the first
+    // launch, so the rc/$PROFILE snippet always dot-sources a real file.
+    shell::ensure_integration_scripts();
     let pty_manager = Arc::new(pty::PtyManager::new());
     let ai_manager = Arc::new(ai::AiManager::new());
     let remote_state = Arc::new(remote::RemoteState::new());

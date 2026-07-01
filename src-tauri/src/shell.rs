@@ -26,6 +26,26 @@ fn config_dir() -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
+/// Write the shell-integration scripts to the config dir at startup, so the
+/// line the user adds to their rc / `$PROFILE` always resolves to a real file —
+/// even if they set it up before ever opening the Blocks panel (which otherwise
+/// writes the script lazily). Called once on launch.
+pub fn ensure_integration_scripts() {
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(windows)]
+    {
+        const PS_INIT: &str = include_str!("../../scripts/lume-shell-init.ps1");
+        let _ = std::fs::write(format!("{dir}\\lume-shell-init.ps1"), PS_INIT);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::fs::write(format!("{dir}/lume-shell-init.zsh"), ZSH_INIT);
+        let _ = std::fs::write(format!("{dir}/lume-shell-init.bash"), BASH_INIT);
+        let _ = std::fs::write(format!("{dir}/lume-shell-init.fish"), FISH_INIT);
+    }
+}
+
 #[tauri::command]
 pub fn get_shell_setup_hint() -> ShellSetupHint {
     #[cfg(windows)]

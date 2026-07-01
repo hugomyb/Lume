@@ -209,11 +209,22 @@ fn parse_osc(buf: &[u8]) -> Option<OscEvent> {
         } else {
             rest
         };
-        let decoded = percent_decode(path);
+        let decoded = normalize_cwd(percent_decode(path));
         return Some(OscEvent::Cwd(decoded));
     }
 
     None
+}
+
+/// `file://host/C:/path` decodes to `/C:/path`; strip the leading slash before
+/// a Windows drive letter so it's a usable path. No-op for POSIX paths.
+fn normalize_cwd(p: String) -> String {
+    let b = p.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
+        p[1..].to_string()
+    } else {
+        p
+    }
 }
 
 fn percent_decode(s: &str) -> String {
@@ -372,6 +383,16 @@ mod tests {
         );
         // OSC 7 is forwarded to xterm even though we captured it.
         assert!(r.passthrough.starts_with(b"\x1b]7;"));
+    }
+
+    #[test]
+    fn normalizes_windows_drive_cwd() {
+        let mut p = OscParser::new();
+        let r = p.feed(b"\x1b]7;file://HOST/C:/Users/me\x07");
+        assert_eq!(
+            events_only(&r),
+            vec![OscEvent::Cwd("C:/Users/me".to_string())]
+        );
     }
 
     #[test]

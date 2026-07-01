@@ -8,7 +8,7 @@ import type { FileTreeConfig } from "./config";
 type FsEntry = { name: string; isDir: boolean };
 
 const join = (dir: string, name: string) =>
-  dir.endsWith("/") ? dir + name : dir + "/" + name;
+  /[\\/]$/.test(dir) ? dir + name : dir + "/" + name;
 
 /** POSIX single-quote a path so it survives spaces/special chars in the shell. */
 const q = (p: string) => "'" + p.replace(/'/g, "'\\''") + "'";
@@ -193,7 +193,7 @@ export default function FileTree(props: {
   const label = () => {
     const cwd = props.cwd();
     if (!cwd) return "—";
-    return cwd.replace(/\/$/, "").split("/").pop() || "/";
+    return cwd.replace(/[\\/]$/, "").split(/[\\/]/).pop() || "/";
   };
 
   // Resize handle on the right edge.

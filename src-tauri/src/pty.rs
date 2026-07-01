@@ -168,15 +168,20 @@ fn spawn_impl(
     // Prefer a restored cwd (session persistence) when it still exists, else
     // default to $HOME so shells open in the user's home dir rather than wherever
     // the Tauri process was launched from (src-tauri/ in dev, / when packaged).
-    let cwd = init_cwd
+    let spawn_cwd = init_cwd
         .filter(|c| !c.is_empty())
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_dir())
         .or_else(crate::paths::home_dir)
         .or_else(|| std::env::current_dir().ok());
-    if let Some(cwd) = cwd {
+    if let Some(ref cwd) = spawn_cwd {
         cmd.cwd(cwd);
     }
+    // String form for the session cwd tracker and the initial cwd event, so the
+    // file tree and path autocomplete have a starting directory immediately —
+    // even before the shell's OSC 7 fires, or when shell integration isn't set
+    // up (notably on Windows/PowerShell).
+    let init_cwd_str = spawn_cwd.map(|p| p.display().to_string());
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("LUME_TERM", "1");
@@ -192,7 +197,7 @@ fn spawn_impl(
 
     let id = pty_state.next_id.fetch_add(1, Ordering::Relaxed);
 
-    let cwd = Arc::new(Mutex::new(std::env::current_dir().ok().map(|p| p.display().to_string())));
+    let cwd = Arc::new(Mutex::new(init_cwd_str.clone()));
     let cwd_for_reader = cwd.clone();
 
     // Fan-out of raw output to remote-control subscribers. The receiver held
@@ -212,6 +217,13 @@ fn spawn_impl(
             replay,
         },
     );
+
+    // Seed the frontend with the initial cwd right away (buffered on the JS side
+    // until the pty id is known), so the file tree / autocomplete work without
+    // waiting on shell integration.
+    if let Some(ref c) = init_cwd_str {
+        let _ = app.emit("pty:cwd", PtyCwdEvent { id, cwd: c.clone() });
+    }
 
     {
         let app = app.clone();

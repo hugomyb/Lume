@@ -56,8 +56,9 @@ pub fn read_dir(path: String, show_hidden: bool) -> Result<Vec<FsEntry>, String>
 
 fn complete_impl(cwd: &str, token: &str) -> Option<Vec<FsEntry>> {
     // Split into the directory part (everything up to and including the last
-    // '/') and the prefix we match entries against.
-    let (dir_part, prefix) = match token.rfind('/') {
+    // path separator) and the prefix we match entries against. Accept '\' too
+    // so Windows-style tokens complete.
+    let (dir_part, prefix) = match token.rfind(['/', '\\']) {
         Some(i) => (&token[..=i], &token[i + 1..]),
         None => ("", token),
     };
@@ -102,14 +103,19 @@ fn resolve_dir(cwd: &str, dir_part: &str) -> Option<PathBuf> {
     if dir_part.is_empty() {
         return Some(PathBuf::from(cwd));
     }
-    if let Some(rest) = dir_part.strip_prefix("~/") {
-        return crate::paths::home_dir().map(|h| h.join(rest));
-    }
-    if dir_part == "~" || dir_part == "~/" {
+    if dir_part == "~" || dir_part == "~/" || dir_part == "~\\" {
         return crate::paths::home_dir();
     }
-    if dir_part.starts_with('/') {
-        return Some(PathBuf::from(dir_part));
+    if let Some(rest) = dir_part
+        .strip_prefix("~/")
+        .or_else(|| dir_part.strip_prefix("~\\"))
+    {
+        return crate::paths::home_dir().map(|h| h.join(rest));
+    }
+    // `is_absolute` handles both `/foo` (Unix) and `C:\foo` (Windows).
+    let p = Path::new(dir_part);
+    if p.is_absolute() {
+        return Some(p.to_path_buf());
     }
     Some(Path::new(cwd).join(dir_part))
 }
