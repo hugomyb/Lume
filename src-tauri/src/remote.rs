@@ -193,13 +193,12 @@ fn cloudflared_bin() -> String {
 
 /// Is `cloudflared` available (on PATH or a known location)?
 fn cloudflared_available() -> bool {
-    std::process::Command::new(cloudflared_bin())
-        .arg("--version")
+    let mut cmd = std::process::Command::new(cloudflared_bin());
+    cmd.arg("--version")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .stderr(std::process::Stdio::null());
+    crate::env_fix::no_window(&mut cmd);
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// Spawn a cloudflared quick tunnel pointing at the local server. A reader
@@ -214,17 +213,17 @@ fn start_tunnel(
     use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
 
-    let mut child = Command::new(cloudflared_bin())
-        .args([
-            "tunnel",
-            "--no-autoupdate",
-            "--url",
-            &format!("http://127.0.0.1:{port}"),
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
+    let mut cmd = Command::new(cloudflared_bin());
+    cmd.args([
+        "tunnel",
+        "--no-autoupdate",
+        "--url",
+        &format!("http://127.0.0.1:{port}"),
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    crate::env_fix::no_window(&mut cmd);
+    let mut child = cmd.spawn().ok()?;
 
     // cloudflared prints the URL to stderr; read both streams to be safe.
     let mut readers: Vec<Box<dyn std::io::Read + Send>> = Vec::new();
@@ -400,6 +399,7 @@ fn chmod_exec(path: &str) -> Result<(), String> {
 fn download(url: &str, dest: &str) -> bool {
     use std::process::{Command, Stdio};
     let run = |cmd: &mut Command| {
+        crate::env_fix::no_window(cmd);
         cmd.stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()

@@ -99,6 +99,21 @@ pub fn sanitize(cmd: &mut Command) {
     }
 }
 
+/// On Windows, stop a spawned console program (the AI CLI, cloudflared, …) from
+/// flashing up its own console window. No-op on other platforms.
+pub fn no_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
+}
+
 /// Strip AppImage pollution from a `portable_pty::CommandBuilder`.
 pub fn sanitize_pty(cmd: &mut portable_pty::CommandBuilder) {
     let (unset, set) = fixups();

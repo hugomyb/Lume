@@ -524,6 +524,8 @@ fn spawn_request(
     // Clean the AppImage pollution and hand the CLI the user's real PATH so it
     // can find its own runtime (node, etc.), mirroring a terminal launch.
     crate::env_fix::sanitize(&mut cmd);
+    // Windows: don't pop up a console window while the CLI runs.
+    crate::env_fix::no_window(&mut cmd);
     cmd.env("PATH", crate::env_fix::user_path());
     if let Some(env_var) = &provider.key_env {
         if !provider.api_key.trim().is_empty() {
