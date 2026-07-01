@@ -8,6 +8,11 @@ name: build-desktop
 
 on:
   workflow_dispatch:
+  # Temporary: auto-build installers on each main push during the Windows
+  # debugging loop, so testable builds appear without a manual dispatch.
+  # Remove once Windows is validated.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
