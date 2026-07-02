@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hugomyb/Lume/releases/latest"><img src="https://img.shields.io/github/v/release/hugomyb/Lume?color=4ea1ff" alt="Latest release"></a>
+  <a href="https://github.com/hugomyb/Lume/releases/latest"><img src="https://img.shields.io/github/v/release/hugomyb/Lume?color=4ea1ff&cacheSeconds=3600" alt="Latest release"></a>
   <a href="https://github.com/hugomyb/Lume/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/hugomyb/Lume/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <a href="https://github.com/hugomyb/Lume/releases"><img src="https://img.shields.io/github/downloads/hugomyb/Lume/total?color=56d364" alt="Downloads"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/hugomyb/Lume?color=c678dd" alt="License: MIT"></a>
-  <a href="https://github.com/hugomyb/Lume/stargazers"><img src="https://img.shields.io/github/stars/hugomyb/Lume" alt="Stars"></a>
+  <a href="https://github.com/hugomyb/Lume/releases"><img src="https://img.shields.io/github/downloads/hugomyb/Lume/total?color=56d364&cacheSeconds=3600" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-c678dd" alt="License: MIT"></a>
+  <a href="https://github.com/hugomyb/Lume/stargazers"><img src="https://img.shields.io/github/stars/hugomyb/Lume?cacheSeconds=3600" alt="Stars"></a>
 </p>
 
 A fast, lightweight, **open-source alternative to Warp** — command blocks,
