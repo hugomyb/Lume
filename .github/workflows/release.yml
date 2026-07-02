@@ -35,10 +35,35 @@ jobs:
     outputs:
       release_id: ${{ steps.create.outputs.result }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build release notes from commits since the previous tag
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          PREV="$(git tag --sort=-v:refname | grep -vFx "$TAG" | head -1 || true)"
+          {
+            echo "### What's changed"
+            echo ""
+            if [ -n "$PREV" ]; then
+              git log --no-merges --invert-grep --grep='^release:' --pretty=format:'- %s' "$PREV..$TAG"
+              echo ""
+              echo ""
+              echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/$PREV...$TAG"
+            else
+              git log --no-merges --pretty=format:'- %s'
+            fi
+          } > CHANGELOG_NOTES.md
+          cat CHANGELOG_NOTES.md
+
       - uses: actions/github-script@v7
         id: create
         with:
           script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('CHANGELOG_NOTES.md', 'utf8');
             const tag = context.ref.replace('refs/tags/', '');
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
@@ -48,6 +73,7 @@ jobs:
               draft: true,
               prerelease: false,
               target_commitish: context.sha,
+              body,
             });
             return data.id;
 
