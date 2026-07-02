@@ -990,9 +990,9 @@ export default function Tabs() {
       }
     }
     if (tabs.length === 1) {
-      const newTab = makeEmptyTab();
-      setTabs([newTab]);
-      setActiveId(newTab.id);
+      // Closing the last terminal quits Lume, like a native terminal
+      // (Ctrl+D / `exit` / the tab's × button all funnel here).
+      getCurrentWindow().close();
       return;
     }
     const wasActive = activeId() === id;
