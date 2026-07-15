@@ -99,28 +99,13 @@ pub fn sanitize(cmd: &mut Command) {
     }
 }
 
-/// Work around WebKitGTK's DMABUF rendering path, which stutters badly on a wide
-/// range of Linux GPU/driver combos (NVIDIA proprietary being the worst): frames
-/// arrive late, typing lags and scrolling judders even though the CPU stays idle.
-/// The symptom is pure render latency, so xterm's WebGL renderer alone can't
-/// rescue it — the compositor upload is the bottleneck. Disabling DMABUF drops
-/// WebKit onto its plain GL path, which is smooth here and costs nothing
-/// noticeable for a terminal (no heavy GPU compositing to lose).
-///
-/// Set before the WebView is created (i.e. before `tauri::Builder`), and only
-/// when the user hasn't already pinned the variable themselves so an explicit
-/// override still wins. No-op off Linux, where the DMABUF renderer doesn't exist.
-pub fn tune_webkit_rendering() {
-    #[cfg(target_os = "linux")]
-    {
-        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-            // Called at the very start of `run()`, before any threads or the
-            // WebView spawn, so nothing races this write. (On edition 2024
-            // `set_var` becomes `unsafe`; this call site is sound to wrap then.)
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-    }
-}
+// NOTE: do NOT set WEBKIT_DISABLE_DMABUF_RENDERER here. v1.0.2 shipped it as a
+// supposed NVIDIA stutter workaround, and it turned out to be a ~3× rendering
+// regression: without DMABUF, WebKitGTK loses zero-copy sharing of xterm's
+// WebGL canvas and falls back to a far more expensive compositing path
+// (measured 78% vs 29% WebProcess CPU during a selection drag, on both NVIDIA
+// and Intel). Users on genuinely broken driver combos can still export the
+// variable themselves — the WebView inherits the process environment.
 
 /// On Windows, stop a spawned console program (the AI CLI, cloudflared, …) from
 /// flashing up its own console window. No-op on other platforms.
