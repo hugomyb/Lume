@@ -18,6 +18,10 @@ mod workflows;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Must run before Tauri creates the WebView: works around WebKitGTK's laggy
+    // DMABUF renderer on Linux (see env_fix for the why).
+    env_fix::tune_webkit_rendering();
+
     let cfg = Arc::new(Mutex::new(config::load()));
     // Make sure the shell-integration scripts exist on disk from the first
     // launch, so the rc/$PROFILE snippet always dot-sources a real file.

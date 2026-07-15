@@ -1,6 +1,6 @@
 [package]
 name = "lume"
-version = "1.0.1"
+version = "1.0.2"
 description = "Fast, lightweight, open-source terminal — a private, local alternative to Warp"
 authors = ["Hugo Mayonobe"]
 license = "MIT"

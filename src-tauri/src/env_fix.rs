@@ -99,6 +99,29 @@ pub fn sanitize(cmd: &mut Command) {
     }
 }
 
+/// Work around WebKitGTK's DMABUF rendering path, which stutters badly on a wide
+/// range of Linux GPU/driver combos (NVIDIA proprietary being the worst): frames
+/// arrive late, typing lags and scrolling judders even though the CPU stays idle.
+/// The symptom is pure render latency, so xterm's WebGL renderer alone can't
+/// rescue it — the compositor upload is the bottleneck. Disabling DMABUF drops
+/// WebKit onto its plain GL path, which is smooth here and costs nothing
+/// noticeable for a terminal (no heavy GPU compositing to lose).
+///
+/// Set before the WebView is created (i.e. before `tauri::Builder`), and only
+/// when the user hasn't already pinned the variable themselves so an explicit
+/// override still wins. No-op off Linux, where the DMABUF renderer doesn't exist.
+pub fn tune_webkit_rendering() {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            // Called at the very start of `run()`, before any threads or the
+            // WebView spawn, so nothing races this write. (On edition 2024
+            // `set_var` becomes `unsafe`; this call site is sound to wrap then.)
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
 /// On Windows, stop a spawned console program (the AI CLI, cloudflared, …) from
 /// flashing up its own console window. No-op on other platforms.
 pub fn no_window(cmd: &mut Command) {
