@@ -254,6 +254,34 @@ export default function Terminal(props: TerminalProps) {
     fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef);
+
+    // xterm on Linux re-extracts the ENTIRE selection text on every mousemove
+    // of a drag (twice, via the `selectionText` getter) and mirrors it into its
+    // hidden textarea (`value` + `select()`), just to keep the X11 PRIMARY
+    // selection live for middle-click paste. That's O(selected rows) work at
+    // mouse-event rate — measured 45% WebProcess CPU for a ~45-row drag vs 12%
+    // for a 1-row one. Middle-click paste only needs PRIMARY to be correct once
+    // the drag ENDS, so: strip the per-move sync (refresh(false)) and replay a
+    // single genuine refresh(true) on mouseup.
+    {
+      const selSvc = (
+        term as unknown as {
+          _core?: { _selectionService?: { refresh: (linux?: boolean) => void } };
+        }
+      )._core?._selectionService;
+      if (selSvc) {
+        const origRefresh = selSvc.refresh.bind(selSvc);
+        selSvc.refresh = () => origRefresh(false);
+        const syncPrimaryOnMouseUp = (e: MouseEvent) => {
+          if (e.button === 0 && term?.hasSelection()) origRefresh(true);
+        };
+        // Document-level: the drag can end outside the terminal (or window).
+        document.addEventListener("mouseup", syncPrimaryOnMouseUp);
+        addCleanup(() =>
+          document.removeEventListener("mouseup", syncPrimaryOnMouseUp)
+        );
+      }
+    }
     // The WebGL renderer is fast but has glyph-rendering gaps (some Nerd Font /
     // icon glyphs render as tofu where the DOM renderer would fall back fine).
     // Allow disabling it: `localStorage.setItem("lume.noWebgl","1")` + reload.
@@ -850,6 +878,13 @@ export default function Terminal(props: TerminalProps) {
     };
 
     const onHostMove = (e: MouseEvent) => {
+      // Button held = selection drag in progress: a hover affordance is
+      // pointless and this handler's layout reads would interleave with
+      // xterm's per-frame selection redraws.
+      if (e.buttons & 1) {
+        hideCopyBtn();
+        return;
+      }
       if (!term || !containerRef || markers.size === 0) {
         hideCopyBtn();
         return;
