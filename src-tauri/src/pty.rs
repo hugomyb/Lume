@@ -9,6 +9,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::broadcast;
 
@@ -83,15 +84,10 @@ impl PtyManager {
 }
 
 #[derive(Serialize, Clone)]
-struct PtyOutputEvent {
-    id: u64,
-    data_b64: String,
-}
-
-#[derive(Serialize, Clone)]
 struct PtyExitEvent {
     id: u64,
 }
+
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -138,8 +134,9 @@ pub fn pty_spawn(
     rows: u16,
     cols: u16,
     cwd: Option<String>,
+    on_output: Channel<InvokeResponseBody>,
 ) -> Result<u64, String> {
-    spawn_impl(app, pty_state, cfg_state, rows, cols, cwd).map_err(|e| e.to_string())
+    spawn_impl(app, pty_state, cfg_state, rows, cols, cwd, on_output).map_err(|e| e.to_string())
 }
 
 fn spawn_impl(
@@ -149,6 +146,7 @@ fn spawn_impl(
     rows: u16,
     cols: u16,
     init_cwd: Option<String>,
+    on_output: Channel<InvokeResponseBody>,
 ) -> Result<u64> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -322,11 +320,16 @@ fn spawn_impl(
                                     let _ = output_tx_reader.send(result.passthrough.clone());
                                 }
                             }
-                            let payload = PtyOutputEvent {
-                                id,
-                                data_b64: B64.encode(&result.passthrough),
-                            };
-                            if app.emit("pty:output", payload).is_err() {
+                            // Point-to-point channel with a raw (non-base64,
+                            // non-JSON) payload: small chunks — the interactive
+                            // case — are eval'd directly into the pane's
+                            // callback, without the event system's per-webview
+                            // broadcast that every other pane would have to
+                            // filter out in JS.
+                            if on_output
+                                .send(InvokeResponseBody::Raw(result.passthrough))
+                                .is_err()
+                            {
                                 break;
                             }
                         }
