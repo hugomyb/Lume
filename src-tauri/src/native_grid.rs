@@ -155,6 +155,11 @@ impl GridModel {
     }
 }
 
+/// Window-coordinate rects of DOM affordances currently shown over panes
+/// (drag grip, copy button, context menus…): the grid leaves them unpainted
+/// so the web layer shows through, fully interactive.
+static OVERLAY_RECTS: Mutex<Vec<(i32, i32, i32, i32)>> = Mutex::new(Vec::new());
+
 fn models() -> &'static Mutex<HashMap<u64, Arc<GridModel>>> {
     static MODELS: OnceLock<Mutex<HashMap<u64, Arc<GridModel>>>> = OnceLock::new();
     MODELS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -254,8 +259,23 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
                 continue;
             }
             cr.save().ok();
+            // Pane clip minus the DOM overlay rects (even-odd fill rule:
+            // regions covered twice are excluded). Holes must be intersected
+            // with the pane rect first — an even-odd rect sticking out would
+            // ADD area outside the pane instead of subtracting.
+            cr.set_fill_rule(gtk::cairo::FillRule::EvenOdd);
             cr.rectangle(x as f64, y as f64, w as f64, h as f64);
+            for &(ox, oy, ow, oh) in OVERLAY_RECTS.lock().iter() {
+                let ix = ox.max(x);
+                let iy = oy.max(y);
+                let ix2 = (ox + ow).min(x + w);
+                let iy2 = (oy + oh).min(y + h);
+                if ix2 > ix && iy2 > iy {
+                    cr.rectangle(ix as f64, iy as f64, (ix2 - ix) as f64, (iy2 - iy) as f64);
+                }
+            }
             cr.clip();
+            cr.set_fill_rule(gtk::cairo::FillRule::Winding);
             cr.translate(x as f64, y as f64);
             let clip = cr
                 .clip_extents()
@@ -728,4 +748,38 @@ pub fn native_grid_set_selection(
         }
     }
     Ok(())
+}
+
+/// Update the DOM-affordance rects the grids must not paint over (window
+/// coordinates). Repaints the union of old and new rects.
+#[tauri::command]
+pub fn native_grid_set_overlay_rects(
+    app: tauri::AppHandle,
+    rects: Vec<[i32; 4]>,
+) -> Result<(), String> {
+    let new: Vec<(i32, i32, i32, i32)> = rects
+        .into_iter()
+        .map(|r| (r[0], r[1], r[2], r[3]))
+        .collect();
+    let old = {
+        let mut cur = OVERLAY_RECTS.lock();
+        if *cur == new {
+            return Ok(());
+        }
+        std::mem::replace(&mut *cur, new.clone())
+    };
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
+    window
+        .run_on_main_thread(move || {
+            HOOKED.with(|hw| {
+                if let Some(win) = hw.borrow().as_ref() {
+                    for (x, y, w, h) in old.iter().chain(new.iter()) {
+                        win.queue_draw_area(*x, *y, *w, *h);
+                    }
+                }
+            });
+        })
+        .map_err(|e| e.to_string())
 }

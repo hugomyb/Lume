@@ -55,6 +55,8 @@ pub fn run() {
             native_grid::native_grid_set_focused,
             #[cfg(target_os = "linux")]
             native_grid::native_grid_set_selection,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_set_overlay_rects,
             config::get_config,
             config::save_config,
             config::export_config,

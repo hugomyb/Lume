@@ -399,6 +399,61 @@ export default function Tabs() {
     document.body.classList.toggle("lume-overlay-open", open);
     window.dispatchEvent(new Event("lume-overlay-change"));
   });
+
+  // Native grid (Linux): small DOM affordances that pop up OVER a pane (drag
+  // grip, per-block copy button, context menus, block flash) must stay
+  // visible above the native layer. Report their on-screen rects so the grid
+  // leaves those pixels unpainted — generic: add the class of any future
+  // pane-covering affordance to the selector.
+  if (navigator.userAgent.includes("Linux")) {
+    const OVERLAY_SEL =
+      ".pane-grip, .lume-block-copy, .block-context-menu, .tab-context-menu, .pane-context-menu, .lume-block-flash";
+    let lastRects = "";
+    let overlayRaf = 0;
+    const syncOverlayRects = () => {
+      if (overlayRaf) return;
+      overlayRaf = requestAnimationFrame(() => {
+        overlayRaf = 0;
+        const rects: number[][] = [];
+        document.querySelectorAll<HTMLElement>(OVERLAY_SEL).forEach((el) => {
+          const cs = getComputedStyle(el);
+          if (
+            cs.display === "none" ||
+            cs.visibility === "hidden" ||
+            parseFloat(cs.opacity) < 0.05
+          )
+            return;
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0)
+            rects.push([
+              Math.floor(r.left),
+              Math.floor(r.top),
+              Math.ceil(r.width),
+              Math.ceil(r.height),
+            ]);
+        });
+        const key = JSON.stringify(rects);
+        if (key !== lastRects) {
+          lastRects = key;
+          invoke("native_grid_set_overlay_rects", { rects }).catch(() => {});
+        }
+      });
+    };
+    document.addEventListener("mousemove", syncOverlayRects, {
+      passive: true,
+    });
+    document.addEventListener("mousedown", syncOverlayRects, true);
+    document.addEventListener("mouseup", syncOverlayRects, true);
+    // Safety net for non-mouse triggers (keyboard-opened menus, animations).
+    const overlayPoll = setInterval(syncOverlayRects, 300);
+    onCleanup(() => {
+      document.removeEventListener("mousemove", syncOverlayRects);
+      document.removeEventListener("mousedown", syncOverlayRects, true);
+      document.removeEventListener("mouseup", syncOverlayRects, true);
+      clearInterval(overlayPoll);
+      if (overlayRaf) cancelAnimationFrame(overlayRaf);
+    });
+  }
   const [toast, setToast] = createSignal<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
   const flashToast = (msg: string) => {
