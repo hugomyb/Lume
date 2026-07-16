@@ -395,7 +395,11 @@ export default function Tabs() {
       paletteOpen() ||
       workflowsOpen() ||
       sshOpen() ||
-      layoutsOpen();
+      layoutsOpen() ||
+      // Tab/pane drags paint drop zones and swap targets across the panes:
+      // yield the whole grid layer for the duration of the drag.
+      draggingTabId() !== null ||
+      draggingPaneLeafId() !== null;
     document.body.classList.toggle("lume-overlay-open", open);
     window.dispatchEvent(new Event("lume-overlay-change"));
   });
