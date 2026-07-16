@@ -416,7 +416,7 @@ export default function Tabs() {
       resizeSettle = setTimeout(() => {
         document.body.classList.remove("lume-split-drag");
         window.dispatchEvent(new Event("lume-overlay-change"));
-      }, 250);
+      }, 400);
     };
     window.addEventListener("resize", onWinResize);
     onCleanup(() => {
@@ -432,7 +432,7 @@ export default function Tabs() {
   // pane-covering affordance to the selector.
   if (navigator.userAgent.includes("Linux")) {
     const OVERLAY_SEL =
-      ".pane-grip, .lume-block-copy, .block-context-menu, .tab-context-menu, .pane-context-menu, .lume-block-flash";
+      '.pane-grip, .lume-block-copy, .lume-block-flash, [class*="context-menu"], [class*="ctx-menu"]';
     let lastRects = "";
     let overlayRaf = 0;
     const syncOverlayRects = () => {

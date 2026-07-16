@@ -625,16 +625,20 @@ pub fn native_grid_update(
         let window = app
             .get_webview_window("main")
             .ok_or("main window not found")?;
+        let rect_changed = old_rect != (x, y, width, height);
         window
             .run_on_main_thread(move || {
-                // Repaint both the old and new spots.
-                HOOKED.with(|hw| {
-                    if let Some(win) = hw.borrow().as_ref() {
-                        let (ox, oy, ow, oh) = old_rect;
-                        win.queue_draw_area(ox, oy, ow, oh);
-                    }
-                });
-                queue_model_redraw(&model, None);
+                if rect_changed {
+                    // Layout moved: full-window repaint wipes any pixels the
+                    // grid left at intermediate positions.
+                    HOOKED.with(|hw| {
+                        if let Some(win) = hw.borrow().as_ref() {
+                            win.queue_draw();
+                        }
+                    });
+                } else {
+                    queue_model_redraw(&model, None);
+                }
             })
             .map_err(|e| e.to_string())?;
     }
@@ -651,12 +655,12 @@ pub fn native_grid_set_visible(app: tauri::AppHandle, id: u64, visible: bool) ->
             .ok_or("main window not found")?;
         window
             .run_on_main_thread(move || {
-                // Repaint the spot either way (uncovers the web layer or
-                // repaints the grid).
-                let (x, y, w, h) = *model.rect.lock();
+                // Full-window repaint: cheap (event-driven only) and it
+                // guarantees no stale grid pixels survive anywhere — pane
+                // rects may have moved while this grid was hidden.
                 HOOKED.with(|hw| {
                     if let Some(win) = hw.borrow().as_ref() {
-                        win.queue_draw_area(x, y, w, h);
+                        win.queue_draw();
                     }
                 });
             })

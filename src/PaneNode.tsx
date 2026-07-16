@@ -65,8 +65,12 @@ function startSplitDrag(
     onResize(splitId, ratio);
   };
   const onUp = () => {
-    document.body.classList.remove("lume-split-drag");
-    window.dispatchEvent(new Event("lume-overlay-change"));
+    // Host rects keep settling for a few frames after release (the portal
+    // hosts are re-positioned by JS): keep the grids yielded until stable.
+    setTimeout(() => {
+      document.body.classList.remove("lume-split-drag");
+      window.dispatchEvent(new Event("lume-overlay-change"));
+    }, 400);
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
     window.removeEventListener("mousemove", onMove);
