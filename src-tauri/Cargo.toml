@@ -1,6 +1,6 @@
 [package]
 name = "lume"
-version = "1.0.4"
+version = "1.0.5"
 description = "Fast, lightweight, open-source terminal — a private, local alternative to Warp"
 authors = ["Hugo Mayonobe"]
 license = "MIT"
@@ -45,6 +45,13 @@ tauri-plugin-dialog = "2.7.1"
 # Blocking HTTP client (rustls/ring → no OpenSSL, keeps the portable build) for
 # the API-key AI providers (OpenAI-compatible streaming).
 ureq = { version = "2", features = ["json"] }
+
+# Native terminal grid renderer (Linux, phase 0) — terminal model + GTK painting.
+[target.'cfg(target_os = "linux")'.dependencies]
+alacritty_terminal = "0.26"
+gtk = "0.18"
+glib = "0.18"
+pangocairo = "0.18"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

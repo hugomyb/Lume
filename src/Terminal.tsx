@@ -17,7 +17,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
@@ -36,7 +36,6 @@ import {
   type Suggestion,
 } from "./suggestions";
 
-type PtyOutput = { id: number; data_b64: string };
 type PtyExit = { id: number };
 
 type TerminalProps = {
@@ -101,13 +100,6 @@ function withFallbacks(family: string): string {
   return family ? `${family}, ${FONT_FALLBACKS}` : FONT_FALLBACKS;
 }
 
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
 function bytesToB64(bytes: Uint8Array): string {
   let bin = "";
   const chunk = 0x8000;
@@ -119,12 +111,36 @@ function bytesToB64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+// Native grid renderer (Linux): the terminal is painted by a Rust-side model
+// under a transparent WebView (docs/native-renderer-plan.md) — ~1-4 ms
+// pty→pixel instead of ~14 ms through WebKit's compositor. xterm.js keeps
+// running as the interaction model (input, autocomplete anchors, selection,
+// search); its canvases are only revealed for states the grid does not
+// render: active selection, scrolled-back viewport, open search.
+// Default on Linux — kill-switch:
+//   localStorage.setItem("lume.noNativeGrid", "1") + reload.
+const NATIVE_GRID = (() => {
+  try {
+    return (
+      navigator.userAgent.includes("Linux") &&
+      localStorage.getItem("lume.noNativeGrid") !== "1"
+    );
+  } catch {
+    return false;
+  }
+})();
+
 export default function Terminal(props: TerminalProps) {
   let containerRef: HTMLDivElement | undefined;
   let term: XTerm | undefined;
   let fit: FitAddon | undefined;
   let ptyId: number | undefined;
-  let unlistenOutput: UnlistenFn | undefined;
+  let nativeGridAttached = false;
+  let nativeGridPoll: ReturnType<typeof setInterval> | undefined;
+  // Set by the native-grid attach: called from the selection-service refresh
+  // patch below so the native highlight follows the drag LIVE (xterm's public
+  // onSelectionChange only fires on mouseup).
+  let nativeSelectionSync: (() => void) | null = null;
   let unlistenExit: UnlistenFn | undefined;
   let unlistenBlock: UnlistenFn | undefined;
   let unlistenCwd: UnlistenFn | undefined;
@@ -271,7 +287,12 @@ export default function Terminal(props: TerminalProps) {
       )._core?._selectionService;
       if (selSvc) {
         const origRefresh = selSvc.refresh.bind(selSvc);
-        selSvc.refresh = () => origRefresh(false);
+        selSvc.refresh = () => {
+          origRefresh(false);
+          // refresh() fires on every mousemove of a drag: mirror the live
+          // selection into the native grid (no-op when the grid is off).
+          nativeSelectionSync?.();
+        };
         const syncPrimaryOnMouseUp = (e: MouseEvent) => {
           if (e.button === 0 && term?.hasSelection()) origRefresh(true);
         };
@@ -280,6 +301,54 @@ export default function Terminal(props: TerminalProps) {
         addCleanup(() =>
           document.removeEventListener("mouseup", syncPrimaryOnMouseUp)
         );
+      }
+    }
+
+    // xterm coalesces redraws behind a requestAnimationFrame (RenderDebouncer):
+    // a keystroke echo parsed at time T is drawn at the next rAF (~+8ms avg)
+    // and WebKit composites the canvas one frame later (~+8ms) — two frame
+    // quantizations on every echo. Measured pty-write→paint: 31ms median on
+    // the release build vs 1.1ms for gnome-terminal on the same machine. An
+    // interactive echo is a tiny redraw, so draw it synchronously as soon as
+    // its chunk is parsed and let the already-scheduled rAF no-op. Under flood
+    // (builds, `yes`) keep the rAF batching: if we sync-rendered <8ms ago,
+    // fall through to the pending frame instead of redrawing per chunk.
+    // Kill-switch: `localStorage.setItem("lume.noSyncRender","1")` + reload.
+    {
+      const deb = (
+        term as unknown as {
+          _core?: {
+            _renderService?: {
+              _renderDebouncer?: {
+                _animationFrame?: number;
+                _innerRefresh: () => void;
+              };
+            };
+          };
+        }
+      )._core?._renderService?._renderDebouncer;
+      const syncRenderOff = (() => {
+        try {
+          return localStorage.getItem("lume.noSyncRender") === "1";
+        } catch {
+          return false;
+        }
+      })();
+      if (deb?._innerRefresh && !syncRenderOff) {
+        let lastSyncRender = 0;
+        const flushSub = term.onWriteParsed(() => {
+          // No pending frame means the parse dirtied no rows — nothing to do.
+          // (Also the steady state for hidden panes: their render service is
+          // paused, so nothing schedules frames until the pane is shown.)
+          if (deb._animationFrame === undefined) return;
+          const now = performance.now();
+          if (now - lastSyncRender < 8) return;
+          lastSyncRender = now;
+          cancelAnimationFrame(deb._animationFrame);
+          deb._animationFrame = undefined;
+          deb._innerRefresh();
+        });
+        addCleanup(() => flushSub.dispose());
       }
     }
     // The WebGL renderer is fast but has glyph-rendering gaps (some Nerd Font /
@@ -550,22 +619,39 @@ export default function Terminal(props: TerminalProps) {
       return true;
     });
 
+    // xterm defers the first write of an idle buffer to a `setTimeout` task
+    // unless the data directly follows user input (its `_didUserInput` fast
+    // path parses synchronously). Upstream only arms that flag from its own
+    // textarea input, which never happens here — our keystrokes round-trip
+    // through the PTY and come back as regular writes. Arm it ourselves on
+    // every chunk: when the buffer is idle (the interactive case — a keystroke
+    // echo) the chunk parses synchronously; mid-burst the flag is ignored and
+    // batching behaves exactly as before.
+    const writeBufForFastPath = (
+      term as unknown as {
+        _core?: { _writeBuffer?: { _didUserInput?: boolean } };
+      }
+    )._core?._writeBuffer;
+    const fastWrite = (bytes: Uint8Array) => {
+      if (writeBufForFastPath) writeBufForFastPath._didUserInput = true;
+      term?.write(bytes);
+    };
+
+    // Raw output arrives on a per-pane channel (created below, passed to
+    // pty_spawn): point-to-point ArrayBuffer delivery, no base64, no JSON
+    // envelope, no event broadcast for the other panes to filter out. Channel
+    // messages are ordered and buffered from the moment the channel object
+    // exists, so — unlike the events below — the shell's first bytes (banner,
+    // first prompt) can't be missed and need no pending-queue dance.
+    const outputChannel = new Channel<ArrayBuffer>();
+    outputChannel.onmessage = (buf) => fastWrite(new Uint8Array(buf));
+
     // Register listeners BEFORE spawning the PTY so we don't miss the shell's
     // initial output (banner, first prompt). The Rust reader thread starts
     // as soon as the PTY is spawned, and on a busy event loop the listener
     // registration after the await could miss those early bytes.
-    const pendingOutput: PtyOutput[] = [];
     const pendingBlocks: PtyBlock[] = [];
     const pendingCwd: { id: number; cwd: string }[] = [];
-
-    unlistenOutput = await listen<PtyOutput>("pty:output", (e) => {
-      if (ptyId === undefined) {
-        pendingOutput.push(e.payload);
-        return;
-      }
-      if (e.payload.id !== ptyId) return;
-      term?.write(b64ToBytes(e.payload.data_b64));
-    });
 
     unlistenExit = await listen<PtyExit>("pty:exit", (e) => {
       if (e.payload.id !== ptyId) return;
@@ -612,18 +698,243 @@ export default function Terminal(props: TerminalProps) {
       rows,
       cols,
       cwd: props.initialCwd ?? null,
+      onOutput: outputChannel,
     });
     props.onSpawned?.(ptyId);
     props.onFocusReady?.(() => term?.focus());
     props.onSelectionReady?.(() => term?.getSelection() ?? "");
     props.onSearchReady?.(openSearchBar);
 
+    // Native grid renderer (Linux) — attach this pane's grid. On failure we
+    // simply keep xterm visible (web fallback), nothing else changes.
+    if (NATIVE_GRID && containerRef) {
+      const th = props.appearance.theme;
+      const gridRect = () => {
+        const r = containerRef!.getBoundingClientRect();
+        return {
+          id: ptyId,
+          x: Math.round(r.left),
+          y: Math.round(r.top),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+          cols: term?.cols ?? 80,
+          rows: term?.rows ?? 24,
+        };
+      };
+      let lastFallback: boolean | null = null;
+      let lastVisible: boolean | null = null;
+      const updateFallback = () => {
+        if (!term || !containerRef || ptyId === undefined) return;
+        const buf = term.buffer.active;
+        // NOTE: selection is NOT a fallback anymore — the grid paints it
+        // natively (no renderer swap mid-drag).
+        const fallback =
+          buf.viewportY < buf.baseY ||
+          searchOpen() ||
+          acOpen() ||
+          document.body.classList.contains("lume-overlay-open");
+        if (fallback !== lastFallback) {
+          lastFallback = fallback;
+          containerRef.classList.toggle("xterm-fallback", fallback);
+        }
+        // Grid visibility = the pane is laid out (its tab is shown; hidden
+        // tabs collapse the rect to 0) and nothing DOM-side needs the spot.
+        // NOTE: props.active() is the FOCUSED pane, not tab visibility — all
+        // panes of the visible tab must show their grid.
+        const r = containerRef.getBoundingClientRect();
+        const visible = r.width > 0 && r.height > 0 && !fallback;
+        if (visible !== lastVisible) {
+          lastVisible = visible;
+          invoke("native_grid_set_visible", { id: ptyId, visible }).catch(
+            () => {}
+          );
+        }
+      };
+      const doAttach = () =>
+      invoke("native_grid_attach", {
+        ...gridRect(),
+        fontFamily: (props.appearance.fontFamily || "monospace")
+          .split(",")[0]
+          .replace(/["']/g, "")
+          .trim(),
+        fontPx: props.appearance.fontSize,
+        cursorBlink: props.appearance.cursorBlink,
+        theme: {
+          background: th.background,
+          foreground: th.foreground,
+          cursor: th.cursor,
+          selection: th.selection,
+          ansi: [
+            th.black,
+            th.red,
+            th.green,
+            th.yellow,
+            th.blue,
+            th.magenta,
+            th.cyan,
+            th.white,
+            th.brightBlack,
+            th.brightRed,
+            th.brightGreen,
+            th.brightYellow,
+            th.brightBlue,
+            th.brightMagenta,
+            th.brightCyan,
+            th.brightWhite,
+          ],
+        },
+      })
+        .then(() => {
+          nativeGridAttached = true;
+          containerRef?.classList.add("native-grid");
+          updateFallback();
+
+          // Mirror the selection into the grid (xterm keeps owning the
+          // state: copy & PRIMARY behave exactly as before).
+          let selRaf = 0;
+          const syncSelection = () => {
+            if (selRaf) return;
+            selRaf = requestAnimationFrame(() => {
+              selRaf = 0;
+              syncSelectionNow();
+            });
+          };
+          const syncSelectionNow = () => {
+            if (!term || ptyId === undefined) return;
+            const pos = term.getSelectionPosition();
+            // Despite the typings claiming 1-based coords, the selection
+            // model is 0-based (verified on-screen: -1 highlighted the row
+            // above). end.x is exclusive.
+            const base = term.buffer.active.baseY;
+            const sel = pos
+              ? [
+                  pos.start.y - base,
+                  pos.start.x,
+                  pos.end.y - base,
+                  pos.end.x,
+                ]
+              : null;
+            invoke("native_grid_set_selection", { id: ptyId, sel }).catch(
+              () => {}
+            );
+          };
+          const selSub = term!.onSelectionChange(syncSelection);
+          nativeSelectionSync = syncSelection;
+          addCleanup(() => {
+            nativeSelectionSync = null;
+            if (selRaf) cancelAnimationFrame(selRaf);
+          });
+          const scrollSub = term!.onScroll(updateFallback);
+          const resizeSub = term!.onResize(() => {
+            invoke("native_grid_update", gridRect()).catch(() => {});
+          });
+          addCleanup(() => {
+            selSub.dispose();
+            scrollSub.dispose();
+            resizeSub.dispose();
+          });
+          if (owner) {
+            runWithOwner(owner, () => {
+              createEffect(() => {
+                // All reactive fallback inputs in one tracked scope.
+                searchOpen();
+                acOpen();
+                updateFallback();
+              });
+              createEffect(() => {
+                const focused = props.active();
+                if (ptyId !== undefined)
+                  invoke("native_grid_set_focused", {
+                    id: ptyId,
+                    focused,
+                  }).catch(() => {});
+              });
+            });
+          }
+          const onOverlayChange = () => updateFallback();
+          window.addEventListener("lume-overlay-change", onOverlayChange);
+          addCleanup(() =>
+            window.removeEventListener("lume-overlay-change", onOverlayChange)
+          );
+          // Block bars are DOM elements sitting on marker rows: report those
+          // viewport rows so the grid leaves them unpainted (they show
+          // through, fully interactive). Recomputed after writes/scrolls.
+          let lastHoles = "";
+          let holesRaf = 0;
+          const syncHoles = () => {
+            if (holesRaf) return;
+            holesRaf = requestAnimationFrame(() => {
+              holesRaf = 0;
+              if (!term || ptyId === undefined) return;
+              const buf = term.buffer.active;
+              // Every visible block-bar row EXCEPT the active prompt's: the
+              // user types on that row, so the grid must keep painting it
+              // (the DOM bar there only decorates the previous command).
+              let lastLine = -1;
+              for (const m of markers.values())
+                if (!m.isDisposed && m.line > lastLine) lastLine = m.line;
+              const rows: number[] = [];
+              for (const m of markers.values()) {
+                if (m.isDisposed || m.line === lastLine) continue;
+                const r = m.line - buf.baseY;
+                if (r >= 0 && r < term.rows) rows.push(r);
+              }
+              rows.sort((a, b) => a - b);
+              const key = rows.join(",");
+              if (key !== lastHoles) {
+                lastHoles = key;
+                invoke("native_grid_set_holes", { id: ptyId, rows }).catch(
+                  () => {}
+                );
+              }
+            });
+          };
+          const holesWriteSub = term!.onWriteParsed(syncHoles);
+          const holesScrollSub = term!.onScroll(syncHoles);
+          syncHoles();
+          addCleanup(() => {
+            holesWriteSub.dispose();
+            holesScrollSub.dispose();
+            if (holesRaf) cancelAnimationFrame(holesRaf);
+          });
+
+          // Panes can move without resizing (file-tree drag, split resize):
+          // follow the container at a low poll rate.
+          let lastRect = "";
+          nativeGridPoll = setInterval(() => {
+            if (!containerRef) return;
+            const g = gridRect();
+            const key = `${g.x},${g.y},${g.width},${g.height}`;
+            if (key !== lastRect) {
+              lastRect = key;
+              invoke("native_grid_update", g).catch(() => {});
+              updateFallback();
+            }
+          }, 300);
+        })
+        .catch((e) => console.warn("[lume] native grid attach failed", e));
+      // Hidden panes (other tabs) have a 0-sized rect at mount: wait for the
+      // first real layout before attaching.
+      const bigEnough = () => {
+        const r = containerRef!.getBoundingClientRect();
+        return r.width > 40 && r.height > 20;
+      };
+      if (bigEnough()) {
+        doAttach();
+      } else {
+        const waitAttach = setInterval(() => {
+          if (!containerRef) return clearInterval(waitAttach);
+          if (bigEnough()) {
+            clearInterval(waitAttach);
+            doAttach();
+          }
+        }, 400);
+        addCleanup(() => clearInterval(waitAttach));
+      }
+    }
+
     // Flush any events that arrived between listener registration and PTY id
     // being assigned.
-    for (const p of pendingOutput) {
-      if (p.id === ptyId) term?.write(b64ToBytes(p.data_b64));
-    }
-    pendingOutput.length = 0;
     for (const p of pendingBlocks) {
       if (p.id === ptyId) props.onBlock?.(p);
     }
@@ -1023,7 +1334,10 @@ export default function Terminal(props: TerminalProps) {
   });
 
   onCleanup(() => {
-    unlistenOutput?.();
+    if (nativeGridPoll) clearInterval(nativeGridPoll);
+    if (nativeGridAttached && ptyId !== undefined) {
+      invoke("native_grid_detach", { id: ptyId }).catch(() => {});
+    }
     unlistenExit?.();
     unlistenBlock?.();
     unlistenCwd?.();

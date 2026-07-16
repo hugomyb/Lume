@@ -15,6 +15,8 @@ mod remote;
 mod shell;
 mod ssh;
 mod workflows;
+#[cfg(target_os = "linux")]
+mod native_grid;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -39,6 +41,20 @@ pub fn run() {
         .manage(ai_manager)
         .manage(remote_state)
         .invoke_handler(tauri::generate_handler![
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_attach,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_update,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_set_visible,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_detach,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_set_holes,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_set_focused,
+            #[cfg(target_os = "linux")]
+            native_grid::native_grid_set_selection,
             config::get_config,
             config::save_config,
             config::export_config,

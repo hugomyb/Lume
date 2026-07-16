@@ -1,0 +1,731 @@
+//! Native terminal grid renderer (Linux) — docs/native-renderer-plan.md.
+//!
+//! Each visible pane gets a GtkDrawingArea painted with pango/cairo from a
+//! Rust-side `alacritty_terminal` model fed by the PTY broadcast. The stack,
+//! bottom to top, inside a GtkOverlay that replaces tao's default vbox:
+//!
+//!   background painter → GtkFixed(grid areas) → WebView (transparent)
+//!
+//! The web layer keeps input, layout and all chrome; DOM overlays (popups,
+//! panels, modals) naturally draw above the grid. xterm.js still runs as the
+//! interaction model but its canvases are hidden while the native grid is
+//! active; the frontend reveals them again for the cases the grid doesn't
+//! cover (active selection, scrolled-back viewport, search) — see
+//! Terminal.tsx.
+//!
+//! Measured pty→pixel: ~1-4 ms (vs ~14 ms through WebKit's compositor).
+//!
+//! IMPORTANT (wry): the undecorated-resize handler resolves the toplevel as
+//! `webview.parent().parent()` and unwrap-downcasts it to GtkWindow on every
+//! left click, so the overlay must sit DIRECTLY under the GtkWindow with the
+//! webview as its direct child — never nest the webview one level deeper.
+
+#![cfg(target_os = "linux")]
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
+use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::{Config as TermConfig, Term, TermDamage};
+use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor};
+use gtk::prelude::*;
+use parking_lot::Mutex;
+use serde::Deserialize;
+use tauri::{Manager, State};
+
+use crate::pty::PtyManager;
+
+// ---------------------------------------------------------------------------
+// Model side (any thread)
+// ---------------------------------------------------------------------------
+
+struct GridSize {
+    columns: usize,
+    screen_lines: usize,
+}
+
+impl Dimensions for GridSize {
+    fn total_lines(&self) -> usize {
+        self.screen_lines
+    }
+    fn screen_lines(&self) -> usize {
+        self.screen_lines
+    }
+    fn columns(&self) -> usize {
+        self.columns
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NoopListener;
+
+impl EventListener for NoopListener {
+    fn send_event(&self, _event: Event) {}
+}
+
+type Rgb = (f64, f64, f64);
+
+fn parse_hex(s: &str, fallback: Rgb) -> Rgb {
+    let h = s.trim_start_matches('#');
+    if h.len() < 6 {
+        return fallback;
+    }
+    let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
+    (p(0), p(2), p(4))
+}
+
+/// Palette + metrics shared between the feed task and the draw handler.
+struct GridStyle {
+    cell_w: f64,
+    cell_h: f64,
+    font: String,
+    font_px: f64,
+    fg: Rgb,
+    bg: Rgb,
+    cursor: Rgb,
+    selection: Rgb,
+    ansi: [Rgb; 16],
+}
+
+struct GridModel {
+    term: Mutex<Term<NoopListener>>,
+    parser: Mutex<Processor>,
+    style: Mutex<GridStyle>,
+    /// Bumped on every reattach so a stale feed task for the same pty exits.
+    generation: Mutex<u64>,
+    /// Only the focused pane draws its cursor (mirrors the web focus).
+    focused: Mutex<bool>,
+    /// Pane rect in window coordinates (x, y, w, h) and its visibility.
+    rect: Mutex<(i32, i32, i32, i32)>,
+    visible: Mutex<bool>,
+    /// Active selection in viewport coords (start_row, start_col,
+    /// end_row, end_col_exclusive), linewise — mirrored from xterm, which
+    /// stays the owner of the selection state (copy/PRIMARY unchanged).
+    selection: Mutex<Option<(i32, i32, i32, i32)>>,
+    /// Viewport rows the grid must NOT paint: the DOM block bars live there
+    /// and show through the unpainted (windowless) area with full
+    /// interactivity — no need to re-render them natively.
+    holes: Mutex<Vec<usize>>,
+}
+
+impl GridModel {
+    fn color(&self, style: &GridStyle, color: Color, is_fg: bool) -> Rgb {
+        match color {
+            Color::Spec(rgb) => (
+                rgb.r as f64 / 255.0,
+                rgb.g as f64 / 255.0,
+                rgb.b as f64 / 255.0,
+            ),
+            Color::Named(NamedColor::Foreground) => style.fg,
+            Color::Named(NamedColor::Background) => style.bg,
+            Color::Named(NamedColor::Cursor) => style.cursor,
+            Color::Named(named) => {
+                let idx = named as usize;
+                if idx < 16 {
+                    style.ansi[idx]
+                } else if is_fg {
+                    style.fg
+                } else {
+                    style.bg
+                }
+            }
+            Color::Indexed(i) => {
+                let i = i as usize;
+                if i < 16 {
+                    style.ansi[i]
+                } else if i < 232 {
+                    let i = i - 16;
+                    let comp = |v: usize| {
+                        if v == 0 {
+                            0.0
+                        } else {
+                            (55 + 40 * v) as f64 / 255.0
+                        }
+                    };
+                    (comp(i / 36), comp((i / 6) % 6), comp(i % 6))
+                } else {
+                    let g = (8 + 10 * (i.min(255) - 232)) as f64 / 255.0;
+                    (g, g, g)
+                }
+            }
+        }
+    }
+}
+
+fn models() -> &'static Mutex<HashMap<u64, Arc<GridModel>>> {
+    static MODELS: OnceLock<Mutex<HashMap<u64, Arc<GridModel>>>> = OnceLock::new();
+    MODELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// ---------------------------------------------------------------------------
+// UI side (main thread only)
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// The toplevel we hooked (main thread only).
+    static HOOKED: RefCell<Option<gtk::ApplicationWindow>> = const { RefCell::new(None) };
+    static CURSOR_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Redraw request sent from the feed task to the main thread.
+/// `None` lines = full redraw of the pane rect.
+struct Redraw {
+    id: u64,
+    lines: Option<Vec<(usize, usize)>>,
+}
+
+/// Queue a repaint of (part of) a model's rect on the toplevel (main thread).
+fn queue_model_redraw(model: &GridModel, lines: Option<&[(usize, usize)]>) {
+    if !*model.visible.lock() {
+        return;
+    }
+    let (x, y, w, h) = *model.rect.lock();
+    HOOKED.with(|hw| {
+        if let Some(win) = hw.borrow().as_ref() {
+            match lines {
+                Some(ranges) => {
+                    let cell_h = model.style.lock().cell_h;
+                    for (a, b) in ranges {
+                        let ry = y + (*a as f64 * cell_h).floor() as i32;
+                        let rh = (((b - a + 1) as f64 + 0.5) * cell_h).ceil() as i32;
+                        win.queue_draw_area(x, ry, w, rh.min(h));
+                    }
+                }
+                None => win.queue_draw_area(x, y, w, h),
+            }
+        }
+    });
+}
+
+fn ensure_glib_bridge() -> std::sync::mpsc::Sender<Redraw> {
+    static TX: OnceLock<std::sync::mpsc::Sender<Redraw>> = OnceLock::new();
+    TX.get_or_init(|| {
+        #[allow(deprecated)] // fine on glib 0.18
+        let (gtx, grx) = gtk::glib::MainContext::channel::<Redraw>(gtk::glib::Priority::HIGH);
+        grx.attach(None, move |req: Redraw| {
+            if let Some(model) = models().lock().get(&req.id).cloned() {
+                queue_model_redraw(&model, req.lines.as_deref());
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+        let (tx, rx) = std::sync::mpsc::channel::<Redraw>();
+        std::thread::spawn(move || {
+            while let Ok(req) = rx.recv() {
+                if gtx.send(req).is_err() {
+                    break;
+                }
+            }
+        });
+        tx
+    })
+    .clone()
+}
+
+/// Hook the toplevel once: paint every visible grid AFTER GTK drew the
+/// children (webview included) — same effect as an overlay widget, but with
+/// ZERO hierarchy changes, so input focus and wry's assumptions are untouched.
+/// Also starts the shared cursor-blink timer.
+fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
+    if HOOKED.with(|h| h.borrow().is_some()) {
+        return true;
+    }
+    let Ok(gtk_window) = window.gtk_window() else {
+        eprintln!("[native-grid] no gtk window");
+        return false;
+    };
+    // gtk3-rs doesn't expose connect_draw_after; hook the "draw" signal with
+    // after=true so we paint once every child (webview included) has drawn.
+    gtk_window.connect_local("draw", true, |values| {
+        let Ok(cr) = values[1].get::<gtk::cairo::Context>() else {
+            return Some(false.to_value());
+        };
+        let cr = &cr;
+        let list: Vec<Arc<GridModel>> = models().lock().values().cloned().collect();
+        let cursor_on = CURSOR_ON.with(|c| c.get());
+        for model in list {
+            if !*model.visible.lock() {
+                continue;
+            }
+            let (x, y, w, h) = *model.rect.lock();
+            if w <= 0 || h <= 0 {
+                continue;
+            }
+            cr.save().ok();
+            cr.rectangle(x as f64, y as f64, w as f64, h as f64);
+            cr.clip();
+            cr.translate(x as f64, y as f64);
+            let clip = cr
+                .clip_extents()
+                .unwrap_or((0.0, 0.0, w as f64, h as f64));
+            draw_grid(
+                &model,
+                cursor_on,
+                cr,
+                (clip.0, clip.1, clip.2 - clip.0, clip.3 - clip.1),
+            );
+            cr.restore().ok();
+        }
+        Some(false.to_value())
+    });
+    if blink {
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(530), move || {
+            CURSOR_ON.with(|c| c.set(!c.get()));
+            let list: Vec<Arc<GridModel>> = models().lock().values().cloned().collect();
+            for model in list {
+                if *model.focused.lock() && *model.visible.lock() {
+                    let row = {
+                        let term = model.term.lock();
+                        term.renderable_content().cursor.point.line.0.max(0) as usize
+                    };
+                    queue_model_redraw(&model, Some(&[(row, row)]));
+                }
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+    }
+    HOOKED.with(|h| *h.borrow_mut() = Some(gtk_window));
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+
+fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip: (f64, f64, f64, f64)) {
+    let style = model.style.lock();
+    let term = model.term.lock();
+    let content = term.renderable_content();
+    let offset = content.display_offset as i32;
+    let cursor = content.cursor.point;
+    let (cell_w, cell_h) = (style.cell_w, style.cell_h);
+
+    // Degenerate metrics (hidden pane attached at 0x0) would turn the row
+    // loop into a runaway: bail out, native_grid_update fixes the dims when
+    // the pane gets real geometry.
+    if cell_w < 0.5 || cell_h < 0.5 {
+        return;
+    }
+    let rows_total = term.screen_lines() as i32;
+    let holes = model.holes.lock().clone();
+    let selection = *model.selection.lock();
+    let first_row = ((clip.1 / cell_h).floor().max(0.0) as i32).min(rows_total);
+    let last_row = (((clip.1 + clip.3) / cell_h).ceil() as i32).clamp(0, rows_total);
+
+    // Opaque background, painted per row so hole rows (DOM block bars) stay
+    // untouched and show the web layer through.
+    cr.set_source_rgb(style.bg.0, style.bg.1, style.bg.2);
+    for row in first_row..=last_row {
+        if holes.contains(&(row.max(0) as usize)) {
+            continue;
+        }
+        cr.rectangle(clip.0, row as f64 * cell_h, clip.2, cell_h + 0.5);
+    }
+    let _ = cr.fill();
+
+    let layout = pangocairo::functions::create_layout(cr);
+    let mut desc = gtk::pango::FontDescription::from_string(&style.font);
+    desc.set_absolute_size(style.font_px * gtk::pango::SCALE as f64);
+    layout.set_font_description(Some(&desc));
+    let mut bold_desc = desc.clone();
+    bold_desc.set_weight(gtk::pango::Weight::Bold);
+
+    for indexed in content.display_iter {
+        let row = indexed.point.line.0 + offset;
+        if row < first_row || row > last_row || holes.contains(&(row.max(0) as usize)) {
+            continue;
+        }
+        let col = indexed.point.column.0;
+        let cell = &*indexed;
+        if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+            continue;
+        }
+        let cx = col as f64 * cell_w;
+        let cy = row as f64 * cell_h;
+        let wide = cell.flags.contains(Flags::WIDE_CHAR);
+        let cw = if wide { cell_w * 2.0 } else { cell_w };
+
+        let (mut fg, mut bg) = (
+            model.color(&style, cell.fg, true),
+            model.color(&style, cell.bg, false),
+        );
+        if cell.flags.contains(Flags::INVERSE) {
+            std::mem::swap(&mut fg, &mut bg);
+        }
+        if let Some((sr, sc, er, ec)) = selection {
+            let c = col as i32;
+            let in_sel = if row < sr || row > er {
+                false
+            } else if sr == er {
+                c >= sc && c < ec
+            } else if row == sr {
+                c >= sc
+            } else if row == er {
+                c < ec
+            } else {
+                true
+            };
+            if in_sel {
+                bg = style.selection;
+            }
+        }
+        let is_cursor = cursor_on
+            && *model.focused.lock()
+            && offset == 0
+            && indexed.point.line == cursor.line
+            && indexed.point.column == cursor.column;
+        if is_cursor {
+            bg = style.cursor;
+            fg = style.bg;
+        }
+
+        if bg != style.bg {
+            cr.set_source_rgb(bg.0, bg.1, bg.2);
+            cr.rectangle(cx, cy, cw + 0.5, cell_h + 0.5);
+            let _ = cr.fill();
+        }
+
+        let ch = cell.c;
+        if ch != ' ' && ch != '\0' {
+            let dim = cell.flags.contains(Flags::DIM);
+            cr.set_source_rgba(fg.0, fg.1, fg.2, if dim { 0.6 } else { 1.0 });
+            let mut buf = [0u8; 4];
+            layout.set_font_description(Some(if cell.flags.contains(Flags::BOLD) {
+                &bold_desc
+            } else {
+                &desc
+            }));
+            layout.set_text(ch.encode_utf8(&mut buf));
+            cr.move_to(cx, cy);
+            pangocairo::functions::show_layout(cr, &layout);
+        }
+        if cell.flags.contains(Flags::UNDERLINE) {
+            cr.set_source_rgb(fg.0, fg.1, fg.2);
+            cr.rectangle(cx, cy + cell_h - 1.5, cw, 1.0);
+            let _ = cr.fill();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridTheme {
+    background: String,
+    foreground: String,
+    cursor: String,
+    selection: String,
+    ansi: Vec<String>,
+}
+
+/// Attach (or re-attach) a native grid for PTY `id`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn native_grid_attach(
+    app: tauri::AppHandle,
+    pty_state: State<'_, Arc<PtyManager>>,
+    id: u64,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    cols: u16,
+    rows: u16,
+    font_family: String,
+    font_px: f64,
+    cursor_blink: bool,
+    theme: GridTheme,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
+    let (snapshot, mut rx) = pty_state.attach(id).ok_or("unknown pty id")?;
+
+    let cols = (cols as usize).max(2);
+    let rows = (rows as usize).max(2);
+    let style = GridStyle {
+        cell_w: width as f64 / cols as f64,
+        cell_h: height as f64 / rows as f64,
+        font: font_family,
+        font_px,
+        fg: parse_hex(&theme.foreground, (0.9, 0.9, 0.9)),
+        bg: parse_hex(&theme.background, (0.06, 0.06, 0.09)),
+        cursor: parse_hex(&theme.cursor, (0.9, 0.9, 0.9)),
+        selection: parse_hex(&theme.selection, (0.16, 0.20, 0.34)),
+        ansi: {
+            let mut a = [(0.0, 0.0, 0.0); 16];
+            for (i, slot) in a.iter_mut().enumerate() {
+                *slot = parse_hex(
+                    theme.ansi.get(i).map(String::as_str).unwrap_or(""),
+                    if i < 8 { (0.2, 0.2, 0.2) } else { (0.8, 0.8, 0.8) },
+                );
+            }
+            a
+        },
+    };
+    
+    // Replace any previous model for this pty (respawn / re-attach).
+    let generation;
+    let model = {
+        let mut map = models().lock();
+        if let Some(old) = map.get(&id) {
+            *old.generation.lock() += 1;
+        }
+        let model = Arc::new(GridModel {
+            term: Mutex::new(Term::new(
+                TermConfig::default(),
+                &GridSize {
+                    columns: cols,
+                    screen_lines: rows,
+                },
+                NoopListener,
+            )),
+            parser: Mutex::new(Processor::new()),
+            style: Mutex::new(style),
+            generation: Mutex::new(0),
+            focused: Mutex::new(false),
+            rect: Mutex::new((x, y, width, height)),
+            visible: Mutex::new(true),
+            selection: Mutex::new(None),
+            holes: Mutex::new(Vec::new()),
+        });
+        generation = 0u64;
+        map.insert(id, model.clone());
+        model
+    };
+
+    {
+        let mut term = model.term.lock();
+        let mut parser = model.parser.lock();
+        parser.advance(&mut *term, &snapshot);
+        term.reset_damage();
+    }
+    if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+        eprintln!("[grid-attach] id={id} snapshot={}B grid={cols}x{rows}", snapshot.len());
+    }
+
+    // UI hook on the main thread (idempotent) + first paint.
+    {
+        let window_ui = window.clone();
+        let model_ui = model.clone();
+        window
+            .run_on_main_thread(move || {
+                if ensure_draw_hook(&window_ui, cursor_blink) {
+                    let _ = ensure_glib_bridge();
+                    queue_model_redraw(&model_ui, None);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Feed task: PTY broadcast -> model -> damage -> redraw request.
+    let tx = {
+        let window = window.clone();
+        move || -> Option<std::sync::mpsc::Sender<Redraw>> {
+            let (otx, orx) = std::sync::mpsc::channel();
+            let _ = window.run_on_main_thread(move || {
+                let _ = otx.send(ensure_glib_bridge());
+            });
+            orx.recv().ok()
+        }
+    };
+
+    tauri::async_runtime::spawn(async move {
+        let Some(tx) = tx() else { return };
+        loop {
+            match rx.recv().await {
+                Ok(bytes) => {
+                    if *model.generation.lock() != generation {
+                        break; // replaced by a newer attach
+                    }
+                    if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+                        eprintln!("[grid-feed] id={id} +{}B", bytes.len());
+                    }
+                    let lines = {
+                        let mut term = model.term.lock();
+                        let mut parser = model.parser.lock();
+                        parser.advance(&mut *term, &bytes);
+                        let damage = match term.damage() {
+                            TermDamage::Full => None,
+                            TermDamage::Partial(iter) => Some(
+                                iter.map(|l| (l.line, l.line)).collect::<Vec<_>>(),
+                            ),
+                        };
+                        term.reset_damage();
+                        damage
+                    };
+                    if tx.send(Redraw { id, lines }).is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = tx.send(Redraw { id, lines: None });
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Move/resize a pane's grid (pane layout changed).
+#[tauri::command]
+pub fn native_grid_update(
+    app: tauri::AppHandle,
+    id: u64,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let cols = (cols as usize).max(2);
+    let rows = (rows as usize).max(2);
+    if let Some(model) = models().lock().get(&id).cloned() {
+        let old_rect = {
+            let mut style = model.style.lock();
+            style.cell_w = width as f64 / cols as f64;
+            style.cell_h = height as f64 / rows as f64;
+            let mut rect = model.rect.lock();
+            let old = *rect;
+            *rect = (x, y, width, height);
+            old
+        };
+        model.term.lock().resize(GridSize {
+            columns: cols,
+            screen_lines: rows,
+        });
+        let window = app
+            .get_webview_window("main")
+            .ok_or("main window not found")?;
+        window
+            .run_on_main_thread(move || {
+                // Repaint both the old and new spots.
+                HOOKED.with(|hw| {
+                    if let Some(win) = hw.borrow().as_ref() {
+                        let (ox, oy, ow, oh) = old_rect;
+                        win.queue_draw_area(ox, oy, ow, oh);
+                    }
+                });
+                queue_model_redraw(&model, None);
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Show/hide a pane's grid (tab switched / web overlay needs the spot).
+#[tauri::command]
+pub fn native_grid_set_visible(app: tauri::AppHandle, id: u64, visible: bool) -> Result<(), String> {
+    if let Some(model) = models().lock().get(&id).cloned() {
+        *model.visible.lock() = visible;
+        let window = app
+            .get_webview_window("main")
+            .ok_or("main window not found")?;
+        window
+            .run_on_main_thread(move || {
+                // Repaint the spot either way (uncovers the web layer or
+                // repaints the grid).
+                let (x, y, w, h) = *model.rect.lock();
+                HOOKED.with(|hw| {
+                    if let Some(win) = hw.borrow().as_ref() {
+                        win.queue_draw_area(x, y, w, h);
+                    }
+                });
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Remove a pane's grid (pane closed).
+#[tauri::command]
+pub fn native_grid_detach(app: tauri::AppHandle, id: u64) -> Result<(), String> {
+    let removed = {
+        let mut map = models().lock();
+        map.remove(&id).inspect(|m| {
+            *m.generation.lock() += 1;
+        })
+    };
+    if let Some(model) = removed {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.run_on_main_thread(move || {
+                let (x, y, w, h) = *model.rect.lock();
+                HOOKED.with(|hw| {
+                    if let Some(win) = hw.borrow().as_ref() {
+                        win.queue_draw_area(x, y, w, h);
+                    }
+                });
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Update the viewport rows occupied by DOM block bars (left unpainted).
+#[tauri::command]
+pub fn native_grid_set_holes(app: tauri::AppHandle, id: u64, rows: Vec<usize>) -> Result<(), String> {
+    if let Some(model) = models().lock().get(&id).cloned() {
+        *model.holes.lock() = rows;
+    }
+    if let Some(model) = models().lock().get(&id).cloned() {
+        let window = app
+            .get_webview_window("main")
+            .ok_or("main window not found")?;
+        window
+            .run_on_main_thread(move || queue_model_redraw(&model, None))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Mirror web-side pane focus: only the focused pane draws its cursor.
+#[tauri::command]
+pub fn native_grid_set_focused(app: tauri::AppHandle, id: u64, focused: bool) -> Result<(), String> {
+    if let Some(model) = models().lock().get(&id).cloned() {
+        *model.focused.lock() = focused;
+        let window = app
+            .get_webview_window("main")
+            .ok_or("main window not found")?;
+        window
+            .run_on_main_thread(move || queue_model_redraw(&model, None))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Mirror xterm's selection (viewport coords) so the grid paints it live —
+/// no renderer swap during drags. `sel` = [startRow, startCol, endRow,
+/// endColExclusive], linewise; None clears.
+#[tauri::command]
+pub fn native_grid_set_selection(
+    app: tauri::AppHandle,
+    id: u64,
+    sel: Option<[i32; 4]>,
+) -> Result<(), String> {
+    if let Some(model) = models().lock().get(&id).cloned() {
+        let changed = {
+            let mut cur = model.selection.lock();
+            let new = sel.map(|s| (s[0], s[1], s[2], s[3]));
+            let changed = *cur != new;
+            *cur = new;
+            changed
+        };
+        if changed {
+            let window = app
+                .get_webview_window("main")
+                .ok_or("main window not found")?;
+            window
+                .run_on_main_thread(move || queue_model_redraw(&model, None))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}

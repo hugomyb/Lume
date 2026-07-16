@@ -385,6 +385,20 @@ export default function Tabs() {
   const [editingTabId, setEditingTabId] = createSignal<number | null>(null);
   const [editingTitle, setEditingTitle] = createSignal("");
   const [layoutsOpen, setLayoutsOpen] = createSignal(false);
+
+  // Native grid (Linux): terminal pixels are painted by a native layer above
+  // the webview, so DOM overlays that can cover a pane must make the grids
+  // yield. Broadcast "some app-level overlay is open" to the Terminals.
+  createEffect(() => {
+    const open =
+      settingsOpen() ||
+      paletteOpen() ||
+      workflowsOpen() ||
+      sshOpen() ||
+      layoutsOpen();
+    document.body.classList.toggle("lume-overlay-open", open);
+    window.dispatchEvent(new Event("lume-overlay-change"));
+  });
   const [toast, setToast] = createSignal<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
   const flashToast = (msg: string) => {
