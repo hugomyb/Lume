@@ -182,25 +182,19 @@ struct Redraw {
     lines: Option<Vec<(usize, usize)>>,
 }
 
-/// Queue a repaint of (part of) a model's rect on the toplevel (main thread).
-fn queue_model_redraw(model: &GridModel, lines: Option<&[(usize, usize)]>) {
+/// Queue a repaint of a model's rect on the toplevel (main thread).
+/// Always full-rect: per-line strips painted while cell metrics/rects churn
+/// (pane resize) land at inconsistent offsets and nothing ever repaints
+/// them — full repaints are self-consistent by construction and cheap
+/// (~1-3 ms of pango for a typical pane, event-driven only).
+fn queue_model_redraw(model: &GridModel, _lines: Option<&[(usize, usize)]>) {
     if !*model.visible.lock() {
         return;
     }
     let (x, y, w, h) = *model.rect.lock();
     HOOKED.with(|hw| {
         if let Some(win) = hw.borrow().as_ref() {
-            match lines {
-                Some(ranges) => {
-                    let cell_h = model.style.lock().cell_h;
-                    for (a, b) in ranges {
-                        let ry = y + (*a as f64 * cell_h).floor() as i32;
-                        let rh = (((b - a + 1) as f64 + 0.5) * cell_h).ceil() as i32;
-                        win.queue_draw_area(x, ry, w, rh.min(h));
-                    }
-                }
-                None => win.queue_draw_area(x, y, w, h),
-            }
+            win.queue_draw_area(x, y, w, h);
         }
     });
 }
@@ -456,6 +450,8 @@ pub fn native_grid_attach(
     height: i32,
     cols: u16,
     rows: u16,
+    cell_w: f64,
+    cell_h: f64,
     font_family: String,
     font_px: f64,
     cursor_blink: bool,
@@ -469,8 +465,10 @@ pub fn native_grid_attach(
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
     let style = GridStyle {
-        cell_w: width as f64 / cols as f64,
-        cell_h: height as f64 / rows as f64,
+        // Prefer xterm's exact cell metrics so both renderings share one
+        // glyph grid; fall back to the rect division when unknown.
+        cell_w: if cell_w > 0.5 { cell_w } else { width as f64 / cols as f64 },
+        cell_h: if cell_h > 0.5 { cell_h } else { height as f64 / rows as f64 },
         font: font_family,
         font_px,
         fg: parse_hex(&theme.foreground, (0.9, 0.9, 0.9)),
@@ -605,14 +603,24 @@ pub fn native_grid_update(
     height: i32,
     cols: u16,
     rows: u16,
+    cell_w: f64,
+    cell_h: f64,
 ) -> Result<(), String> {
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
     if let Some(model) = models().lock().get(&id).cloned() {
         let old_rect = {
             let mut style = model.style.lock();
-            style.cell_w = width as f64 / cols as f64;
-            style.cell_h = height as f64 / rows as f64;
+            style.cell_w = if cell_w > 0.5 {
+                cell_w
+            } else {
+                width as f64 / cols as f64
+            };
+            style.cell_h = if cell_h > 0.5 {
+                cell_h
+            } else {
+                height as f64 / rows as f64
+            };
             let mut rect = model.rect.lock();
             let old = *rect;
             *rect = (x, y, width, height);

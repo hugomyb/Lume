@@ -711,6 +711,18 @@ export default function Terminal(props: TerminalProps) {
       const th = props.appearance.theme;
       const gridRect = () => {
         const r = containerRef!.getBoundingClientRect();
+        // xterm's real cell size (CSS px): the grid must use the exact same
+        // glyph grid or the two renderings drift apart (rect/cols includes
+        // padding and rounding).
+        const cell = (
+          term as unknown as {
+            _core?: {
+              _renderService?: {
+                dimensions?: { css?: { cell?: { width?: number; height?: number } } };
+              };
+            };
+          }
+        )._core?._renderService?.dimensions?.css?.cell;
         return {
           id: ptyId,
           x: Math.round(r.left),
@@ -719,6 +731,8 @@ export default function Terminal(props: TerminalProps) {
           height: Math.round(r.height),
           cols: term?.cols ?? 80,
           rows: term?.rows ?? 24,
+          cellW: cell?.width ?? 0,
+          cellH: cell?.height ?? 0,
         };
       };
       let lastFallback: boolean | null = null;
@@ -737,6 +751,18 @@ export default function Terminal(props: TerminalProps) {
         if (fallback !== lastFallback) {
           lastFallback = fallback;
           containerRef.classList.toggle("xterm-fallback", fallback);
+          // The WebGL canvas accumulates garbage while it isn't painting
+          // (resizes recompose its texture): force a full repaint whenever
+          // it becomes the visible layer — and when it goes back under, so
+          // the next reveal starts clean.
+          try {
+            term.refresh(0, term.rows - 1);
+          } catch {
+            /* renderer mid-teardown */
+          }
+          // Layouts settle for a few frames after yields end: re-evaluate
+          // once the dust settles (also refreshes the grid rect via poll).
+          setTimeout(() => updateFallback(), 450);
         }
         // Grid visibility = the pane is laid out (its tab is shown; hidden
         // tabs collapse the rect to 0) and nothing DOM-side needs the spot.
