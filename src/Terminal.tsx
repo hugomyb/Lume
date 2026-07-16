@@ -732,7 +732,8 @@ export default function Terminal(props: TerminalProps) {
           buf.viewportY < buf.baseY ||
           searchOpen() ||
           acOpen() ||
-          document.body.classList.contains("lume-overlay-open");
+          document.body.classList.contains("lume-overlay-open") ||
+          document.body.classList.contains("lume-split-drag");
         if (fallback !== lastFallback) {
           lastFallback = fallback;
           containerRef.classList.toggle("xterm-fallback", fallback);

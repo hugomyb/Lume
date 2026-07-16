@@ -399,10 +399,31 @@ export default function Tabs() {
       // Tab/pane drags paint drop zones and swap targets across the panes:
       // yield the whole grid layer for the duration of the drag.
       draggingTabId() !== null ||
-      draggingPaneLeafId() !== null;
+      draggingPaneLeafId() !== null ||
+      remoteDialogOpen();
     document.body.classList.toggle("lume-overlay-open", open);
     window.dispatchEvent(new Event("lume-overlay-change"));
   });
+
+  // Window resizes re-layout every pane continuously: same treatment as a
+  // split drag — yield the grids until the size settles.
+  {
+    let resizeSettle: ReturnType<typeof setTimeout> | undefined;
+    const onWinResize = () => {
+      document.body.classList.add("lume-split-drag");
+      window.dispatchEvent(new Event("lume-overlay-change"));
+      if (resizeSettle) clearTimeout(resizeSettle);
+      resizeSettle = setTimeout(() => {
+        document.body.classList.remove("lume-split-drag");
+        window.dispatchEvent(new Event("lume-overlay-change"));
+      }, 250);
+    };
+    window.addEventListener("resize", onWinResize);
+    onCleanup(() => {
+      window.removeEventListener("resize", onWinResize);
+      if (resizeSettle) clearTimeout(resizeSettle);
+    });
+  }
 
   // Native grid (Linux): small DOM affordances that pop up OVER a pane (drag
   // grip, per-block copy button, context menus, block flash) must stay

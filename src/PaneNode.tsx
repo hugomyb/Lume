@@ -52,6 +52,10 @@ function startSplitDrag(
 ) {
   if (!containerEl || !onResize) return;
   e.preventDefault();
+  // Native grid (Linux): pane rects churn continuously during the drag —
+  // yield the grid layer (xterm shows live underneath) until mouseup.
+  document.body.classList.add("lume-split-drag");
+  window.dispatchEvent(new Event("lume-overlay-change"));
   const rect = containerEl.getBoundingClientRect();
   const onMove = (mv: MouseEvent) => {
     const ratio =
@@ -61,6 +65,8 @@ function startSplitDrag(
     onResize(splitId, ratio);
   };
   const onUp = () => {
+    document.body.classList.remove("lume-split-drag");
+    window.dispatchEvent(new Event("lume-overlay-change"));
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
     window.removeEventListener("mousemove", onMove);
