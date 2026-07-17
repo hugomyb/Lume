@@ -244,7 +244,16 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
         let cr = &cr;
         let list: Vec<Arc<GridModel>> = models().lock().values().cloned().collect();
         let cursor_on = CURSOR_ON.with(|c| c.get());
+        let debug = std::env::var_os("LUME_GRID_DEBUG").is_some();
         for model in list {
+            if debug {
+                eprintln!(
+                    "[grid-draw] rect={:?} visible={} holes={:?}",
+                    *model.rect.lock(),
+                    *model.visible.lock(),
+                    *model.holes.lock()
+                );
+            }
             if !*model.visible.lock() {
                 continue;
             }
@@ -604,8 +613,15 @@ pub fn native_grid_attach(
 
 /// Move/resize a pane's grid (pane layout changed).
 ///
-/// Dimension changes resize the model in place (see the comment at the
-/// resize call for why a replay-based rebuild is wrong here).
+/// When `dump` is provided (a serialized snapshot of xterm's live viewport,
+/// SGR included), the model is rebuilt from it at the new dimensions: xterm
+/// and alacritty rewrap buffers differently on resize, so resizing the model
+/// in place drifts its rows away from xterm's (mispositioned text vs the DOM
+/// block bars, lines lost on shrink/grow cycles). The dump IS xterm's
+/// post-reflow truth. Without a dump, dimension changes fall back to an
+/// in-place resize. (A replay of the raw PTY bytes is NOT an alternative:
+/// cursor-relative prompt redraws are only valid at their original width and
+/// stack one prompt copy per redraw.)
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn native_grid_update(
@@ -619,6 +635,7 @@ pub fn native_grid_update(
     rows: u16,
     cell_w: f64,
     cell_h: f64,
+    dump: Option<String>,
 ) -> Result<(), String> {
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
@@ -647,20 +664,36 @@ pub fn native_grid_update(
             let term = model.term.lock();
             term.screen_lines() != rows || term.columns() != cols
         };
-        if dims_changed {
-            // In-place resize. NOT a replay-based rebuild: the replay buffer
-            // holds the whole session's raw bytes whose cursor-relative
-            // prompt-redraw sequences are only valid at their original
-            // width — replaying them at a new width stacks a copy of the
-            // prompt per historical redraw. Reflow differences vs xterm on
-            // OLD rows are acceptable: the shell redraws the live prompt
-            // after SIGWINCH and scrolled-back viewing falls back to xterm.
+        if let Some(dump) = dump.as_ref() {
+            // Rebuild from xterm's serialized viewport: fresh grid at the
+            // final dims, then replay the dump (absolute content, valid at
+            // exactly these dims). The live feed keeps appending to the same
+            // Term afterwards.
+            let mut term = model.term.lock();
+            let mut parser = model.parser.lock();
+            *term = Term::new(
+                TermConfig::default(),
+                &GridSize {
+                    columns: cols,
+                    screen_lines: rows,
+                },
+                NoopListener,
+            );
+            *parser = Processor::new();
+            parser.advance(&mut *term, dump.as_bytes());
+        } else if dims_changed {
             model.term.lock().resize(GridSize {
                 columns: cols,
                 screen_lines: rows,
             });
         }
         let rect_changed = old_rect != (x, y, width, height);
+        if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+            eprintln!(
+                "[grid-update] id={id} rect={old_rect:?}->({x},{y},{width},{height}) grid={cols}x{rows} dims_changed={dims_changed} dump={}B",
+                dump.as_ref().map_or(0, |d| d.len())
+            );
+        }
         window
             .run_on_main_thread(move || {
                 if rect_changed || dims_changed {
@@ -684,6 +717,9 @@ pub fn native_grid_update(
 #[tauri::command]
 pub fn native_grid_set_visible(app: tauri::AppHandle, id: u64, visible: bool) -> Result<(), String> {
     if let Some(model) = models().lock().get(&id).cloned() {
+        if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+            eprintln!("[grid-visible] id={id} visible={visible}");
+        }
         *model.visible.lock() = visible;
         let window = app
             .get_webview_window("main")
@@ -732,6 +768,9 @@ pub fn native_grid_detach(app: tauri::AppHandle, id: u64) -> Result<(), String> 
 #[tauri::command]
 pub fn native_grid_set_holes(app: tauri::AppHandle, id: u64, rows: Vec<usize>) -> Result<(), String> {
     if let Some(model) = models().lock().get(&id).cloned() {
+        if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+            eprintln!("[grid-holes] id={id} rows={rows:?}");
+        }
         *model.holes.lock() = rows;
     }
     if let Some(model) = models().lock().get(&id).cloned() {

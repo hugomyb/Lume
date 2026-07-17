@@ -17,6 +17,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -269,6 +270,13 @@ export default function Terminal(props: TerminalProps) {
     });
     fit = new FitAddon();
     term.loadAddon(fit);
+    let serialize: SerializeAddon | undefined;
+    if (NATIVE_GRID) {
+      // Used to resync the native grid model from xterm's real buffer after
+      // resizes (the two terminals' reflow algorithms differ).
+      serialize = new SerializeAddon();
+      term.loadAddon(serialize);
+    }
     term.open(containerRef);
 
     // xterm on Linux re-extracts the ENTIRE selection text on every mousemove
@@ -741,6 +749,19 @@ export default function Terminal(props: TerminalProps) {
           cellH: cell?.height ?? 0,
         };
       };
+      // Push the pane's rect/dims to the grid, with a serialized dump of
+      // xterm's real viewport (colors included): the model is rebuilt from
+      // it, so the native rows can never drift from xterm's after reflow
+      // (alacritty and xterm resize/rewrap buffers differently).
+      const gridUpdate = () => {
+        let dump: string | undefined;
+        try {
+          dump = serialize?.serialize({ scrollback: 0 });
+        } catch {
+          /* addon mid-teardown */
+        }
+        invoke("native_grid_update", { ...gridRect(), dump }).catch(() => {});
+      };
       let lastFallback: boolean | null = null;
       let lastVisible: boolean | null = null;
       const updateFallback = () => {
@@ -863,9 +884,7 @@ export default function Terminal(props: TerminalProps) {
             if (selRaf) cancelAnimationFrame(selRaf);
           });
           const scrollSub = term!.onScroll(updateFallback);
-          const resizeSub = term!.onResize(() => {
-            invoke("native_grid_update", gridRect()).catch(() => {});
-          });
+          const resizeSub = term!.onResize(() => gridUpdate());
           addCleanup(() => {
             selSub.dispose();
             scrollSub.dispose();
@@ -955,12 +974,16 @@ export default function Terminal(props: TerminalProps) {
               layoutChurn = false;
               const g = gridRect();
               lastRect = `${g.x},${g.y},${g.width},${g.height}`;
-              invoke("native_grid_update", g).catch(() => {});
+              gridUpdate();
               try {
                 term?.refresh(0, term.rows - 1);
               } catch {
                 /* renderer mid-teardown */
               }
+              // Selection coords and marker rows may both have shifted with
+              // the reflow: resync them against the fresh model.
+              syncSelectionNow();
+              syncHoles();
               updateFallback();
             }, 250);
           };
