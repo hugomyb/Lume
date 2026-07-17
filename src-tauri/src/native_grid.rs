@@ -344,7 +344,10 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
     // as style/size hints ("MesloLGS NF" -> family "MesloLGS" + unknown "NF")
     // and silently falls back to a font without the nerd/powerline glyphs.
     let mut desc = gtk::pango::FontDescription::new();
-    desc.set_family(&style.font);
+    // Secondary family matches the web renderer's tail fallback: icon
+    // codepoints missing from the user's font resolve to Unifont CSUR's
+    // real glyphs instead of Unifont Sample's hex-boxes ("tofu").
+    desc.set_family(&format!("{},Unifont CSUR", style.font));
     desc.set_absolute_size(style.font_px * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&desc));
     let mut bold_desc = desc.clone();
@@ -406,6 +409,9 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
         }
 
         let ch = cell.c;
+        if std::env::var_os("LUME_GRID_DEBUG").is_some() && (ch as u32) > 0x2000 {
+            eprintln!("[grid-glyph] U+{:04X}", ch as u32);
+        }
         if ch != ' ' && ch != '\0' {
             let dim = cell.flags.contains(Flags::DIM);
             cr.set_source_rgba(fg.0, fg.1, fg.2, if dim { 0.6 } else { 1.0 });

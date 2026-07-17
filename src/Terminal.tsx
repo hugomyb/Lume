@@ -782,6 +782,8 @@ export default function Terminal(props: TerminalProps) {
       const doAttach = () =>
       invoke("native_grid_attach", {
         ...gridRect(),
+        // Single primary family: pango/fontconfig does automatic per-glyph
+        // fallback on its own (comma lists degrade the metrics resolution).
         fontFamily: (props.appearance.fontFamily || "monospace")
           .split(",")[0]
           .replace(/["']/g, "")
