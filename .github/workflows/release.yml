@@ -65,6 +65,24 @@ jobs:
             const fs = require('fs');
             const body = fs.readFileSync('CHANGELOG_NOTES.md', 'utf8');
             const tag = context.ref.replace('refs/tags/', '');
+            // Drop any stale draft left by a previous (cancelled/failed) run
+            // of this same tag: two drafts sharing a tag_name make every
+            // by-tag lookup in later steps (gh release download/upload)
+            // ambiguous — the run then reads the wrong, asset-less draft.
+            const existing = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            for (const r of existing.data) {
+              if (r.tag_name === tag && r.draft) {
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: r.id,
+                });
+              }
+            }
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
