@@ -709,6 +709,12 @@ export default function Terminal(props: TerminalProps) {
     // simply keep xterm visible (web fallback), nothing else changes.
     if (NATIVE_GRID && containerRef) {
       const th = props.appearance.theme;
+      // ANY layout change (sidebar toggles, split drags, window resizes,
+      // panel switches…) shifts this pane's rect: yield the grid instantly
+      // and only bring it back once the layout has been stable for 250 ms,
+      // with the final rect, a resynced model and a full repaint. One
+      // generic mechanism instead of per-trigger heuristics.
+      let layoutChurn = false;
       const gridRect = () => {
         const r = containerRef!.getBoundingClientRect();
         // xterm's real cell size (CSS px): the grid must use the exact same
@@ -746,6 +752,7 @@ export default function Terminal(props: TerminalProps) {
         // pane's rendering on every keystroke made the text visibly jump.
         // The popup stays visible through a precise overlay rect instead.
         const fallback =
+          layoutChurn ||
           buf.viewportY < buf.baseY ||
           searchOpen() ||
           document.body.classList.contains("lume-overlay-open") ||
@@ -936,19 +943,44 @@ export default function Terminal(props: TerminalProps) {
             if (holesRaf) cancelAnimationFrame(holesRaf);
           });
 
-          // Panes can move without resizing (file-tree drag, split resize):
-          // follow the container at a low poll rate.
+          let settleTimer: ReturnType<typeof setTimeout> | undefined;
           let lastRect = "";
+          const onLayoutChange = () => {
+            if (!layoutChurn) {
+              layoutChurn = true;
+              updateFallback();
+            }
+            if (settleTimer) clearTimeout(settleTimer);
+            settleTimer = setTimeout(() => {
+              layoutChurn = false;
+              const g = gridRect();
+              lastRect = `${g.x},${g.y},${g.width},${g.height}`;
+              invoke("native_grid_update", g).catch(() => {});
+              try {
+                term?.refresh(0, term.rows - 1);
+              } catch {
+                /* renderer mid-teardown */
+              }
+              updateFallback();
+            }, 250);
+          };
+          const ro = new ResizeObserver(() => onLayoutChange());
+          ro.observe(containerRef!);
+          addCleanup(() => {
+            ro.disconnect();
+            if (settleTimer) clearTimeout(settleTimer);
+          });
+          // Safety net for position-only moves (rect size unchanged): the
+          // observer can't see them, a slow poll can.
           nativeGridPoll = setInterval(() => {
             if (!containerRef) return;
             const g = gridRect();
             const key = `${g.x},${g.y},${g.width},${g.height}`;
             if (key !== lastRect) {
               lastRect = key;
-              invoke("native_grid_update", g).catch(() => {});
-              updateFallback();
+              onLayoutChange();
             }
-          }, 300);
+          }, 500);
         })
         .catch((e) => console.warn("[lume] native grid attach failed", e));
       // Hidden panes (other tabs) have a 0-sized rect at mount: wait for the
