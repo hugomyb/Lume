@@ -29,7 +29,7 @@ use std::sync::{Arc, OnceLock};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config as TermConfig, Term, TermDamage};
+use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor};
 use gtk::prelude::*;
 use parking_lot::Mutex;
@@ -515,7 +515,7 @@ pub fn native_grid_attach(
     let window = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
-    let (snapshot, mut rx) = pty_state.attach(id).ok_or("unknown pty id")?;
+    let (snapshot, rx) = pty_state.attach(id).ok_or("unknown pty id")?;
 
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
@@ -604,18 +604,12 @@ pub fn native_grid_attach(
 
 /// Move/resize a pane's grid (pane layout changed).
 ///
-/// When the character grid dimensions change, the model is REBUILT from the
-/// PTY replay buffer at the new size instead of being resized in place:
-/// alacritty's and xterm's reflow algorithms differ, and letting them
-/// diverge shifts the painted rows away from the DOM block bars (the
-/// "typed text offset" bug). Re-deriving both views from the same bytes at
-/// the same width keeps them aligned; the shell's own post-SIGWINCH prompt
-/// redraw settles the live rows.
+/// Dimension changes resize the model in place (see the comment at the
+/// resize call for why a replay-based rebuild is wrong here).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn native_grid_update(
     app: tauri::AppHandle,
-    pty_state: State<'_, Arc<PtyManager>>,
     id: u64,
     x: i32,
     y: i32,
@@ -654,29 +648,17 @@ pub fn native_grid_update(
             term.screen_lines() != rows || term.columns() != cols
         };
         if dims_changed {
-            if let Some((snapshot, rx)) = pty_state.attach(id) {
-                let generation = {
-                    let mut g = model.generation.lock();
-                    *g += 1;
-                    *g
-                };
-                {
-                    let mut term = model.term.lock();
-                    let mut parser = model.parser.lock();
-                    *term = Term::new(
-                        TermConfig::default(),
-                        &GridSize {
-                            columns: cols,
-                            screen_lines: rows,
-                        },
-                        NoopListener,
-                    );
-                    *parser = Processor::new();
-                    parser.advance(&mut *term, &snapshot);
-                    term.reset_damage();
-                }
-                spawn_feed(window.clone(), model.clone(), id, generation, rx);
-            }
+            // In-place resize. NOT a replay-based rebuild: the replay buffer
+            // holds the whole session's raw bytes whose cursor-relative
+            // prompt-redraw sequences are only valid at their original
+            // width — replaying them at a new width stacks a copy of the
+            // prompt per historical redraw. Reflow differences vs xterm on
+            // OLD rows are acceptable: the shell redraws the live prompt
+            // after SIGWINCH and scrolled-back viewing falls back to xterm.
+            model.term.lock().resize(GridSize {
+                columns: cols,
+                screen_lines: rows,
+            });
         }
         let rect_changed = old_rect != (x, y, width, height);
         window
