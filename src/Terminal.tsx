@@ -879,6 +879,7 @@ export default function Terminal(props: TerminalProps) {
           // Mirror the selection into the grid (xterm keeps owning the
           // state: copy & PRIMARY behave exactly as before).
           let selRaf = 0;
+          let lastSelKey = "";
           const syncSelection = () => {
             if (selRaf) return;
             selRaf = requestAnimationFrame(() => {
@@ -904,6 +905,12 @@ export default function Terminal(props: TerminalProps) {
                   pos.end.x,
                 ]
               : null;
+            // refresh() fires per mousemove but most moves stay inside the
+            // same cell: skip the IPC (and the repaint behind it) when the
+            // mirrored coords haven't changed.
+            const key = sel ? sel.join(",") : "";
+            if (key === lastSelKey) return;
+            lastSelKey = key;
             invoke("native_grid_set_selection", { id: ptyId, sel }).catch(
               () => {}
             );
@@ -976,7 +983,10 @@ export default function Terminal(props: TerminalProps) {
               const resync = () => {
                 gridUpdate();
                 // Selection coords and the scroll offset may have shifted
-                // with the reflow: resync them against the fresh model.
+                // with the reflow: resync them against the fresh model. The
+                // rebuild cleared the model's selection — bust the dedup
+                // cache so the mirror is re-sent even if unchanged.
+                lastSelKey = " ";
                 syncSelectionNow();
                 syncOffset();
               };

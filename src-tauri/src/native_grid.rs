@@ -200,6 +200,22 @@ static OVERLAY_RECTS: Mutex<Vec<(i32, i32, i32, i32)>> = Mutex::new(Vec::new());
 /// rect (hole in the clip), so it stays undimmed.
 static DIM_ALPHA: Mutex<f64> = Mutex::new(0.0);
 
+/// Bumped on every attach (font/theme changes re-attach every pane): the
+/// glyph cache below drops its surfaces when this moves.
+static GLYPH_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+type GlyphKey = (char, (u8, u8, u8), bool, bool); // (ch, fg, dim, bold)
+
+thread_local! {
+    /// Main-thread cache of pre-rendered glyph surfaces. Pango layout+shape
+    /// per cell is ~2 µs; blitting a cached ARGB surface is a fraction of
+    /// that — this is what keeps dense full-pane repaints (selection drags,
+    /// autoscroll) cheap on slower machines. Keyed per (char, color, dim,
+    /// bold); font identity is handled by GLYPH_GEN.
+    static GLYPH_CACHE: std::cell::RefCell<(u64, HashMap<GlyphKey, gtk::cairo::Surface>)> =
+        std::cell::RefCell::new((0, HashMap::new()));
+}
+
 fn models() -> &'static Mutex<HashMap<u64, Arc<GridModel>>> {
     static MODELS: OnceLock<Mutex<HashMap<u64, Arc<GridModel>>>> = OnceLock::new();
     MODELS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -285,15 +301,8 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
         let list: Vec<Arc<GridModel>> = models().lock().values().cloned().collect();
         let cursor_on = CURSOR_ON.with(|c| c.get());
         let debug = std::env::var_os("LUME_GRID_DEBUG").is_some();
+        let t0 = debug.then(std::time::Instant::now);
         for model in list {
-            if debug {
-                eprintln!(
-                    "[grid-draw] rect={:?} visible={} holes={:?}",
-                    *model.rect.lock(),
-                    *model.visible.lock(),
-                    *model.holes.lock()
-                );
-            }
             if !*model.visible.lock() {
                 continue;
             }
@@ -338,6 +347,9 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
                 let _ = cr.fill();
             }
             cr.restore().ok();
+        }
+        if let Some(t0) = t0 {
+            eprintln!("[grid-drawpass] {:.2}ms", t0.elapsed().as_secs_f64() * 1000.0);
         }
         Some(false.to_value())
     });
@@ -410,6 +422,26 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
     let mut bold_desc = desc.clone();
     bold_desc.set_weight(gtk::pango::Weight::Bold);
 
+    // Two passes over the viewport, both O(visible cells) but with the
+    // per-cell overhead stripped: pass 1 merges contiguous same-color
+    // backgrounds into single fills (a full-row selection is ONE rect
+    // instead of ~200), pass 2 draws glyphs and only touches the pango
+    // font description when the bold state actually changes. This is what
+    // keeps selection drags smooth on slower machines.
+    let focused = *model.focused.lock();
+    let debug = std::env::var_os("LUME_GRID_DEBUG").is_some();
+    let mut glyphs: Vec<(f64, f64, char, Rgb, f64, bool)> = Vec::with_capacity(512);
+    let mut underlines: Vec<(f64, f64, f64, Rgb)> = Vec::new();
+    // Current background run: (row, start_x, end_x, color).
+    let mut run: Option<(i32, f64, f64, Rgb)> = None;
+    fn flush_run(cr: &gtk::cairo::Context, run: &mut Option<(i32, f64, f64, Rgb)>, cell_h: f64) {
+        if let Some((row, sx, ex, c)) = run.take() {
+            cr.set_source_rgb(c.0, c.1, c.2);
+            cr.rectangle(sx, row as f64 * cell_h, ex - sx + 0.5, cell_h + 0.5);
+            let _ = cr.fill();
+        }
+    }
+
     for indexed in content.display_iter {
         let row = indexed.point.line.0 + offset;
         if row < first_row || row > last_row || holes.contains(&(row.max(0) as usize)) {
@@ -450,7 +482,7 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
             }
         }
         let is_cursor = cursor_on
-            && *model.focused.lock()
+            && focused
             && offset == 0
             && indexed.point.line == cursor.line
             && indexed.point.column == cursor.column;
@@ -460,33 +492,105 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
         }
 
         if bg != style.bg {
-            cr.set_source_rgb(bg.0, bg.1, bg.2);
-            cr.rectangle(cx, cy, cw + 0.5, cell_h + 0.5);
-            let _ = cr.fill();
+            match &mut run {
+                Some((rrow, _, ex, rc))
+                    if *rrow == row && *rc == bg && (cx - *ex).abs() < 0.01 =>
+                {
+                    *ex = cx + cw;
+                }
+                _ => {
+                    flush_run(cr, &mut run, cell_h);
+                    run = Some((row, cx, cx + cw, bg));
+                }
+            }
+        } else {
+            flush_run(cr, &mut run, cell_h);
         }
 
         let ch = cell.c;
-        if std::env::var_os("LUME_GRID_DEBUG").is_some() && (ch as u32) > 0x2000 {
+        if debug && (ch as u32) > 0x2000 {
             eprintln!("[grid-glyph] U+{:04X}", ch as u32);
         }
         if ch != ' ' && ch != '\0' {
             let dim = cell.flags.contains(Flags::DIM);
-            cr.set_source_rgba(fg.0, fg.1, fg.2, if dim { 0.6 } else { 1.0 });
-            let mut buf = [0u8; 4];
-            layout.set_font_description(Some(if cell.flags.contains(Flags::BOLD) {
-                &bold_desc
-            } else {
-                &desc
-            }));
-            layout.set_text(ch.encode_utf8(&mut buf));
-            cr.move_to(cx, cy);
-            pangocairo::functions::show_layout(cr, &layout);
+            glyphs.push((
+                cx,
+                cy,
+                ch,
+                fg,
+                if dim { 0.6 } else { 1.0 },
+                cell.flags.contains(Flags::BOLD),
+            ));
         }
         if cell.flags.contains(Flags::UNDERLINE) {
-            cr.set_source_rgb(fg.0, fg.1, fg.2);
-            cr.rectangle(cx, cy + cell_h - 1.5, cw, 1.0);
+            underlines.push((cx, cy, cw, fg));
+        }
+    }
+    flush_run(cr, &mut run, cell_h);
+
+    let _ = &layout; // direct-drawing fallback below builds its own layouts
+    let scale = cr.target().device_scale();
+    GLYPH_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let gen = GLYPH_GEN.load(std::sync::atomic::Ordering::Relaxed);
+        if cache.0 != gen || cache.1.len() > 8192 {
+            cache.0 = gen;
+            cache.1.clear();
+        }
+        for (cx, cy, ch, fg, alpha, bold) in glyphs {
+            let key = (
+                ch,
+                (
+                    (fg.0 * 255.0) as u8,
+                    (fg.1 * 255.0) as u8,
+                    (fg.2 * 255.0) as u8,
+                ),
+                alpha < 1.0,
+                bold,
+            );
+            if !cache.1.contains_key(&key) {
+                let sw = ((cell_w * 2.0 + 2.0) * scale.0).ceil() as i32;
+                let sh = ((cell_h + 2.0) * scale.1).ceil() as i32;
+                // Similar surface, NOT an ImageSurface: it lives on the same
+                // backend as the draw target (X server side), so the blit is
+                // a server-side composite instead of a pixel upload per
+                // glyph per frame.
+                let Ok(surf) = cr.target().create_similar(
+                    gtk::cairo::Content::ColorAlpha,
+                    sw,
+                    sh,
+                ) else {
+                    continue;
+                };
+                surf.set_device_scale(scale.0, scale.1);
+                if let Ok(gcr) = gtk::cairo::Context::new(&surf) {
+                    let l = pangocairo::functions::create_layout(&gcr);
+                    l.set_font_description(Some(if bold { &bold_desc } else { &desc }));
+                    let mut buf = [0u8; 4];
+                    l.set_text(ch.encode_utf8(&mut buf));
+                    gcr.set_source_rgba(fg.0, fg.1, fg.2, alpha);
+                    gcr.move_to(0.0, 0.0);
+                    pangocairo::functions::show_layout(&gcr, &l);
+                }
+                cache.1.insert(key, surf);
+            }
+            let surf = &cache.1[&key];
+            // Snap to device pixels: blitting at a fractional offset would
+            // resample (blurry glyphs). ±0.5 px of jitter is the standard
+            // glyph-atlas trade-off every terminal makes.
+            let sx = (cx * scale.0).round() / scale.0;
+            let sy = (cy * scale.1).round() / scale.1;
+            cr.set_source_surface(surf, sx, sy).ok();
+            // Bounded fill, NOT paint(): paint() composites the whole
+            // current clip for every glyph (O(pane area) each).
+            cr.rectangle(sx, sy, cell_w * 2.0 + 2.0, cell_h + 2.0);
             let _ = cr.fill();
         }
+    });
+    for (cx, cy, cw, fg) in underlines {
+        cr.set_source_rgb(fg.0, fg.1, fg.2);
+        cr.rectangle(cx, cy + cell_h - 1.5, cw, 1.0);
+        let _ = cr.fill();
     }
 }
 
@@ -589,6 +693,8 @@ pub fn native_grid_attach(
         .get_webview_window("main")
         .ok_or("main window not found")?;
     let (snapshot, snap_end, rx) = pty_state.attach(id).ok_or("unknown pty id")?;
+    // Font/theme changes re-attach every pane: retire the cached glyphs.
+    GLYPH_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
