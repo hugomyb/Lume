@@ -585,7 +585,7 @@ async fn output_task(
             return;
         }
         match target.and_then(|id| st.pty.attach(id)) {
-            Some((snapshot, mut rx)) => {
+            Some((snapshot, _offset, mut rx)) => {
                 // Replay the current screen + recent scrollback so a (re)connecting
                 // client doesn't see a blank terminal.
                 if !snapshot.is_empty()

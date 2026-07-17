@@ -109,7 +109,36 @@ struct GridModel {
     /// and show through the unpainted (windowless) area with full
     /// interactivity — no need to re-render them natively.
     holes: Mutex<Vec<usize>>,
+    /// Byte-offset bookkeeping for dump-based resyncs (see StreamSync).
+    stream: Mutex<StreamSync>,
 }
+
+/// Lines the model's byte stream up with xterm's. The PTY reader feeds this
+/// model directly (Rust-side, low latency) and xterm through the JS channel —
+/// the model is normally AHEAD. A resync dump serialized from xterm therefore
+/// misses bytes the model has already applied; blindly rebuilding from it
+/// would lose them forever (stale prompts resurrected, fresh output dropped).
+/// Both consumers count the same absolute passthrough-byte offset, and the
+/// model keeps a capped ring of recent bytes so a rebuild can replay exactly
+/// the span the dump hasn't seen: rebuild(state@J) + ring[J..rx_pos] ==
+/// state@rx_pos, byte-exact.
+struct StreamSync {
+    /// Absolute offset of the next byte expected from the broadcast feed.
+    rx_pos: u64,
+    /// Everything below this absolute offset is already in the model —
+    /// feed chunks under it are skipped (covered by a dump rebuild).
+    applied: u64,
+    /// Absolute offset of ring[0].
+    ring_base: u64,
+    ring: Vec<u8>,
+    /// The broadcast lagged (chunks lost, byte counts unknowable): offsets
+    /// are re-anchored on the next dump rebuild.
+    lagged: bool,
+}
+
+/// Ring capacity: must comfortably cover the bytes a shell can emit between
+/// xterm serializing its buffer and the rebuild applying it (milliseconds).
+const STREAM_RING_CAP: usize = 256 * 1024;
 
 impl GridModel {
     fn color(&self, style: &GridStyle, color: Color, is_fg: bool) -> Rgb {
@@ -485,14 +514,29 @@ fn spawn_feed(
                     {
                         let mut term = model.term.lock();
                         let mut parser = model.parser.lock();
-                        parser.advance(&mut *term, &bytes);
-                        term.reset_damage();
+                        let mut st = model.stream.lock();
+                        let start = st.rx_pos;
+                        st.ring.extend_from_slice(&bytes);
+                        let overflow = st.ring.len().saturating_sub(STREAM_RING_CAP);
+                        if overflow > 0 {
+                            st.ring.drain(..overflow);
+                            st.ring_base += overflow as u64;
+                        }
+                        st.rx_pos = start + bytes.len() as u64;
+                        // Skip any prefix a dump rebuild already covered.
+                        if st.rx_pos > st.applied {
+                            let skip = st.applied.saturating_sub(start) as usize;
+                            parser.advance(&mut *term, &bytes[skip..]);
+                            st.applied = st.rx_pos;
+                            term.reset_damage();
+                        }
                     }
                     if tx.send(Redraw { id, lines: None }).is_err() {
                         break;
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    model.stream.lock().lagged = true;
                     let _ = tx.send(Redraw { id, lines: None });
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -524,7 +568,7 @@ pub fn native_grid_attach(
     let window = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
-    let (snapshot, rx) = pty_state.attach(id).ok_or("unknown pty id")?;
+    let (snapshot, snap_end, rx) = pty_state.attach(id).ok_or("unknown pty id")?;
 
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
@@ -575,6 +619,15 @@ pub fn native_grid_attach(
             visible: Mutex::new(true),
             selection: Mutex::new(None),
             holes: Mutex::new(Vec::new()),
+            stream: Mutex::new(StreamSync {
+                rx_pos: snap_end,
+                applied: snap_end,
+                // Seed the ring with the snapshot itself: an early dump can
+                // predate the attach point and still replay across it.
+                ring_base: snap_end - snapshot.len() as u64,
+                ring: snapshot.clone(),
+                lagged: false,
+            }),
         });
         generation = 0u64;
         map.insert(id, model.clone());
@@ -636,6 +689,7 @@ pub fn native_grid_update(
     cell_w: f64,
     cell_h: f64,
     dump: Option<String>,
+    dump_offset: Option<u64>,
 ) -> Result<(), String> {
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
@@ -667,10 +721,14 @@ pub fn native_grid_update(
         if let Some(dump) = dump.as_ref() {
             // Rebuild from xterm's serialized viewport: fresh grid at the
             // final dims, then replay the dump (absolute content, valid at
-            // exactly these dims). The live feed keeps appending to the same
-            // Term afterwards.
+            // exactly these dims). The model normally runs AHEAD of xterm
+            // (it's fed Rust-side), so the dump alone would lose the bytes
+            // applied since xterm's serialize: replay them from the ring
+            // (see StreamSync) to land byte-exactly on the model's stream
+            // position. The live feed keeps appending afterwards.
             let mut term = model.term.lock();
             let mut parser = model.parser.lock();
+            let mut st = model.stream.lock();
             *term = Term::new(
                 TermConfig::default(),
                 &GridSize {
@@ -681,6 +739,33 @@ pub fn native_grid_update(
             );
             *parser = Processor::new();
             parser.advance(&mut *term, dump.as_bytes());
+            let j = dump_offset.unwrap_or(st.rx_pos);
+            if st.lagged {
+                // Byte counts are unknowable after a broadcast lag: the dump
+                // re-anchors the whole accounting.
+                st.rx_pos = j;
+                st.applied = j;
+                st.ring_base = j;
+                st.ring.clear();
+                st.lagged = false;
+            } else if j <= st.rx_pos {
+                if j >= st.ring_base {
+                    let from = (j - st.ring_base) as usize;
+                    if from < st.ring.len() {
+                        let delta = st.ring[from..].to_vec();
+                        parser.advance(&mut *term, &delta);
+                    }
+                } else if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+                    // Dump older than the ring (>256 KiB since serialize):
+                    // accept the dump as-is; the next quiet dump heals.
+                    eprintln!("[grid-update] id={id} dump@{j} below ring base");
+                }
+                st.applied = st.rx_pos;
+            } else {
+                // Dump is AHEAD of the feed (xterm saw bytes still in flight
+                // to us): skip incoming chunks up to the dump's offset.
+                st.applied = j;
+            }
         } else if dims_changed {
             model.term.lock().resize(GridSize {
                 columns: cols,

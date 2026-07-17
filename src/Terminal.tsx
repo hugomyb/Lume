@@ -640,9 +640,18 @@ export default function Terminal(props: TerminalProps) {
         _core?: { _writeBuffer?: { _didUserInput?: boolean } };
       }
     )._core?._writeBuffer;
+    // Absolute count of PTY stream bytes xterm has fully parsed. Sent along
+    // with native-grid resync dumps so the Rust side can replay exactly the
+    // bytes its model has applied beyond the dump (its feed runs ahead of
+    // xterm's write queue). The write callback fires synchronously after the
+    // chunk is parsed, so (buffer state, counter) are always consistent.
+    let ptyBytesParsed = 0;
     const fastWrite = (bytes: Uint8Array) => {
       if (writeBufForFastPath) writeBufForFastPath._didUserInput = true;
-      term?.write(bytes);
+      const n = bytes.length;
+      term?.write(bytes, () => {
+        ptyBytesParsed += n;
+      });
     };
 
     // Raw output arrives on a per-pane channel (created below, passed to
@@ -760,7 +769,12 @@ export default function Terminal(props: TerminalProps) {
         } catch {
           /* addon mid-teardown */
         }
-        invoke("native_grid_update", { ...gridRect(), dump }).catch(() => {});
+        invoke("native_grid_update", {
+          ...gridRect(),
+          dump,
+          // Stream position the dump corresponds to (bytes xterm has parsed).
+          dumpOffset: ptyBytesParsed,
+        }).catch(() => {});
       };
       let lastFallback: boolean | null = null;
       let lastVisible: boolean | null = null;

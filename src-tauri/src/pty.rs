@@ -25,6 +25,11 @@ pub struct PtySession {
     /// Recent raw output (capped ring) so a remote client that (re)connects can
     /// reconstruct the current screen + scrollback instead of seeing a blank one.
     replay: Arc<Mutex<Vec<u8>>>,
+    /// Total passthrough bytes ever emitted (absolute stream offset). Lets a
+    /// consumer that resyncs from a snapshot of another consumer's state (the
+    /// native grid rebuilding from xterm's serialized buffer) line the two
+    /// streams up byte-exactly. Updated under the `replay` lock.
+    total_out: Arc<Mutex<u64>>,
 }
 
 /// Cap on the per-session replay buffer (enough to rebuild the screen + recent
@@ -34,15 +39,18 @@ const MAX_REPLAY: usize = 256 * 1024;
 impl PtyManager {
     /// Attach a remote client: snapshot the replay buffer AND subscribe to live
     /// output under the replay lock, so the boundary is clean (no gap/dup). The
-    /// client replays the snapshot to reconstruct the current screen.
-    pub fn attach(&self, id: u64) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
+    /// client replays the snapshot to reconstruct the current screen. The `u64`
+    /// is the absolute stream offset of the snapshot's END (= total bytes ever
+    /// emitted at that point).
+    pub fn attach(&self, id: u64) -> Option<(Vec<u8>, u64, broadcast::Receiver<Vec<u8>>)> {
         let sessions = self.sessions.lock();
         let s = sessions.get(&id)?;
         let rb = s.replay.lock();
         let snapshot = rb.clone();
+        let offset = *s.total_out.lock();
         let rx = s.output_tx.subscribe();
         drop(rb);
-        Some((snapshot, rx))
+        Some((snapshot, offset, rx))
     }
 
     /// Write raw bytes to a session. Returns false if the id is unknown.
@@ -204,6 +212,8 @@ fn spawn_impl(
     let output_tx_reader = output_tx.clone();
     let replay = Arc::new(Mutex::new(Vec::<u8>::new()));
     let replay_for_reader = replay.clone();
+    let total_out = Arc::new(Mutex::new(0u64));
+    let total_for_reader = total_out.clone();
 
     pty_state.sessions.lock().insert(
         id,
@@ -213,6 +223,7 @@ fn spawn_impl(
             cwd,
             output_tx,
             replay,
+            total_out,
         },
     );
 
@@ -316,6 +327,7 @@ fn spawn_impl(
                                 if len > MAX_REPLAY {
                                     rb.drain(..len - MAX_REPLAY);
                                 }
+                                *total_for_reader.lock() += result.passthrough.len() as u64;
                                 if output_tx_reader.receiver_count() > 0 {
                                     let _ = output_tx_reader.send(result.passthrough.clone());
                                 }
