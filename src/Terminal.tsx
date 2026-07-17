@@ -742,10 +742,12 @@ export default function Terminal(props: TerminalProps) {
         const buf = term.buffer.active;
         // NOTE: selection is NOT a fallback anymore — the grid paints it
         // natively (no renderer swap mid-drag).
+        // NOTE: the autocomplete popup is NOT a fallback — swapping the whole
+        // pane's rendering on every keystroke made the text visibly jump.
+        // The popup stays visible through a precise overlay rect instead.
         const fallback =
           buf.viewportY < buf.baseY ||
           searchOpen() ||
-          acOpen() ||
           document.body.classList.contains("lume-overlay-open") ||
           document.body.classList.contains("lume-split-drag");
         if (fallback !== lastFallback) {
@@ -865,8 +867,15 @@ export default function Terminal(props: TerminalProps) {
               createEffect(() => {
                 // All reactive fallback inputs in one tracked scope.
                 searchOpen();
-                acOpen();
                 updateFallback();
+              });
+              createEffect(() => {
+                // Popup opened/moved/closed: resync the overlay rects NOW
+                // (the mousemove-driven reporter is too slow for typing).
+                acOpen();
+                acPos();
+                acItems();
+                window.dispatchEvent(new Event("lume-overlay-sync"));
               });
               createEffect(() => {
                 const focused = props.active();

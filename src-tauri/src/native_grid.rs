@@ -340,7 +340,11 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
     let _ = cr.fill();
 
     let layout = pangocairo::functions::create_layout(cr);
-    let mut desc = gtk::pango::FontDescription::from_string(&style.font);
+    // set_family, NOT from_string: pango parses trailing words of the string
+    // as style/size hints ("MesloLGS NF" -> family "MesloLGS" + unknown "NF")
+    // and silently falls back to a font without the nerd/powerline glyphs.
+    let mut desc = gtk::pango::FontDescription::new();
+    desc.set_family(&style.font);
     desc.set_absolute_size(style.font_px * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&desc));
     let mut bold_desc = desc.clone();
@@ -435,6 +439,51 @@ pub struct GridTheme {
     cursor: String,
     selection: String,
     ansi: Vec<String>,
+}
+
+/// Feed a model from a live PTY subscription until its generation changes.
+fn spawn_feed(
+    window: tauri::WebviewWindow,
+    model: Arc<GridModel>,
+    id: u64,
+    generation: u64,
+    mut rx: tokio::sync::broadcast::Receiver<Vec<u8>>,
+) {
+    let tx = move || -> Option<std::sync::mpsc::Sender<Redraw>> {
+        let (otx, orx) = std::sync::mpsc::channel();
+        let _ = window.run_on_main_thread(move || {
+            let _ = otx.send(ensure_glib_bridge());
+        });
+        orx.recv().ok()
+    };
+    tauri::async_runtime::spawn(async move {
+        let Some(tx) = tx() else { return };
+        loop {
+            match rx.recv().await {
+                Ok(bytes) => {
+                    if *model.generation.lock() != generation {
+                        break; // replaced by a newer attach/resync
+                    }
+                    if std::env::var_os("LUME_GRID_DEBUG").is_some() {
+                        eprintln!("[grid-feed] id={id} +{}B", bytes.len());
+                    }
+                    {
+                        let mut term = model.term.lock();
+                        let mut parser = model.parser.lock();
+                        parser.advance(&mut *term, &bytes);
+                        term.reset_damage();
+                    }
+                    if tx.send(Redraw { id, lines: None }).is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = tx.send(Redraw { id, lines: None });
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Attach (or re-attach) a native grid for PTY `id`.
@@ -541,61 +590,26 @@ pub fn native_grid_attach(
             .map_err(|e| e.to_string())?;
     }
 
-    // Feed task: PTY broadcast -> model -> damage -> redraw request.
-    let tx = {
-        let window = window.clone();
-        move || -> Option<std::sync::mpsc::Sender<Redraw>> {
-            let (otx, orx) = std::sync::mpsc::channel();
-            let _ = window.run_on_main_thread(move || {
-                let _ = otx.send(ensure_glib_bridge());
-            });
-            orx.recv().ok()
-        }
-    };
-
-    tauri::async_runtime::spawn(async move {
-        let Some(tx) = tx() else { return };
-        loop {
-            match rx.recv().await {
-                Ok(bytes) => {
-                    if *model.generation.lock() != generation {
-                        break; // replaced by a newer attach
-                    }
-                    if std::env::var_os("LUME_GRID_DEBUG").is_some() {
-                        eprintln!("[grid-feed] id={id} +{}B", bytes.len());
-                    }
-                    let lines = {
-                        let mut term = model.term.lock();
-                        let mut parser = model.parser.lock();
-                        parser.advance(&mut *term, &bytes);
-                        let damage = match term.damage() {
-                            TermDamage::Full => None,
-                            TermDamage::Partial(iter) => Some(
-                                iter.map(|l| (l.line, l.line)).collect::<Vec<_>>(),
-                            ),
-                        };
-                        term.reset_damage();
-                        damage
-                    };
-                    if tx.send(Redraw { id, lines }).is_err() {
-                        break;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let _ = tx.send(Redraw { id, lines: None });
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
+    // Feed task: PTY broadcast -> model -> redraw requests.
+    spawn_feed(window.clone(), model, id, generation, rx);
 
     Ok(())
 }
 
 /// Move/resize a pane's grid (pane layout changed).
+///
+/// When the character grid dimensions change, the model is REBUILT from the
+/// PTY replay buffer at the new size instead of being resized in place:
+/// alacritty's and xterm's reflow algorithms differ, and letting them
+/// diverge shifts the painted rows away from the DOM block bars (the
+/// "typed text offset" bug). Re-deriving both views from the same bytes at
+/// the same width keeps them aligned; the shell's own post-SIGWINCH prompt
+/// redraw settles the live rows.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn native_grid_update(
     app: tauri::AppHandle,
+    pty_state: State<'_, Arc<PtyManager>>,
     id: u64,
     x: i32,
     y: i32,
@@ -608,6 +622,9 @@ pub fn native_grid_update(
 ) -> Result<(), String> {
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
     if let Some(model) = models().lock().get(&id).cloned() {
         let old_rect = {
             let mut style = model.style.lock();
@@ -626,17 +643,39 @@ pub fn native_grid_update(
             *rect = (x, y, width, height);
             old
         };
-        model.term.lock().resize(GridSize {
-            columns: cols,
-            screen_lines: rows,
-        });
-        let window = app
-            .get_webview_window("main")
-            .ok_or("main window not found")?;
+        let dims_changed = {
+            let term = model.term.lock();
+            term.screen_lines() != rows || term.columns() != cols
+        };
+        if dims_changed {
+            if let Some((snapshot, rx)) = pty_state.attach(id) {
+                let generation = {
+                    let mut g = model.generation.lock();
+                    *g += 1;
+                    *g
+                };
+                {
+                    let mut term = model.term.lock();
+                    let mut parser = model.parser.lock();
+                    *term = Term::new(
+                        TermConfig::default(),
+                        &GridSize {
+                            columns: cols,
+                            screen_lines: rows,
+                        },
+                        NoopListener,
+                    );
+                    *parser = Processor::new();
+                    parser.advance(&mut *term, &snapshot);
+                    term.reset_damage();
+                }
+                spawn_feed(window.clone(), model.clone(), id, generation, rx);
+            }
+        }
         let rect_changed = old_rect != (x, y, width, height);
         window
             .run_on_main_thread(move || {
-                if rect_changed {
+                if rect_changed || dims_changed {
                     // Layout moved: full-window repaint wipes any pixels the
                     // grid left at intermediate positions.
                     HOOKED.with(|hw| {

@@ -432,7 +432,7 @@ export default function Tabs() {
   // pane-covering affordance to the selector.
   if (navigator.userAgent.includes("Linux")) {
     const OVERLAY_SEL =
-      '.pane-grip, .lume-block-copy, .lume-block-flash, [class*="context-menu"], [class*="ctx-menu"]';
+      '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, [class*="context-menu"], [class*="ctx-menu"]';
     let lastRects = "";
     let overlayRaf = 0;
     const syncOverlayRects = () => {
@@ -467,12 +467,14 @@ export default function Tabs() {
     document.addEventListener("mousemove", syncOverlayRects, {
       passive: true,
     });
+    window.addEventListener("lume-overlay-sync", syncOverlayRects);
     document.addEventListener("mousedown", syncOverlayRects, true);
     document.addEventListener("mouseup", syncOverlayRects, true);
     // Safety net for non-mouse triggers (keyboard-opened menus, animations).
     const overlayPoll = setInterval(syncOverlayRects, 300);
     onCleanup(() => {
       document.removeEventListener("mousemove", syncOverlayRects);
+      window.removeEventListener("lume-overlay-sync", syncOverlayRects);
       document.removeEventListener("mousedown", syncOverlayRects, true);
       document.removeEventListener("mouseup", syncOverlayRects, true);
       clearInterval(overlayPoll);
