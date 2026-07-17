@@ -48,6 +48,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_grid::native_grid_set_visible,
             #[cfg(target_os = "linux")]
+            native_grid::native_grid_set_offset,
+            #[cfg(target_os = "linux")]
             native_grid::native_grid_detach,
             #[cfg(target_os = "linux")]
             native_grid::native_grid_set_holes,

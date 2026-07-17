@@ -152,6 +152,9 @@ export default function Terminal(props: TerminalProps) {
   // actual buffer row through scrollback evictions.
   const markers = new Map<number, IMarker>();
   let nextMarkerId = 0;
+  // Marker of the most recent prompt: replaced (not stacked) when the shell
+  // redraws an idle prompt (SIGWINCH, empty Enter).
+  let lastPromptMarkerId: number | null = null;
   // Assigned inside onMount; let the render/top-level effect reach the popup
   // controls that live in onMount's scope.
   let closeAcRef: (() => void) | null = null;
@@ -605,6 +608,21 @@ export default function Terminal(props: TerminalProps) {
         awaitingFirstInput = true;
         typedSincePrompt = false;
         closeAutocomplete();
+        // Prompt REDRAW dedupe: the shell re-emits the whole prompt (with
+        // its OSC 133;A) on every SIGWINCH and empty Enter. If the previous
+        // prompt never ran a command, this A is a redraw of the same idle
+        // prompt, not a new block — drop the stale marker instead of
+        // stacking one block per redraw.
+        if (lastPromptMarkerId !== null) {
+          const prev = markers.get(lastPromptMarkerId);
+          if (
+            prev &&
+            !prev.isDisposed &&
+            !(props.canCopyMarker?.(lastPromptMarkerId) ?? true)
+          ) {
+            prev.dispose();
+          }
+        }
         const buf = term.buffer.active;
         // Cursor mid-line? Most shells will emit a CR/LF before drawing the
         // prompt, so the prompt lands one row below the current cursor row.
@@ -614,6 +632,7 @@ export default function Terminal(props: TerminalProps) {
           const id = nextMarkerId++;
           markers.set(id, marker);
           marker.onDispose(() => markers.delete(id));
+          lastPromptMarkerId = id;
           props.onBlockLine?.(id);
         }
       } else if (kind === "B") {
@@ -727,11 +746,10 @@ export default function Terminal(props: TerminalProps) {
     if (NATIVE_GRID && containerRef) {
       const th = props.appearance.theme;
       // ANY layout change (sidebar toggles, split drags, window resizes,
-      // panel switches…) shifts this pane's rect: yield the grid instantly
-      // and only bring it back once the layout has been stable for 250 ms,
-      // with the final rect, a resynced model and a full repaint. One
-      // generic mechanism instead of per-trigger heuristics.
-      let layoutChurn = false;
+      // panel switches…) shifts this pane's rect: the grid follows every
+      // observed change live, then resyncs its model from a full xterm
+      // buffer dump once the layout has been stable for 250 ms. One generic
+      // mechanism instead of per-trigger heuristics.
       const gridRect = () => {
         const r = containerRef!.getBoundingClientRect();
         // xterm's real cell size (CSS px): the grid must use the exact same
@@ -759,13 +777,16 @@ export default function Terminal(props: TerminalProps) {
         };
       };
       // Push the pane's rect/dims to the grid, with a serialized dump of
-      // xterm's real viewport (colors included): the model is rebuilt from
-      // it, so the native rows can never drift from xterm's after reflow
-      // (alacritty and xterm resize/rewrap buffers differently).
+      // xterm's FULL buffer, scrollback included (colors too): the model is
+      // rebuilt from it, so the native rows — and the native scrollback the
+      // viewport offset indexes into — can never drift from xterm's after
+      // reflow (alacritty and xterm resize/rewrap buffers differently).
       const gridUpdate = () => {
         let dump: string | undefined;
         try {
-          dump = serialize?.serialize({ scrollback: 0 });
+          dump = serialize?.serialize({
+            scrollback: props.appearance.scrollback,
+          });
         } catch {
           /* addon mid-teardown */
         }
@@ -776,44 +797,34 @@ export default function Terminal(props: TerminalProps) {
           dumpOffset: ptyBytesParsed,
         }).catch(() => {});
       };
-      let lastFallback: boolean | null = null;
+      // Mirror xterm's viewport scroll position into the grid: the grid is
+      // the ONLY painter of the terminal area (xterm is never revealed), so
+      // scrollback viewing happens by offsetting the native display. The two
+      // histories stay line-for-line aligned via the full-buffer dumps.
+      let offsetRaf = 0;
+      const syncOffset = () => {
+        if (offsetRaf) return;
+        offsetRaf = requestAnimationFrame(() => {
+          offsetRaf = 0;
+          if (!term || ptyId === undefined) return;
+          const buf = term.buffer.active;
+          invoke("native_grid_set_offset", {
+            id: ptyId,
+            offset: Math.max(0, buf.baseY - buf.viewportY),
+          }).catch(() => {});
+        });
+      };
       let lastVisible: boolean | null = null;
-      const updateFallback = () => {
+      const updateVisibility = () => {
         if (!term || !containerRef || ptyId === undefined) return;
-        const buf = term.buffer.active;
-        // NOTE: selection is NOT a fallback anymore — the grid paints it
-        // natively (no renderer swap mid-drag).
-        // NOTE: the autocomplete popup is NOT a fallback — swapping the whole
-        // pane's rendering on every keystroke made the text visibly jump.
-        // The popup stays visible through a precise overlay rect instead.
-        const fallback =
-          layoutChurn ||
-          buf.viewportY < buf.baseY ||
-          searchOpen() ||
-          document.body.classList.contains("lume-overlay-open") ||
-          document.body.classList.contains("lume-split-drag");
-        if (fallback !== lastFallback) {
-          lastFallback = fallback;
-          containerRef.classList.toggle("xterm-fallback", fallback);
-          // The WebGL canvas accumulates garbage while it isn't painting
-          // (resizes recompose its texture): force a full repaint whenever
-          // it becomes the visible layer — and when it goes back under, so
-          // the next reveal starts clean.
-          try {
-            term.refresh(0, term.rows - 1);
-          } catch {
-            /* renderer mid-teardown */
-          }
-          // Layouts settle for a few frames after yields end: re-evaluate
-          // once the dust settles (also refreshes the grid rect via poll).
-          setTimeout(() => updateFallback(), 450);
-        }
         // Grid visibility = the pane is laid out (its tab is shown; hidden
-        // tabs collapse the rect to 0) and nothing DOM-side needs the spot.
+        // tabs collapse the rect to 0). There is NO fallback to xterm
+        // anymore: scrollback, search and selection are all painted
+        // natively, DOM overlays stay visible through overlay rects.
         // NOTE: props.active() is the FOCUSED pane, not tab visibility — all
         // panes of the visible tab must show their grid.
         const r = containerRef.getBoundingClientRect();
-        const visible = r.width > 0 && r.height > 0 && !fallback;
+        const visible = r.width > 0 && r.height > 0;
         if (visible !== lastVisible) {
           lastVisible = visible;
           invoke("native_grid_set_visible", { id: ptyId, visible }).catch(
@@ -832,6 +843,9 @@ export default function Terminal(props: TerminalProps) {
           .trim(),
         fontPx: props.appearance.fontSize,
         cursorBlink: props.appearance.cursorBlink,
+        // Native scrollback sized like xterm's: the mirrored viewport offset
+        // must index the same history depth on both sides.
+        history: props.appearance.scrollback,
         theme: {
           background: th.background,
           foreground: th.foreground,
@@ -860,7 +874,7 @@ export default function Terminal(props: TerminalProps) {
         .then(() => {
           nativeGridAttached = true;
           containerRef?.classList.add("native-grid");
-          updateFallback();
+          updateVisibility();
 
           // Mirror the selection into the grid (xterm keeps owning the
           // state: copy & PRIMARY behave exactly as before).
@@ -877,13 +891,16 @@ export default function Terminal(props: TerminalProps) {
             const pos = term.getSelectionPosition();
             // Despite the typings claiming 1-based coords, the selection
             // model is 0-based (verified on-screen: -1 highlighted the row
-            // above). end.x is exclusive.
-            const base = term.buffer.active.baseY;
+            // above). end.x is exclusive. Rows are sent relative to the
+            // CURRENT viewport top (viewportY, not baseY): the grid mirrors
+            // xterm's scroll offset, so selections made or shown while
+            // scrolled back land on the right painted rows.
+            const viewTop = term.buffer.active.viewportY;
             const sel = pos
               ? [
-                  pos.start.y - base,
+                  pos.start.y - viewTop,
                   pos.start.x,
-                  pos.end.y - base,
+                  pos.end.y - viewTop,
                   pos.end.x,
                 ]
               : null;
@@ -897,8 +914,17 @@ export default function Terminal(props: TerminalProps) {
             nativeSelectionSync = null;
             if (selRaf) cancelAnimationFrame(selRaf);
           });
-          const scrollSub = term!.onScroll(updateFallback);
-          const resizeSub = term!.onResize(() => gridUpdate());
+          // Scrolls move the viewport: mirror the offset and re-express the
+          // selection in the new viewport-relative coordinates.
+          const scrollSub = term!.onScroll(() => {
+            syncOffset();
+            syncSelection();
+          });
+          // Mid-drag resizes are frequent: cheap in-place update only, the
+          // authoritative full-buffer dump happens at the layout settle.
+          const resizeSub = term!.onResize(() =>
+            invoke("native_grid_update", gridRect()).catch(() => {})
+          );
           addCleanup(() => {
             selSub.dispose();
             scrollSub.dispose();
@@ -906,11 +932,6 @@ export default function Terminal(props: TerminalProps) {
           });
           if (owner) {
             runWithOwner(owner, () => {
-              createEffect(() => {
-                // All reactive fallback inputs in one tracked scope.
-                searchOpen();
-                updateFallback();
-              });
               createEffect(() => {
                 // Popup opened/moved/closed: resync the overlay rects NOW
                 // (the mousemove-driven reporter is too slow for typing).
@@ -929,76 +950,44 @@ export default function Terminal(props: TerminalProps) {
               });
             });
           }
-          const onOverlayChange = () => updateFallback();
+          const onOverlayChange = () => updateVisibility();
           window.addEventListener("lume-overlay-change", onOverlayChange);
           addCleanup(() =>
             window.removeEventListener("lume-overlay-change", onOverlayChange)
           );
-          // Block bars are DOM elements sitting on marker rows: report those
-          // viewport rows so the grid leaves them unpainted (they show
-          // through, fully interactive). Recomputed after writes/scrolls.
-          let lastHoles = "";
-          let holesRaf = 0;
-          const syncHoles = () => {
-            if (holesRaf) return;
-            holesRaf = requestAnimationFrame(() => {
-              holesRaf = 0;
-              if (!term || ptyId === undefined) return;
-              const buf = term.buffer.active;
-              // Every visible block-bar row EXCEPT the active prompt's: the
-              // user types on that row, so the grid must keep painting it
-              // (the DOM bar there only decorates the previous command).
-              let lastLine = -1;
-              for (const m of markers.values())
-                if (!m.isDisposed && m.line > lastLine) lastLine = m.line;
-              const rows: number[] = [];
-              for (const m of markers.values()) {
-                if (m.isDisposed || m.line === lastLine) continue;
-                const r = m.line - buf.baseY;
-                if (r >= 0 && r < term.rows) rows.push(r);
-              }
-              rows.sort((a, b) => a - b);
-              const key = rows.join(",");
-              if (key !== lastHoles) {
-                lastHoles = key;
-                invoke("native_grid_set_holes", { id: ptyId, rows }).catch(
-                  () => {}
-                );
-              }
-            });
-          };
-          const holesWriteSub = term!.onWriteParsed(syncHoles);
-          const holesScrollSub = term!.onScroll(syncHoles);
-          syncHoles();
-          addCleanup(() => {
-            holesWriteSub.dispose();
-            holesScrollSub.dispose();
-            if (holesRaf) cancelAnimationFrame(holesRaf);
-          });
+          // NOTE: no "holes" anymore — block rows are ordinary terminal text
+          // (the shell's own prompt), painted natively like everything else.
+          // The only DOM affordances over a pane (copy button, flash,
+          // popups) go through the overlay-rects mechanism.
 
           let settleTimer: ReturnType<typeof setTimeout> | undefined;
           let lastRect = "";
           const onLayoutChange = () => {
-            if (!layoutChurn) {
-              layoutChurn = true;
-              updateFallback();
-            }
+            // The grid never hides during churn anymore: glue it to the
+            // pane's rect on every observed change (cheap, in-place) so it
+            // follows divider drags live, then send the authoritative
+            // full-buffer dump once the layout has settled.
+            invoke("native_grid_update", gridRect()).catch(() => {});
+            updateVisibility();
             if (settleTimer) clearTimeout(settleTimer);
             settleTimer = setTimeout(() => {
-              layoutChurn = false;
               const g = gridRect();
               lastRect = `${g.x},${g.y},${g.width},${g.height}`;
-              gridUpdate();
-              try {
-                term?.refresh(0, term.rows - 1);
-              } catch {
-                /* renderer mid-teardown */
-              }
-              // Selection coords and marker rows may both have shifted with
-              // the reflow: resync them against the fresh model.
-              syncSelectionNow();
-              syncHoles();
-              updateFallback();
+              const resync = () => {
+                gridUpdate();
+                // Selection coords and the scroll offset may have shifted
+                // with the reflow: resync them against the fresh model.
+                syncSelectionNow();
+                syncOffset();
+              };
+              resync();
+              updateVisibility();
+              // Second pass once the stream is quiet: the debounced
+              // pty_resize fires around the same time as this settle, and
+              // the shell's SIGWINCH prompt redraw can land right across
+              // the first dump. A heal dump after the round trip closes
+              // that race for good.
+              settleTimer = setTimeout(resync, 600);
             }, 250);
           };
           const ro = new ResizeObserver(() => onLayoutChange());
@@ -1173,9 +1162,21 @@ export default function Terminal(props: TerminalProps) {
       );
     });
 
+    // Debounced: divider drags refit xterm at every mousemove step, and each
+    // pty_resize raises a SIGWINCH the shell answers with a full prompt
+    // redraw — a drag used to shower the pty with ~15 SIGWINCHs, stacking
+    // one redrawn prompt (and one block) per step. One trailing resize per
+    // settle is what the shell actually needs.
+    let ptyResizeTimer: ReturnType<typeof setTimeout> | undefined;
     term.onResize(({ cols, rows }) => {
       if (ptyId === undefined) return;
-      invoke("pty_resize", { id: ptyId, rows, cols }).catch(console.error);
+      if (ptyResizeTimer) clearTimeout(ptyResizeTimer);
+      ptyResizeTimer = setTimeout(() => {
+        invoke("pty_resize", { id: ptyId, rows, cols }).catch(console.error);
+      }, 150);
+    });
+    addCleanup(() => {
+      if (ptyResizeTimer) clearTimeout(ptyResizeTimer);
     });
 
     // Recompute autocomplete after the buffer changes (shell echo, output) or

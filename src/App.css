@@ -3174,17 +3174,14 @@ select.settings-input optgroup {
 
 /* --- Native grid renderer (Linux) --------------------------------------- */
 /* The terminal pixels come from a native GTK layer painted OVER the webview
-   (~1-4 ms pty->pixel). xterm keeps rendering underneath and takes over
-   whenever DOM content may overlap the pane: selection, search, autocomplete,
-   scrolled-back viewport, app modals — the grid hides and xterm is revealed,
-   instantly, since it was live all along. */
+   (~1-4 ms pty->pixel). It is the ONLY painter of the terminal area —
+   scrollback, search and selection included; xterm runs invisibly as the
+   state machine (parsing, shell integration, keyboard encoding) and is
+   never revealed. DOM overlays stay visible through overlay rects. */
 /* Make xterm's paint layers invisible but KEEP them interactive:
    visibility:hidden would break both focus (the hidden textarea receives all
    keyboard input) and hit-testing (mousedown on the screen element is what
    focuses the terminal and drives selection). opacity keeps everything live. */
 .terminal-host.native-grid .xterm-screen {
   opacity: 0;
-}
-.terminal-host.native-grid.xterm-fallback .xterm-screen {
-  opacity: 1;
 }

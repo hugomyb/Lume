@@ -387,43 +387,20 @@ export default function Tabs() {
   const [layoutsOpen, setLayoutsOpen] = createSignal(false);
 
   // Native grid (Linux): terminal pixels are painted by a native layer above
-  // the webview, so DOM overlays that can cover a pane must make the grids
-  // yield. Broadcast "some app-level overlay is open" to the Terminals.
+  // the webview. The grid never yields to xterm anymore — DOM overlays stay
+  // visible through per-element overlay rects (see OVERLAY_SEL below); this
+  // effect just resyncs those rects the instant a modal opens or closes.
   createEffect(() => {
-    const open =
-      settingsOpen() ||
-      paletteOpen() ||
-      workflowsOpen() ||
-      sshOpen() ||
-      layoutsOpen() ||
-      // Tab/pane drags paint drop zones and swap targets across the panes:
-      // yield the whole grid layer for the duration of the drag.
-      draggingTabId() !== null ||
-      draggingPaneLeafId() !== null ||
-      remoteDialogOpen();
-    document.body.classList.toggle("lume-overlay-open", open);
-    window.dispatchEvent(new Event("lume-overlay-change"));
+    settingsOpen();
+    paletteOpen();
+    workflowsOpen();
+    sshOpen();
+    layoutsOpen();
+    draggingTabId();
+    draggingPaneLeafId();
+    remoteDialogOpen();
+    window.dispatchEvent(new Event("lume-overlay-sync"));
   });
-
-  // Window resizes re-layout every pane continuously: same treatment as a
-  // split drag — yield the grids until the size settles.
-  {
-    let resizeSettle: ReturnType<typeof setTimeout> | undefined;
-    const onWinResize = () => {
-      document.body.classList.add("lume-split-drag");
-      window.dispatchEvent(new Event("lume-overlay-change"));
-      if (resizeSettle) clearTimeout(resizeSettle);
-      resizeSettle = setTimeout(() => {
-        document.body.classList.remove("lume-split-drag");
-        window.dispatchEvent(new Event("lume-overlay-change"));
-      }, 400);
-    };
-    window.addEventListener("resize", onWinResize);
-    onCleanup(() => {
-      window.removeEventListener("resize", onWinResize);
-      if (resizeSettle) clearTimeout(resizeSettle);
-    });
-  }
 
   // Native grid (Linux): small DOM affordances that pop up OVER a pane (drag
   // grip, per-block copy button, context menus, block flash) must stay
@@ -432,7 +409,10 @@ export default function Tabs() {
   // pane-covering affordance to the selector.
   if (navigator.userAgent.includes("Linux")) {
     const OVERLAY_SEL =
-      '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, [class*="context-menu"], [class*="ctx-menu"]';
+      '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, [class*="context-menu"], [class*="ctx-menu"], ' +
+      // Full DOM overlays (modals, palettes, search bar, pane drop zones):
+      // the grid paints around these rects instead of yielding to xterm.
+      ".settings-panel, .palette, .layouts-popup, .remote-slideover, .term-search, .pane-drop-zone";
     let lastRects = "";
     let overlayRaf = 0;
     const syncOverlayRects = () => {

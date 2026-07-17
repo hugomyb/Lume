@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor};
@@ -111,6 +111,10 @@ struct GridModel {
     holes: Mutex<Vec<usize>>,
     /// Byte-offset bookkeeping for dump-based resyncs (see StreamSync).
     stream: Mutex<StreamSync>,
+    /// Scrollback depth, mirroring xterm's configured scrollback: the JS
+    /// side mirrors xterm's viewport offset into this model, so both
+    /// histories must hold the same number of lines.
+    history: Mutex<usize>,
 }
 
 /// Lines the model's byte stream up with xterm's. The PTY reader feeds this
@@ -563,6 +567,7 @@ pub fn native_grid_attach(
     font_family: String,
     font_px: f64,
     cursor_blink: bool,
+    history: u32,
     theme: GridTheme,
 ) -> Result<(), String> {
     let window = app
@@ -604,7 +609,10 @@ pub fn native_grid_attach(
         }
         let model = Arc::new(GridModel {
             term: Mutex::new(Term::new(
-                TermConfig::default(),
+                TermConfig {
+                    scrolling_history: history as usize,
+                    ..TermConfig::default()
+                },
                 &GridSize {
                     columns: cols,
                     screen_lines: rows,
@@ -628,6 +636,7 @@ pub fn native_grid_attach(
                 ring: snapshot.clone(),
                 lagged: false,
             }),
+            history: Mutex::new(history as usize),
         });
         generation = 0u64;
         map.insert(id, model.clone());
@@ -729,8 +738,15 @@ pub fn native_grid_update(
             let mut term = model.term.lock();
             let mut parser = model.parser.lock();
             let mut st = model.stream.lock();
+            // The user may be scrolled back: carry the display offset over
+            // to the rebuilt model (clamped by alacritty if now out of
+            // range). JS re-mirrors the exact offset right after.
+            let display_offset = term.grid().display_offset();
             *term = Term::new(
-                TermConfig::default(),
+                TermConfig {
+                    scrolling_history: *model.history.lock(),
+                    ..TermConfig::default()
+                },
                 &GridSize {
                     columns: cols,
                     screen_lines: rows,
@@ -739,6 +755,12 @@ pub fn native_grid_update(
             );
             *parser = Processor::new();
             parser.advance(&mut *term, dump.as_bytes());
+            if display_offset > 0 {
+                term.scroll_display(Scroll::Delta(display_offset as i32));
+            }
+            // Stale selection coords are meaningless against the rebuilt
+            // buffer; JS re-mirrors the real selection right after.
+            *model.selection.lock() = None;
             let j = dump_offset.unwrap_or(st.rx_pos);
             if st.lagged {
                 // Byte counts are unknowable after a broadcast lag: the dump
@@ -793,6 +815,32 @@ pub fn native_grid_update(
                     queue_model_redraw(&model, None);
                 }
             })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Mirror xterm's viewport scroll offset (0 = bottom, live view). The grid
+/// paints its own scrollback at this offset — scrolled-back viewing is fully
+/// native, xterm is never revealed.
+#[tauri::command]
+pub fn native_grid_set_offset(app: tauri::AppHandle, id: u64, offset: u32) -> Result<(), String> {
+    if let Some(model) = models().lock().get(&id).cloned() {
+        {
+            let mut term = model.term.lock();
+            let current = term.grid().display_offset();
+            let delta = offset as i64 - current as i64;
+            if delta != 0 {
+                term.scroll_display(Scroll::Delta(delta as i32));
+            } else {
+                return Ok(());
+            }
+        }
+        let window = app
+            .get_webview_window("main")
+            .ok_or("main window not found")?;
+        window
+            .run_on_main_thread(move || queue_model_redraw(&model, None))
             .map_err(|e| e.to_string())?;
     }
     Ok(())

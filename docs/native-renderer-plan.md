@@ -86,3 +86,47 @@ clamps). À reprendre : vérifier le contenu de `holes` réellement envoyé
 (suspect n°1 : syncHoles envoie trop de lignes ou des valeurs erronées),
 comparer avec le commit ng8 fonctionnel. Le natif reste opt-in tant que ce
 n'est pas réglé ; le défaut = pipeline xterm optimisé (~14 ms).
+
+## État au 17/07/2026 — architecture finale « peintre unique »
+
+Le double-affichage (natif ⇄ xterm révélé en fallback) créait des divergences
+structurelles : xterm et alacritty rewrappent différemment au resize, donc
+chaque bascule exposait lignes décalées/dupliquées/perdues. Décision : le
+natif est le SEUL peintre de la zone terminale, xterm n'est plus jamais
+affiché (opacity 0 permanent) et sert uniquement de machine d'état (parsing,
+intégration shell OSC 133, encodage clavier, extraction sélection/PRIMARY).
+
+Mécanique :
+- **Scrollback natif** : historique alacritty dimensionné comme xterm
+  (`history` à l'attach), offset de viewport miroir (`native_grid_set_offset`
+  sur onScroll), les deux historiques restent alignés par dumps complets
+  (serialize scrollback inclus) au settle des layouts + **seconde passe de
+  heal à +600 ms** (le redraw SIGWINCH débouncé peut atterrir après le
+  premier dump).
+- **Plus de fallback** : la grille suit le rect en continu pendant les drags
+  (update in-place par événement ResizeObserver, dump authoritatif au
+  settle). Sélection resetée côté Rust à chaque rebuild (le JS re-mirror
+  aussitôt).
+- **Overlays DOM** (modales, palettes, barre de recherche, drop zones,
+  menus, autocomplete, bouton copier) : visibles via OVERLAY_RECTS (trous
+  dans le clip cairo). Limitation cosmétique : le backdrop des modales ne
+  peut pas assombrir la zone peinte nativement.
+- **Plus de « holes »** : les « block bars » sont le prompt p10k lui-même
+  (texte du terminal) — il n'y a jamais eu de bars DOM. Le mécanisme holes
+  est retiré côté JS (`native_grid_set_holes` dormant côté Rust).
+- **Anti-tempête SIGWINCH** : `pty_resize` débouncé (150 ms trailing) — un
+  drag de divider n'envoie plus ~15 SIGWINCH (qui empilaient un prompt
+  p10k redessiné par étape) ; et dédup des markers de prompt (un 133;A sans
+  commande exécutée depuis le précédent REMPLACE le marker au lieu d'en
+  empiler un — plus un block par redraw).
+
+Validation (torture xdotool, écran 3) : 5 drags violents multi-dividers sur
+contenu statique avec blocks réels → zéro divergence à l'oracle PRIMARY
+(triple/double-clic → xsel -p comparé au pixel peint), scrollback natif
+(molette, ancrage sous flux, resize scrollé, snap au clavier), sélection
+live/nettoyée, recherche (barre en overlay rect, match actif via sélection),
+modale Settings au-dessus de la grille, latence 1,7-3,5 ms.
+
+Reste connu : surlignage « tous les matchs » de la recherche non peint
+(seul le match actif l'est, via la sélection) ; hover-underline des liens
+invisible ; préview IME/composition invisible (entrée directe OK).
