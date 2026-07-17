@@ -389,17 +389,24 @@ export default function Tabs() {
   // Native grid (Linux): terminal pixels are painted by a native layer above
   // the webview. The grid never yields to xterm anymore — DOM overlays stay
   // visible through per-element overlay rects (see OVERLAY_SEL below); this
-  // effect just resyncs those rects the instant a modal opens or closes.
+  // effect resyncs those rects the instant a modal opens or closes, and
+  // mirrors the modal backdrop veil onto the native layer (the DOM backdrop
+  // sits under the grid's paint, so the grid dims its own pixels with the
+  // same rgba(0,0,0,0.4) — the modal box itself is a hole, left undimmed).
   createEffect(() => {
-    settingsOpen();
-    paletteOpen();
-    workflowsOpen();
-    sshOpen();
+    const backdropOpen =
+      settingsOpen() ||
+      paletteOpen() ||
+      workflowsOpen() ||
+      sshOpen() ||
+      remoteDialogOpen();
     layoutsOpen();
     draggingTabId();
     draggingPaneLeafId();
-    remoteDialogOpen();
     window.dispatchEvent(new Event("lume-overlay-sync"));
+    invoke("native_grid_set_dim", { alpha: backdropOpen ? 0.4 : 0 }).catch(
+      () => {}
+    );
   });
 
   // Native grid (Linux): small DOM affordances that pop up OVER a pane (drag

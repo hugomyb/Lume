@@ -193,6 +193,13 @@ impl GridModel {
 /// so the web layer shows through, fully interactive.
 static OVERLAY_RECTS: Mutex<Vec<(i32, i32, i32, i32)>> = Mutex::new(Vec::new());
 
+/// Opacity of the modal-backdrop veil painted over every grid (0.0 = none).
+/// The DOM backdrop dims the web layer but sits UNDER the native paint; the
+/// grid paints the same rgba(0,0,0,α) veil over its own pixels so panes dim
+/// uniformly with the rest of the window. The modal box itself is an overlay
+/// rect (hole in the clip), so it stays undimmed.
+static DIM_ALPHA: Mutex<f64> = Mutex::new(0.0);
+
 fn models() -> &'static Mutex<HashMap<u64, Arc<GridModel>>> {
     static MODELS: OnceLock<Mutex<HashMap<u64, Arc<GridModel>>>> = OnceLock::new();
     MODELS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -322,6 +329,14 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
                 cr,
                 (clip.0, clip.1, clip.2 - clip.0, clip.3 - clip.1),
             );
+            let dim = *DIM_ALPHA.lock();
+            if dim > 0.0 {
+                // Same veil as the DOM modal backdrop (still translated to
+                // the pane origin, still clipped minus the overlay holes).
+                cr.set_source_rgba(0.0, 0.0, 0.0, dim);
+                cr.rectangle(0.0, 0.0, w as f64, h as f64);
+                let _ = cr.fill();
+            }
             cr.restore().ok();
         }
         Some(false.to_value())
@@ -814,6 +829,25 @@ pub fn native_grid_update(
                 } else {
                     queue_model_redraw(&model, None);
                 }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Set the modal-backdrop veil opacity painted over every grid (see
+/// DIM_ALPHA). Called when a backdrop modal opens (α ≈ 0.4) or closes (0).
+#[tauri::command]
+pub fn native_grid_set_dim(app: tauri::AppHandle, alpha: f64) -> Result<(), String> {
+    *DIM_ALPHA.lock() = alpha.clamp(0.0, 1.0);
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .run_on_main_thread(|| {
+                HOOKED.with(|hw| {
+                    if let Some(win) = hw.borrow().as_ref() {
+                        win.queue_draw();
+                    }
+                });
             })
             .map_err(|e| e.to_string())?;
     }
