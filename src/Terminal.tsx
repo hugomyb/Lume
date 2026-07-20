@@ -142,6 +142,11 @@ export default function Terminal(props: TerminalProps) {
   // patch below so the native highlight follows the drag LIVE (xterm's public
   // onSelectionChange only fires on mouseup).
   let nativeSelectionSync: (() => void) | null = null;
+  // Set by the native-grid attach: the live-apply appearance effect calls it
+  // so font/theme changes reach the native painter (attach carries the style
+  // and is idempotent — it replaces the model and retires the glyph cache).
+  let nativeGridReattach: (() => void) | null = null;
+  let nativeGridReattachTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenExit: UnlistenFn | undefined;
   let unlistenBlock: UnlistenFn | undefined;
   let unlistenCwd: UnlistenFn | undefined;
@@ -832,8 +837,10 @@ export default function Terminal(props: TerminalProps) {
           );
         }
       };
-      const doAttach = () =>
-      invoke("native_grid_attach", {
+      // Everything the native painter needs to (re)build a pane's style —
+      // sent at first attach, and again on appearance changes via
+      // `nativeGridReattach` (the grid learns font/theme ONLY through attach).
+      const attachPayload = () => ({
         ...gridRect(),
         // Single primary family: pango/fontconfig does automatic per-glyph
         // fallback on its own (comma lists degrade the metrics resolution).
@@ -870,7 +877,9 @@ export default function Terminal(props: TerminalProps) {
             th.brightWhite,
           ],
         },
-      })
+      });
+      const doAttach = () =>
+        invoke("native_grid_attach", attachPayload())
         .then(() => {
           nativeGridAttached = true;
           containerRef?.classList.add("native-grid");
@@ -917,8 +926,29 @@ export default function Terminal(props: TerminalProps) {
           };
           const selSub = term!.onSelectionChange(syncSelection);
           nativeSelectionSync = syncSelection;
+          // Appearance edits (font/theme/scrollback) land here: re-attach
+          // with the new style — the model is rebuilt and the glyph cache
+          // retired — WITHOUT re-running the one-time wiring around this
+          // block. Then restore what the rebuild dropped: the authoritative
+          // buffer dump, the mirrored selection (dedup cache busted — the
+          // fresh model has no selection) and the scroll offset.
+          nativeGridReattach = () => {
+            invoke("native_grid_attach", attachPayload())
+              .then(() => {
+                gridUpdate();
+                lastSelKey = " ";
+                syncSelectionNow();
+                syncOffset();
+                // The fresh Rust model defaults to visible — re-mirror the
+                // DOM-derived state (hidden tabs must stay hidden).
+                lastVisible = null;
+                updateVisibility();
+              })
+              .catch(() => {});
+          };
           addCleanup(() => {
             nativeSelectionSync = null;
+            nativeGridReattach = null;
             if (selRaf) cancelAnimationFrame(selRaf);
           });
           // Scrolls move the viewport: mirror the offset and re-express the
@@ -1427,6 +1457,13 @@ export default function Terminal(props: TerminalProps) {
         term.refresh(0, term.rows - 1);
       } catch {}
     });
+    // The native grid is the ONLY painter: push the new style there too, by
+    // re-attaching. Trailing debounce — Ctrl+scroll zoom fires in bursts and
+    // every re-attach rebuilds the pane's model; only the settled style
+    // matters. 150 ms also lands after the rAF refit above, so the payload
+    // carries the new cell metrics.
+    if (nativeGridReattachTimer) clearTimeout(nativeGridReattachTimer);
+    nativeGridReattachTimer = setTimeout(() => nativeGridReattach?.(), 150);
   });
 
   createEffect(() => {
@@ -1453,6 +1490,7 @@ export default function Terminal(props: TerminalProps) {
 
   onCleanup(() => {
     if (nativeGridPoll) clearInterval(nativeGridPoll);
+    if (nativeGridReattachTimer) clearTimeout(nativeGridReattachTimer);
     if (nativeGridAttached && ptyId !== undefined) {
       invoke("native_grid_detach", { id: ptyId }).catch(() => {});
     }
