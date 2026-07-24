@@ -25,6 +25,8 @@ type Props = {
   onBlockLine: (markerId: number) => void;
   onRefreshReady: (refresh: () => void) => void;
   onActivate: () => void;
+  /** Focus-follows-mouse setting: hovering the pane activates it. */
+  focusFollowsMouse: () => boolean;
   onContextMenu: (x: number, y: number) => void;
   onPaneDragStart: (leafId: number) => void;
   onPaneDragEnd: () => void;
@@ -104,6 +106,11 @@ export default function PortableTerminal(props: Props) {
       class="terminal-portal-host"
       classList={{ "pane-active": props.active() }}
       onMouseDown={props.onActivate}
+      onMouseEnter={(e) => {
+        // No button held: don't steal focus mid selection-drag / split-resize.
+        if (props.focusFollowsMouse() && e.buttons === 0 && !props.active())
+          props.onActivate();
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         props.onActivate();

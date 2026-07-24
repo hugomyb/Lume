@@ -35,6 +35,11 @@ export type Appearance = {
   theme: Theme;
 };
 
+export type BehaviorConfig = {
+  /** Focus the hovered pane without clicking (focus follows mouse). */
+  focusFollowsMouse: boolean;
+};
+
 export type ShellConfig = {
   program: string | null;
   args: string[];
@@ -85,6 +90,7 @@ export type FileTreeConfig = {
 
 export type Config = {
   appearance: Appearance;
+  behavior: BehaviorConfig;
   shell: ShellConfig;
   notifications: NotificationsConfig;
   ai: AiConfig;
@@ -137,6 +143,7 @@ export const DEFAULT_CONFIG: Config = {
     scrollback: 5000,
     theme: DEFAULT_THEME,
   },
+  behavior: { focusFollowsMouse: false },
   shell: { program: null, args: [] },
   notifications: { enabled: true, minDurationSec: 10, sound: true },
   ai: {

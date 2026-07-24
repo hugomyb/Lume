@@ -10,6 +10,7 @@ use tauri::State;
 #[serde(default, rename_all = "camelCase")]
 pub struct Config {
     pub appearance: AppearanceConfig,
+    pub behavior: BehaviorConfig,
     pub shell: ShellConfig,
     pub notifications: NotificationsConfig,
     pub ai: AiConfig,
@@ -97,6 +98,13 @@ impl AiConfig {
             ..self.clone()
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BehaviorConfig {
+    /// Focus the hovered pane without clicking (focus follows mouse).
+    pub focus_follows_mouse: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

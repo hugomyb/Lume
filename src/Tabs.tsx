@@ -2675,6 +2675,9 @@ export default function Tabs() {
                                   leafRefreshFns.set(leafId, refresh)
                                 }
                                 onActivate={() => focusLeaf(leafId)}
+                                focusFollowsMouse={() =>
+                                  config.behavior.focusFollowsMouse
+                                }
                                 onContextMenu={(x, y) =>
                                   setPaneCtxMenu({ x, y, leafId })
                                 }

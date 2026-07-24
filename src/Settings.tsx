@@ -1022,6 +1022,22 @@ export default function Settings(props: Props) {
                   </select>
                 </label>
 
+                <div class="settings-row">
+                  <span class="settings-label">
+                    {t("general.focusFollowsMouse")}
+                  </span>
+                  <Toggle
+                    checked={props.config.behavior.focusFollowsMouse}
+                    onChange={(v) => {
+                      props.setConfig("behavior", "focusFollowsMouse", v);
+                      props.onChange();
+                    }}
+                  />
+                </div>
+                <p class="settings-note">
+                  {t("general.focusFollowsMouseNote")}
+                </p>
+
                 <div class="settings-subtitle">{t("general.backup")}</div>
                 <div class="settings-row">
                   <span class="settings-label">{t("general.exportImport")}</span>

@@ -94,6 +94,9 @@ const en: Dict = {
 
   // --- General ---
   "general.language": "Language",
+  "general.focusFollowsMouse": "Focus pane on hover",
+  "general.focusFollowsMouseNote":
+    "Focus follows the mouse: hovering a split pane focuses it without clicking.",
   "general.backup": "Settings backup",
   "general.exportImport": "Export / import the whole config",
   "general.export": "Export",
@@ -449,6 +452,9 @@ const fr: Dict = {
   "keys.fixed": "Raccourcis fixes",
 
   "general.language": "Langue",
+  "general.focusFollowsMouse": "Focus du pane au survol",
+  "general.focusFollowsMouseNote":
+    "Le focus suit la souris : survoler un pane d'un split lui donne le focus sans cliquer.",
   "general.backup": "Sauvegarde des réglages",
   "general.exportImport": "Exporter / importer toute la config",
   "general.export": "Exporter",
