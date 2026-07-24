@@ -229,6 +229,39 @@ thread_local! {
     /// The toplevel we hooked (main thread only).
     static HOOKED: RefCell<Option<gtk::ApplicationWindow>> = const { RefCell::new(None) };
     static CURSOR_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// Origin of the WebKitWebView inside the toplevel, refreshed on every
+    /// draw pass. (0,0) on X11 where the webview fills the window; non-zero
+    /// under Wayland, where GTK's client-side decorations (header bar +
+    /// shadow margins) live in the SAME surface above/around the webview.
+    /// Grid rects are DOM coordinates: painting and damage must both shift
+    /// by this, or the grid lands on the CSD title bar (reported on sway).
+    static WEBVIEW_OFFSET: std::cell::Cell<(i32, i32)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Locate the WebKitWebView widget and return its origin in toplevel
+/// coordinates. Cheap: the widget tree between the toplevel and the webview
+/// is a handful of containers.
+fn webview_origin(toplevel: &gtk::Widget) -> (i32, i32) {
+    fn find(widget: gtk::Widget) -> Option<gtk::Widget> {
+        if widget.type_().name().contains("WebKitWebView") {
+            return Some(widget);
+        }
+        widget
+            .dynamic_cast_ref::<gtk::Container>()?
+            .children()
+            .into_iter()
+            .find_map(find)
+    }
+    find(toplevel.clone())
+        .and_then(|wv| wv.translate_coordinates(toplevel, 0, 0))
+        .unwrap_or((0, 0))
+}
+
+/// `queue_draw_area` for a DOM-coordinate rect: shift by the webview origin
+/// (see `WEBVIEW_OFFSET`). Main thread only, like every GTK call here.
+fn queue_draw_area_dom(win: &gtk::ApplicationWindow, x: i32, y: i32, w: i32, h: i32) {
+    let (ox, oy) = WEBVIEW_OFFSET.with(|o| o.get());
+    win.queue_draw_area(x + ox, y + oy, w, h);
 }
 
 /// Redraw request sent from the feed task to the main thread.
@@ -250,7 +283,7 @@ fn queue_model_redraw(model: &GridModel, _lines: Option<&[(usize, usize)]>) {
     let (x, y, w, h) = *model.rect.lock();
     HOOKED.with(|hw| {
         if let Some(win) = hw.borrow().as_ref() {
-            win.queue_draw_area(x, y, w, h);
+            queue_draw_area_dom(win, x, y, w, h);
         }
     });
 }
@@ -298,6 +331,13 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
             return Some(false.to_value());
         };
         let cr = &cr;
+        // DOM coords → toplevel coords: one global shift for the whole pass
+        // (pane rects, overlay holes, dim veil all share the DOM space).
+        if let Ok(toplevel) = values[0].get::<gtk::Widget>() {
+            let (ox, oy) = webview_origin(&toplevel);
+            WEBVIEW_OFFSET.with(|o| o.set((ox, oy)));
+            cr.translate(ox as f64, oy as f64);
+        }
         let list: Vec<Arc<GridModel>> = models().lock().values().cloned().collect();
         let cursor_on = CURSOR_ON.with(|c| c.get());
         let debug = std::env::var_os("LUME_GRID_DEBUG").is_some();
@@ -349,7 +389,11 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
             cr.restore().ok();
         }
         if let Some(t0) = t0 {
-            eprintln!("[grid-drawpass] {:.2}ms", t0.elapsed().as_secs_f64() * 1000.0);
+            let (ox, oy) = WEBVIEW_OFFSET.with(|o| o.get());
+            eprintln!(
+                "[grid-drawpass] {:.2}ms offset=({ox},{oy})",
+                t0.elapsed().as_secs_f64() * 1000.0
+            );
         }
         Some(false.to_value())
     });
@@ -1028,7 +1072,7 @@ pub fn native_grid_detach(app: tauri::AppHandle, id: u64) -> Result<(), String> 
                 let (x, y, w, h) = *model.rect.lock();
                 HOOKED.with(|hw| {
                     if let Some(win) = hw.borrow().as_ref() {
-                        win.queue_draw_area(x, y, w, h);
+                        queue_draw_area_dom(win, x, y, w, h);
                     }
                 });
             });
@@ -1127,7 +1171,7 @@ pub fn native_grid_set_overlay_rects(
             HOOKED.with(|hw| {
                 if let Some(win) = hw.borrow().as_ref() {
                     for (x, y, w, h) in old.iter().chain(new.iter()) {
-                        win.queue_draw_area(*x, *y, *w, *h);
+                        queue_draw_area_dom(win, *x, *y, *w, *h);
                     }
                 }
             });
