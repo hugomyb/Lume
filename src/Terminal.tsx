@@ -951,6 +951,79 @@ export default function Terminal(props: TerminalProps) {
             nativeGridReattach = null;
             if (selRaf) cancelAnimationFrame(selRaf);
           });
+
+          // Drag-selection autoscroll: dragging past the pane's top/bottom
+          // edge scrolls the hidden text into view while selecting. xterm has
+          // this built in, but it never engages under the native grid — so
+          // drive it here through the PROVEN mirrors: term.scrollLines() is
+          // the wheel path (offset mirrored via onScroll→syncOffset), and the
+          // selection is extended to the freshly revealed edge row exactly
+          // like xterm's own _dragScroll, then mirrored via the patched
+          // refresh(). Speed scales with overshoot distance, like xterm's.
+          let dragY = 0;
+          let dragScrollTimer: ReturnType<typeof setInterval> | undefined;
+          const dragMove = (e: MouseEvent) => {
+            dragY = e.clientY;
+          };
+          const dragStop = () => {
+            document.removeEventListener("mousemove", dragMove, true);
+            document.removeEventListener("mouseup", dragStop, true);
+            if (dragScrollTimer) {
+              clearInterval(dragScrollTimer);
+              dragScrollTimer = undefined;
+            }
+          };
+          const dragStart = (e: MouseEvent) => {
+            if (e.button !== 0 || dragScrollTimer) return;
+            dragY = e.clientY;
+            // Capture phase: xterm's own document-level mousemove handler
+            // stopImmediatePropagation()s every move during a drag, which
+            // starves any bubble-phase listener registered after it.
+            document.addEventListener("mousemove", dragMove, true);
+            document.addEventListener("mouseup", dragStop, true);
+            dragScrollTimer = setInterval(() => {
+              if (!term || !containerRef) return;
+              const svc = (
+                term as unknown as {
+                  _core?: {
+                    _selectionService?: {
+                      _model?: {
+                        selectionStart?: unknown;
+                        selectionEnd?: [number, number] | null;
+                      };
+                      refresh?: () => void;
+                    };
+                  };
+                }
+              )._core?._selectionService;
+              // Only while xterm is actually tracking a selection drag (not
+              // plain clicks, scrollbar grabs…).
+              if (!svc?._model?.selectionStart) return;
+              const r = containerRef.getBoundingClientRect();
+              let amount = 0;
+              if (dragY < r.top) {
+                amount = -(1 + Math.min(14, Math.floor((r.top - dragY) / 25)));
+              } else if (dragY > r.bottom) {
+                amount = 1 + Math.min(14, Math.floor((dragY - r.bottom) / 25));
+              }
+              if (!amount) return;
+              term.scrollLines(amount);
+              const buf = term.buffer.active;
+              svc._model.selectionEnd =
+                amount < 0
+                  ? [0, buf.viewportY]
+                  : [
+                      term.cols,
+                      Math.min(buf.viewportY + term.rows, buf.length - 1),
+                    ];
+              svc.refresh?.();
+            }, 50);
+          };
+          containerRef!.addEventListener("mousedown", dragStart);
+          addCleanup(() => {
+            containerRef?.removeEventListener("mousedown", dragStart);
+            dragStop();
+          });
           // Scrolls move the viewport: mirror the offset and re-express the
           // selection in the new viewport-relative coordinates.
           const scrollSub = term!.onScroll(() => {
