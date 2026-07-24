@@ -1,11 +1,16 @@
 import { createSignal, onMount, Show } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import { checkForUpdate, installUpdate, type Update } from "./updater";
 import { t } from "./i18n";
 
 /** A slim banner that appears when a new Lume version is available. Auto-checks
- *  shortly after launch; lets the user install + relaunch in one click. */
+ *  shortly after launch; lets the user install + relaunch in one click.
+ *  On package-manager installs (AUR lume-bin: the binary is pacman-owned),
+ *  self-install is disabled — the updater would try to pkexec a .deb onto an
+ *  Arch system — and the banner points to `yay -Syu` instead. */
 export default function UpdateBanner() {
   const [update, setUpdate] = createSignal<Update | null>(null);
+  const [selfInstall, setSelfInstall] = createSignal(true);
   const [installing, setInstalling] = createSignal(false);
   const [progress, setProgress] = createSignal(0);
   const [dismissed, setDismissed] = createSignal(false);
@@ -15,7 +20,12 @@ export default function UpdateBanner() {
     // Delay a few seconds so the check doesn't compete with startup.
     setTimeout(async () => {
       const u = await checkForUpdate();
-      if (u) setUpdate(u);
+      if (u) {
+        setSelfInstall(
+          await invoke<boolean>("self_update_supported").catch(() => true)
+        );
+        setUpdate(u);
+      }
     }, 4000);
   });
 
@@ -52,9 +62,19 @@ export default function UpdateBanner() {
           }
         >
           <div class="update-banner-actions">
-            <button class="update-banner-btn primary" onClick={install}>
-              {t("update.install")}
-            </button>
+            <Show
+              when={selfInstall()}
+              fallback={
+                <span
+                  class="update-banner-hint"
+                  innerHTML={t("update.packageManager")}
+                />
+              }
+            >
+              <button class="update-banner-btn primary" onClick={install}>
+                {t("update.install")}
+              </button>
+            </Show>
             <button
               class="update-banner-btn"
               onClick={() => setDismissed(true)}

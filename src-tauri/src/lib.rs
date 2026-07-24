@@ -14,6 +14,7 @@ mod pty;
 mod remote;
 mod shell;
 mod ssh;
+mod update;
 mod workflows;
 #[cfg(target_os = "linux")]
 mod native_grid;
@@ -75,6 +76,7 @@ pub fn run() {
             fonts::list_custom_fonts,
             fonts::remove_custom_font,
             notify::notify,
+            update::self_update_supported,
             remote::remote_start,
             remote::remote_stop,
             remote::remote_status,

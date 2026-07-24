@@ -79,6 +79,17 @@ body,
   color: var(--accent);
   flex: none;
 }
+/* Package-manager installs (AUR): instruction shown instead of the install
+   button — self-install is disabled there. */
+.update-banner-hint {
+  font-size: 12px;
+  color: var(--fg-dim, var(--fg));
+  flex: none;
+}
+.update-banner-hint code {
+  font-family: inherit;
+  color: var(--accent);
+}
 
 /* --- Tab bar --- */
 .tab-bar {

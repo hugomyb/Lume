@@ -219,6 +219,8 @@ const en: Dict = {
 
   // --- Update banner ---
   "update.available": "<strong>Lume {version}</strong> is available",
+  "update.packageManager":
+    "update with your package manager: <code>yay -Syu</code>",
   "update.failed": "failed, retry",
   "update.install": "Install and restart",
   "update.later": "Later",
@@ -570,6 +572,8 @@ const fr: Dict = {
   "ftctx.insertPath": "Insérer le chemin",
 
   "update.available": "<strong>Lume {version}</strong> est disponible",
+  "update.packageManager":
+    "mets à jour via ton gestionnaire de paquets : <code>yay -Syu</code>",
   "update.failed": "échec, réessayer",
   "update.install": "Installer et redémarrer",
   "update.later": "Plus tard",
