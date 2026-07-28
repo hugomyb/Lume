@@ -21,6 +21,23 @@ mod native_grid;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Native grid vs Wayland: on GDK's Wayland backend, WebKitGTK composites
+    // the page through a wl_subsurface that ALWAYS stacks above the parent
+    // surface — cairo painted on the toplevel (our grid) can never show
+    // through, whatever the offset (verified empirically; DMABUF/compositing
+    // kill-switches change nothing). Under XWayland everything works, so:
+    // on a Wayland session with X available, pick the x11 backend up-front.
+    // An explicit user GDK_BACKEND is honored; pure-Wayland setups without
+    // XWayland keep the wayland backend and the grid declines to attach
+    // (native_grid.rs), letting the xterm.js fallback paint instead.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_BACKEND").is_none()
+        && std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && std::env::var_os("DISPLAY").is_some()
+    {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+
     let cfg = Arc::new(Mutex::new(config::load()));
     // Make sure the shell-integration scripts exist on disk from the first
     // launch, so the rc/$PROFILE snippet always dot-sources a real file.

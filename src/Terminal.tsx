@@ -779,6 +779,10 @@ export default function Terminal(props: TerminalProps) {
           rows: term?.rows ?? 24,
           cellW: cell?.width ?? 0,
           cellH: cell?.height ?? 0,
+          // CSS px → device px ratio. WebKit zooms the page for Xft.dpi
+          // (fractional scaling, common on i3): DOM coords are then SMALLER
+          // than what GTK paints in — the grid rescales by dpr/scale_factor.
+          dpr: window.devicePixelRatio || 1,
         };
       };
       // Push the pane's rect/dims to the grid, with a serialized dump of

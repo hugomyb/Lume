@@ -204,6 +204,14 @@ static DIM_ALPHA: Mutex<f64> = Mutex::new(0.0);
 /// glyph cache below drops its surfaces when this moves.
 static GLYPH_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// The page's window.devicePixelRatio, reported by every attach/update.
+/// WebKit zooms the whole page when Xft.dpi ≠ 96 (fractional scaling —
+/// common on i3): CSS px × dpr = device px. GTK's cairo target only absorbs
+/// the INTEGER widget scale (GDK_SCALE), so the draw pass rescales all
+/// CSS-space geometry by k = dpr / widget_scale (1.0 whenever the two
+/// agree — X11 at 96 dpi, or GDK_SCALE=2 where dpr == widget_scale).
+static PAGE_DPR: Mutex<f64> = Mutex::new(1.0);
+
 type GlyphKey = (char, (u8, u8, u8), bool, bool); // (ch, fg, dim, bold)
 
 thread_local! {
@@ -236,6 +244,24 @@ thread_local! {
     /// Grid rects are DOM coordinates: painting and damage must both shift
     /// by this, or the grid lands on the CSD title bar (reported on sway).
     static WEBVIEW_OFFSET: std::cell::Cell<(i32, i32)> = const { std::cell::Cell::new((0, 0)) };
+    /// CSS→GTK-logical scale (see PAGE_DPR), cached per draw pass for the
+    /// damage helper below.
+    static CSS_SCALE: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+}
+
+/// Whether GDK is (or will be) running on its Wayland backend. Env-based on
+/// purpose — deterministic mirror of run()'s GDK_BACKEND policy, callable
+/// from any thread (commands don't run on the GTK main thread).
+fn wayland_backend_active() -> bool {
+    match std::env::var("GDK_BACKEND") {
+        // Explicit backend (user, or run()'s x11 forcing).
+        Ok(b) => b.contains("wayland"),
+        // GDK's own default: wayland when available, else x11.
+        Err(_) => {
+            std::env::var_os("WAYLAND_DISPLAY").is_some()
+                && std::env::var_os("DISPLAY").is_none()
+        }
+    }
 }
 
 /// Locate the WebKitWebView widget and return its origin in toplevel
@@ -257,11 +283,18 @@ fn webview_origin(toplevel: &gtk::Widget) -> (i32, i32) {
         .unwrap_or((0, 0))
 }
 
-/// `queue_draw_area` for a DOM-coordinate rect: shift by the webview origin
-/// (see `WEBVIEW_OFFSET`). Main thread only, like every GTK call here.
+/// `queue_draw_area` for a DOM-coordinate rect: scale CSS→logical (see
+/// PAGE_DPR) and shift by the webview origin (see `WEBVIEW_OFFSET`). Main
+/// thread only, like every GTK call here.
 fn queue_draw_area_dom(win: &gtk::ApplicationWindow, x: i32, y: i32, w: i32, h: i32) {
     let (ox, oy) = WEBVIEW_OFFSET.with(|o| o.get());
-    win.queue_draw_area(x + ox, y + oy, w, h);
+    let k = CSS_SCALE.with(|s| s.get());
+    win.queue_draw_area(
+        (x as f64 * k).floor() as i32 + ox,
+        (y as f64 * k).floor() as i32 + oy,
+        (w as f64 * k).ceil() as i32 + 1,
+        (h as f64 * k).ceil() as i32 + 1,
+    );
 }
 
 /// Redraw request sent from the feed task to the main thread.
@@ -324,6 +357,23 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
         eprintln!("[native-grid] no gtk window");
         return false;
     };
+    // GDK Wayland backend: WebKit's page lives in a wl_subsurface stacked
+    // above the parent surface — an after-draw cairo overlay can never be
+    // seen (run() prefers x11/XWayland for this reason; landing here means
+    // pure Wayland without X). Decline: the attach command errors and the
+    // frontend keeps xterm.js visible as the painter.
+    if gtk_window
+        .display()
+        .type_()
+        .name()
+        .contains("Wayland")
+    {
+        eprintln!(
+            "[native-grid] GDK Wayland backend: native grid unavailable \
+             (WebKit composites via a subsurface) — using the web renderer"
+        );
+        return false;
+    }
     // gtk3-rs doesn't expose connect_draw_after; hook the "draw" signal with
     // after=true so we paint once every child (webview included) has drawn.
     gtk_window.connect_local("draw", true, |values| {
@@ -336,7 +386,11 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
         if let Ok(toplevel) = values[0].get::<gtk::Widget>() {
             let (ox, oy) = webview_origin(&toplevel);
             WEBVIEW_OFFSET.with(|o| o.set((ox, oy)));
+            let k = *PAGE_DPR.lock() / toplevel.scale_factor() as f64;
+            CSS_SCALE.with(|s| s.set(k));
             cr.translate(ox as f64, oy as f64);
+            // CSS space → GTK logical space (Xft.dpi fractional scaling).
+            cr.scale(k, k);
         }
         let list: Vec<Arc<GridModel>> = models().lock().values().cloned().collect();
         let cursor_on = CURSOR_ON.with(|c| c.get());
@@ -356,7 +410,21 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
             // with the pane rect first — an even-odd rect sticking out would
             // ADD area outside the pane instead of subtracting.
             cr.set_fill_rule(gtk::cairo::FillRule::EvenOdd);
-            cr.rectangle(x as f64, y as f64, w as f64, h as f64);
+            // Rounded pane path, same radius as .terminal-portal-host's
+            // border-radius (App.css): a square rect would paint over the
+            // DOM border's rounded corners and visibly cut them.
+            {
+                const R: f64 = 5.0;
+                use std::f64::consts::{FRAC_PI_2, PI};
+                let (fx, fy, fw, fh) = (x as f64, y as f64, w as f64, h as f64);
+                let r = R.min(fw / 2.0).min(fh / 2.0);
+                cr.new_sub_path();
+                cr.arc(fx + fw - r, fy + r, r, -FRAC_PI_2, 0.0);
+                cr.arc(fx + fw - r, fy + fh - r, r, 0.0, FRAC_PI_2);
+                cr.arc(fx + r, fy + fh - r, r, FRAC_PI_2, PI);
+                cr.arc(fx + r, fy + r, r, PI, PI + FRAC_PI_2);
+                cr.close_path();
+            }
             for &(ox, oy, ow, oh) in OVERLAY_RECTS.lock().iter() {
                 let ix = ox.max(x);
                 let iy = oy.max(y);
@@ -573,7 +641,14 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
     flush_run(cr, &mut run, cell_h);
 
     let _ = &layout; // direct-drawing fallback below builds its own layouts
-    let scale = cr.target().device_scale();
+    // Effective CSS→device ratio: the surface's integer scale × the page's
+    // fractional zoom (the cr is cr.scale(k)-ed by the hook). Rasterizing
+    // the glyph surfaces at THIS scale keeps text crisp under Xft.dpi.
+    let scale = {
+        let ds = cr.target().device_scale();
+        let k = CSS_SCALE.with(|s| s.get());
+        (ds.0 * k, ds.1 * k)
+    };
     GLYPH_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let gen = GLYPH_GEN.load(std::sync::atomic::Ordering::Relaxed);
@@ -732,7 +807,16 @@ pub fn native_grid_attach(
     cursor_blink: bool,
     history: u32,
     theme: GridTheme,
+    dpr: Option<f64>,
 ) -> Result<(), String> {
+    *PAGE_DPR.lock() = dpr.unwrap_or(1.0).max(0.5);
+    // Mirror of run()'s backend policy: on the GDK Wayland backend the grid
+    // can never be visible (WebKit composites the page via a wl_subsurface
+    // stacked above the parent surface) — fail the attach so the frontend
+    // keeps xterm.js as the painter.
+    if wayland_backend_active() {
+        return Err("native grid unavailable on the GDK Wayland backend".into());
+    }
     let window = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
@@ -815,7 +899,14 @@ pub fn native_grid_attach(
         term.reset_damage();
     }
     if std::env::var_os("LUME_GRID_DEBUG").is_some() {
-        eprintln!("[grid-attach] id={id} snapshot={}B grid={cols}x{rows}", snapshot.len());
+        let s = model.style.lock();
+        eprintln!(
+            "[grid-attach] id={id} snapshot={}B grid={cols}x{rows} rect=({x},{y} {width}x{height}) cell=({:.2},{:.2}) font_px={}",
+            snapshot.len(),
+            s.cell_w,
+            s.cell_h,
+            s.font_px
+        );
     }
 
     // UI hook on the main thread (idempotent) + first paint.
@@ -864,7 +955,9 @@ pub fn native_grid_update(
     cell_h: f64,
     dump: Option<String>,
     dump_offset: Option<u64>,
+    dpr: Option<f64>,
 ) -> Result<(), String> {
+    *PAGE_DPR.lock() = dpr.unwrap_or(1.0).max(0.5);
     let cols = (cols as usize).max(2);
     let rows = (rows as usize).max(2);
     let window = app
