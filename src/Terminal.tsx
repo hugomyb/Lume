@@ -1543,26 +1543,40 @@ export default function Terminal(props: TerminalProps) {
     nativeGridReattachTimer = setTimeout(() => nativeGridReattach?.(), 150);
   });
 
+  // Guards the focus retry chain below: a re-run of the effect (or another
+  // pane taking over) obsoletes any in-flight chain.
+  let focusEpoch = 0;
   createEffect(() => {
     if (!props.active()) {
+      focusEpoch++;
       closeAcRef?.();
       if (searchOpen()) closeSearchBar();
       return;
     }
     if (!term || !fit) return;
-    // rAF (not microtask) so flex/display changes from the parent get laid
-    // out before we measure the container. queueMicrotask runs before layout.
-    requestAnimationFrame(() => {
-      if (!term || !fit || !containerRef) return;
-      try {
-        const rect = containerRef.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
+    // On a tab switch this pane's portal wrapper is still display:none at
+    // effect time — PortableTerminal repositions it on its OWN rAF — and
+    // focusing a hidden textarea is a silent no-op: the focus then falls to
+    // <body> when the previous tab hides. Retry across frames until the
+    // pane is actually laid out, THEN fit + focus.
+    const epoch = ++focusEpoch;
+    const tryFocus = (attempts: number) => {
+      requestAnimationFrame(() => {
+        if (epoch !== focusEpoch) return;
+        if (!term || !fit || !containerRef) return;
+        try {
+          const rect = containerRef.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) {
+            if (attempts > 0) tryFocus(attempts - 1);
+            return;
+          }
           fit.fit();
           term.refresh(0, term.rows - 1);
-        }
-        term.focus();
-      } catch {}
-    });
+          term.focus();
+        } catch {}
+      });
+    };
+    tryFocus(30);
   });
 
   onCleanup(() => {
