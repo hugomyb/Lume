@@ -1117,8 +1117,8 @@ export default function Tabs() {
     setTabs(tIdx, "activeLeafId", newLeaf.id);
   };
 
-  const closeActivePane = () => {
-    const tab = activeTab();
+  const closeLeaf = (tabId: number, toClose: number) => {
+    const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     const ids = leafIds(tab.tree);
     if (ids.length === 1) {
@@ -1127,7 +1127,6 @@ export default function Tabs() {
       return;
     }
     const tIdx = tabIndex(tab.id);
-    const toClose = tab.activeLeafId;
     const newTree = removeLeaf(tab.tree, toClose);
     if (!newTree) return;
 
@@ -1138,13 +1137,21 @@ export default function Tabs() {
     }
     setTabs(tIdx, "tree", newTree);
     setTabs(tIdx, "leaves", remaining);
-    const newIds = leafIds(newTree);
-    setTabs(tIdx, "activeLeafId", newIds[0]);
+    if (tab.activeLeafId === toClose) {
+      const newIds = leafIds(newTree);
+      setTabs(tIdx, "activeLeafId", newIds[0]);
+    }
     leafFocusFns.delete(toClose);
     leafScrollFns.delete(toClose);
     leafRefreshFns.delete(toClose);
     leafSelectionFns.delete(toClose);
     leafSearchFns.delete(toClose);
+  };
+
+  const closeActivePane = () => {
+    const tab = activeTab();
+    if (!tab) return;
+    closeLeaf(tab.id, tab.activeLeafId);
   };
 
   type LayoutKind =
@@ -2636,10 +2643,10 @@ export default function Tabs() {
                                   }
                                 }}
                                 onExit={() => {
-                                  const idx = tabIndex(tab.id);
-                                  if (idx === -1) return;
-                                  if (tab.activeLeafId === leafId)
-                                    closeActivePane();
+                                  // Close this pane wherever it lives — like a
+                                  // classic terminal, a pane whose shell exits
+                                  // goes away even if it isn't focused.
+                                  closeLeaf(tab.id, leafId);
                                 }}
                                 onBlock={(ev) =>
                                   handleBlock(tab.id, leafId, ev)
