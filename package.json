@@ -1,6 +1,6 @@
 {
   "name": "lume",
-  "version": "1.0.15",
+  "version": "1.1.0",
   "description": "Fast, lightweight, open-source terminal — a private, local alternative to Warp",
   "license": "MIT",
   "type": "module",
