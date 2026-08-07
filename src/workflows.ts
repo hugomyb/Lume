@@ -19,6 +19,23 @@ export function listWorkflows(): Promise<Workflow[]> {
   return invoke<Workflow[]>("list_workflows");
 }
 
+/** Create (source omitted) or update (source = existing filename) a workflow
+ *  YAML file. Resolves to the filename it was saved under. */
+export function saveWorkflow(wf: {
+  name: string;
+  command: string;
+  description?: string | null;
+  tags: string[];
+  arguments: WorkflowArg[];
+  source?: string | null;
+}): Promise<string> {
+  return invoke<string>("save_workflow", wf);
+}
+
+export function deleteWorkflow(source: string): Promise<void> {
+  return invoke("delete_workflow", { source });
+}
+
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/g;
 
 /** Replace `{{name}}` placeholders with provided values. Unfilled placeholders

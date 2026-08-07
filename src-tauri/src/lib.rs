@@ -87,6 +87,8 @@ pub fn run() {
             complete::fs_complete,
             complete::read_dir,
             workflows::list_workflows,
+            workflows::save_workflow,
+            workflows::delete_workflow,
             ssh::list_ssh_hosts,
             fonts::list_system_fonts,
             fonts::import_font,

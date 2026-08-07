@@ -292,13 +292,35 @@ const en: Dict = {
 
   // --- Workflows palette ---
   "wf.searchPlaceholder": "Search a workflow…",
-  "wf.empty": "No workflow. <code>~/.config/lume/workflows/*.yaml</code>",
+  "wf.empty":
+    "No workflow yet — create one with the button below. Files live in <code>~/.config/lume/workflows/*.yaml</code>.",
   "wf.navHint": "<kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> choose",
   "wf.back": "Back",
   "wf.preview": "Preview",
   "wf.toComplete": "To complete: {fields}",
   "wf.insertHint": "<kbd>Enter</kbd> to insert into the terminal",
   "wf.insert": "Insert",
+  "wf.new": "New workflow",
+  "wf.newTitle": "New workflow",
+  "wf.editTitle": "Edit workflow",
+  "wf.edit": "Edit",
+  "wf.delete": "Delete",
+  "wf.confirmDelete": "Sure?",
+  "wf.fName": "Name",
+  "wf.fNamePh": "e.g. Git: commit all",
+  "wf.fDesc": "Description",
+  "wf.fCommand": "Command",
+  "wf.fCommandHint":
+    "Use <code>{{placeholder}}</code> for the parts to fill in when running it.",
+  "wf.fTags": "Tags",
+  "wf.fTagsPh": "git, docker…",
+  "wf.fArgs": "Arguments",
+  "wf.fArgsHint": "Detected from the command's placeholders.",
+  "wf.argDescPh": "Description (optional)",
+  "wf.argDefaultPh": "Default value",
+  "wf.save": "Save",
+  "wf.cancel": "Cancel",
+  "wf.saveHint": "<kbd>Ctrl</kbd>+<kbd>Enter</kbd> to save",
 
   // --- SSH palette ---
   "ssh.placeholder": "SSH host or user@server…",
@@ -642,13 +664,35 @@ const fr: Dict = {
 
   // --- Workflows palette ---
   "wf.searchPlaceholder": "Chercher un workflow…",
-  "wf.empty": "Aucun workflow. <code>~/.config/lume/workflows/*.yaml</code>",
+  "wf.empty":
+    "Aucun workflow — crée-en un avec le bouton ci-dessous. Les fichiers vivent dans <code>~/.config/lume/workflows/*.yaml</code>.",
   "wf.navHint": "<kbd>↑</kbd><kbd>↓</kbd> naviguer · <kbd>Enter</kbd> choisir",
   "wf.back": "Retour",
   "wf.preview": "Aperçu",
   "wf.toComplete": "À compléter : {fields}",
   "wf.insertHint": "<kbd>Enter</kbd> pour insérer dans le terminal",
   "wf.insert": "Insérer",
+  "wf.new": "Nouveau workflow",
+  "wf.newTitle": "Nouveau workflow",
+  "wf.editTitle": "Modifier le workflow",
+  "wf.edit": "Modifier",
+  "wf.delete": "Supprimer",
+  "wf.confirmDelete": "Sûr ?",
+  "wf.fName": "Nom",
+  "wf.fNamePh": "ex. Git : tout committer",
+  "wf.fDesc": "Description",
+  "wf.fCommand": "Commande",
+  "wf.fCommandHint":
+    "Utilise <code>{{placeholder}}</code> pour les parties à remplir au moment de l'exécution.",
+  "wf.fTags": "Tags",
+  "wf.fTagsPh": "git, docker…",
+  "wf.fArgs": "Arguments",
+  "wf.fArgsHint": "Détectés depuis les placeholders de la commande.",
+  "wf.argDescPh": "Description (optionnelle)",
+  "wf.argDefaultPh": "Valeur par défaut",
+  "wf.save": "Enregistrer",
+  "wf.cancel": "Annuler",
+  "wf.saveHint": "<kbd>Ctrl</kbd>+<kbd>Enter</kbd> pour enregistrer",
 
   // --- SSH palette ---
   "ssh.placeholder": "Host SSH ou user@serveur…",
