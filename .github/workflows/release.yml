@@ -5,13 +5,15 @@ name: release
 #   macOS   — .dmg  (universal: Intel + Apple Silicon)   [unsigned for now]
 #   Windows — .exe  (NSIS)                                [unsigned for now]
 #
-# Flow: create a DRAFT release, build each OS into it (matrix), then publish.
-# If any build fails the `publish` job is skipped, so the release stays a draft
-# and is never seen by users — the updater is never put at risk.
+# Flow: create a DRAFT release, build each OS into it (matrix, in parallel),
+# then assemble the updater manifest (latest.json) from the uploaded .sig
+# assets and publish. If any build fails the `publish` job is skipped, so the
+# release stays a draft and is never seen by users — the updater is never put
+# at risk.
 #
-# All three OSes auto-update: each job merges its platform into the updater
-# manifest (latest.json). The matrix is serialized (max-parallel: 1) so those
-# read-modify-writes of latest.json can't race each other.
+# The OS jobs run concurrently: none of them touches latest.json (the manifest
+# is built once, at publish time, from the final signed assets — including the
+# re-signed AppImage), so there is nothing left to race on.
 #
 # To cut a release: bump the version (scripts/release.sh) and push a tag vX.Y.Z.
 #
@@ -97,14 +99,11 @@ jobs:
             });
             return data.id;
 
-  # 2) Build each OS into the draft release.
+  # 2) Build each OS into the draft release — in parallel.
   build:
     needs: create-release
     strategy:
       fail-fast: false
-      # Serialized: every job merges its platform into latest.json via a
-      # read-modify-write, so they must not run concurrently.
-      max-parallel: 1
       matrix:
         include:
           - platform: ubuntu-22.04
@@ -133,6 +132,14 @@ jobs:
         with:
           targets: ${{ matrix.rust_targets }}
 
+      # Mainly speeds up re-runs of a failed/cancelled release on the same tag
+      # (GitHub cache scoping: a tag's run can only restore caches saved on
+      # that same tag or on main, and main's CI caches are debug-profile).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -150,16 +157,20 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          # Every platform merges its entry into latest.json (default behaviour).
-          # The serialized matrix keeps those merges from racing.
+          # No per-job latest.json handling (that read-modify-write is what
+          # used to force the matrix to run serialized): the manifest is
+          # assembled once in publish-release, from the uploaded .sig assets.
+          # The .sig files themselves are still built and uploaded here.
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
       # Linux only — same fix as before: the AppImage bundler (linuxdeploy)
       # embeds libnghttp2.so.* which collides with the host libcurl on newer
       # systems and breaks tools run inside the terminal (git/curl). Drop the
-      # bundled copy, re-sign, and refresh the signature in latest.json.
+      # bundled copy, re-sign, and re-upload. publish-release builds the
+      # manifest from the re-signed .sig, so no manifest surgery is needed.
       # (See scripts/fix-appimage.sh for the full rationale.)
-      - name: Drop bundled libnghttp2 from the AppImage, re-sign, refresh manifest
+      - name: Drop bundled libnghttp2 from the AppImage and re-sign
         if: matrix.platform == 'ubuntu-22.04'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -171,20 +182,86 @@ jobs:
           bash scripts/fix-appimage.sh "$appimage"
           rm -f "$appimage.sig"
           npm run tauri -- signer sign "$appimage"
-          sig="$(cat "$appimage.sig")"
-          gh release download "${{ github.ref_name }}" --pattern latest.json --clobber
-          jq --arg s "$sig" \
-            '.platforms["linux-x86_64"].signature = $s
-             | .platforms["linux-x86_64-appimage"].signature = $s' \
-            latest.json > latest.json.tmp && mv latest.json.tmp latest.json
           gh release upload "${{ github.ref_name }}" --clobber \
-            "$appimage" "$appimage.sig" latest.json
+            "$appimage" "$appimage.sig"
 
-  # 3) All builds succeeded — flip the draft to a published release.
+  # 3) All builds succeeded — assemble the updater manifest from the signed
+  #    assets, then flip the draft to a published release.
   publish-release:
     needs: [create-release, build]
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
     steps:
+      # latest.json is what the in-app updater polls. It must reference the
+      # FINAL assets (notably the re-signed AppImage), so it's built here from
+      # the .sig files uploaded by the (parallel) build jobs — same shape and
+      # platform keys tauri-action used to generate.
+      - name: Assemble and upload the updater manifest (latest.json)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          DL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"
+
+          # Fetch the .sig assets of THIS draft release (by id — immune to
+          # any by-tag draft ambiguity).
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+            > assets.json
+          mkdir sigs
+          while IFS== read -r asset_id name; do
+            gh api -H "Accept: application/octet-stream" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "sigs/${name}"
+          done < <(jq -r '.[] | select(.name | endswith(".sig")) | "\(.id)=\(.name)"' assets.json)
+          cd sigs
+
+          # Exactly one signed bundle of each kind, or the release stays a
+          # draft — a manifest with a missing/duplicated platform must never
+          # reach the updater.
+          pick() {
+            local matches=( $1 )
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "!! expected exactly one asset matching $1, got ${#matches[@]}" >&2
+              exit 1
+            fi
+            printf '%s' "${matches[0]}"
+          }
+          APPIMAGE_SIG="$(pick '*.AppImage.sig')"
+          DEB_SIG="$(pick '*.deb.sig')"
+          RPM_SIG="$(pick '*.rpm.sig')"
+          EXE_SIG="$(pick '*-setup.exe.sig')"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
+            --arg appimage_sig "$(cat "$APPIMAGE_SIG")" \
+            --arg appimage_url "$DL/${APPIMAGE_SIG%.sig}" \
+            --arg deb_sig "$(cat "$DEB_SIG")" \
+            --arg deb_url "$DL/${DEB_SIG%.sig}" \
+            --arg rpm_sig "$(cat "$RPM_SIG")" \
+            --arg rpm_url "$DL/${RPM_SIG%.sig}" \
+            --arg exe_sig "$(cat "$EXE_SIG")" \
+            --arg exe_url "$DL/${EXE_SIG%.sig}" \
+            '{
+              version: $version,
+              notes: "",
+              pub_date: $pub_date,
+              platforms: {
+                "linux-x86_64":          { signature: $appimage_sig, url: $appimage_url },
+                "linux-x86_64-appimage": { signature: $appimage_sig, url: $appimage_url },
+                "linux-x86_64-deb":      { signature: $deb_sig, url: $deb_url },
+                "linux-x86_64-rpm":      { signature: $rpm_sig, url: $rpm_url },
+                "windows-x86_64":        { signature: $exe_sig, url: $exe_url },
+                "windows-x86_64-nsis":   { signature: $exe_sig, url: $exe_url }
+              }
+            }' > latest.json
+          cat latest.json
+          gh release upload "$TAG" latest.json --clobber \
+            --repo "${GITHUB_REPOSITORY}"
+
       - uses: actions/github-script@v7
         with:
           script: |
