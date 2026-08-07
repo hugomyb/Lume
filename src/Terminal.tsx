@@ -61,6 +61,12 @@ type TerminalProps = {
   onCwd?: (cwd: string) => void;
   /** Exposes a getter for the terminal's current text selection (for copy). */
   onSelectionReady?: (getSelection: () => string) => void;
+  /** Exposes a fn that pastes text through xterm (bracketed paste + newline
+   *  normalization), so pasted text behaves like in any other terminal. */
+  onPasteReady?: (paste: (text: string) => void) => void;
+  /** Exposes a getter for whether the alternate screen is active (a fullscreen
+   *  app like nano/vim owns the keyboard — app shortcuts should step aside). */
+  onAltScreenReady?: (isAltScreen: () => boolean) => void;
   /** Exposes a fn that opens the in-terminal scrollback search bar. */
   onSearchReady?: (openSearch: () => void) => void;
   /** Fired when the per-block copy button is clicked, with the block's opaque
@@ -744,6 +750,8 @@ export default function Terminal(props: TerminalProps) {
     props.onSpawned?.(ptyId);
     props.onFocusReady?.(() => term?.focus());
     props.onSelectionReady?.(() => term?.getSelection() ?? "");
+    props.onPasteReady?.((text) => term?.paste(text));
+    props.onAltScreenReady?.(() => term?.buffer.active.type === "alternate");
     props.onSearchReady?.(openSearchBar);
 
     // Native grid renderer (Linux) — attach this pane's grid. On failure we

@@ -15,6 +15,8 @@ type Props = {
   onBlock: (ev: PtyBlock) => void;
   onCwd: (cwd: string) => void;
   onSelectionReady: (getSelection: () => string) => void;
+  onPasteReady: (paste: (text: string) => void) => void;
+  onAltScreenReady: (isAltScreen: () => boolean) => void;
   onSearchReady: (openSearch: () => void) => void;
   onCopyBlock: (markerId: number) => void;
   canCopyMarker: (markerId: number) => boolean;
@@ -153,6 +155,8 @@ export default function PortableTerminal(props: Props) {
         onBlock={props.onBlock}
         onCwd={props.onCwd}
         onSelectionReady={props.onSelectionReady}
+        onPasteReady={props.onPasteReady}
+        onAltScreenReady={props.onAltScreenReady}
         onSearchReady={props.onSearchReady}
         onCopyBlock={props.onCopyBlock}
         canCopyMarker={props.canCopyMarker}

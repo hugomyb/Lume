@@ -679,6 +679,8 @@ export default function Tabs() {
   // Per-leaf focus/scroll/refresh callbacks, registered by each Terminal on mount.
   const leafFocusFns = new Map<number, () => void>();
   const leafSelectionFns = new Map<number, () => string>();
+  const leafPasteFns = new Map<number, (text: string) => void>();
+  const leafAltScreenFns = new Map<number, () => boolean>();
   const leafSearchFns = new Map<number, () => void>();
 
   // Desktop notification when a long command finishes while Lume is in the
@@ -1069,6 +1071,8 @@ export default function Tabs() {
         leafScrollFns.delete(leafId);
         leafRefreshFns.delete(leafId);
         leafSelectionFns.delete(leafId);
+        leafPasteFns.delete(leafId);
+        leafAltScreenFns.delete(leafId);
         leafSearchFns.delete(leafId);
       }
     }
@@ -1145,6 +1149,8 @@ export default function Tabs() {
     leafScrollFns.delete(toClose);
     leafRefreshFns.delete(toClose);
     leafSelectionFns.delete(toClose);
+    leafPasteFns.delete(toClose);
+    leafAltScreenFns.delete(toClose);
     leafSearchFns.delete(toClose);
   };
 
@@ -1224,6 +1230,8 @@ export default function Tabs() {
       leafScrollFns.delete(oldId);
       leafRefreshFns.delete(oldId);
       leafSelectionFns.delete(oldId);
+      leafPasteFns.delete(oldId);
+      leafAltScreenFns.delete(oldId);
       leafSearchFns.delete(oldId);
     }
 
@@ -1283,17 +1291,16 @@ export default function Tabs() {
     if (leaf.ptyId === null) return;
     const text = await pasteText();
     if (!text) return;
-    const bytes = new TextEncoder().encode(text);
-    let bin = "";
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      bin += String.fromCharCode(
-        ...bytes.subarray(i, Math.min(i + chunk, bytes.length))
-      );
+    // Route through xterm's paste so the text gets proper terminal semantics:
+    // \n → \r conversion and bracketed-paste wrapping when the app enabled it.
+    // Writing the clipboard raw to the PTY loses multi-line pastes (bare LFs
+    // are ignored by most raw-mode apps).
+    const paste = leafPasteFns.get(leafId);
+    if (paste) {
+      paste(text);
+      return;
     }
-    await invoke("pty_write", { id: leaf.ptyId, dataB64: btoa(bin) }).catch(
-      (e) => console.error("paste write failed", e)
-    );
+    ptyWriteText(leaf.ptyId, text.replace(/\r?\n/g, "\r"));
   };
 
   // Dismiss pane context menu on click outside / escape.
@@ -1927,6 +1934,9 @@ export default function Tabs() {
     if (!e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       const leaf = activeLeaf();
       if (!leaf || leaf.blocks.length === 0) return;
+      // A fullscreen app (nano, vim, htop…) owns the keyboard: let Ctrl+↑/↓
+      // flow through to the terminal instead of hijacking it for block nav.
+      if (leafAltScreenFns.get(leaf.id)?.()) return;
       e.preventDefault();
       setBlockNavMode(true);
       navigateBlocks(e.key === "ArrowUp" ? -1 : 1);
@@ -2656,6 +2666,12 @@ export default function Tabs() {
                                 }
                                 onSelectionReady={(getSel) =>
                                   leafSelectionFns.set(leafId, getSel)
+                                }
+                                onPasteReady={(paste) =>
+                                  leafPasteFns.set(leafId, paste)
+                                }
+                                onAltScreenReady={(isAlt) =>
+                                  leafAltScreenFns.set(leafId, isAlt)
                                 }
                                 onSearchReady={(openSearch) =>
                                   leafSearchFns.set(leafId, openSearch)
