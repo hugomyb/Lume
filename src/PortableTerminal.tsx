@@ -63,10 +63,17 @@ export default function PortableTerminal(props: Props) {
       return;
     }
     wrapperRef.style.display = "";
-    wrapperRef.style.top = `${phRect.top - parentRect.top}px`;
-    wrapperRef.style.left = `${phRect.left - parentRect.left}px`;
-    wrapperRef.style.width = `${phRect.width}px`;
-    wrapperRef.style.height = `${phRect.height}px`;
+    // Snap edges to device pixels: flex hands out fractional sizes, and a
+    // fractional bottom/right edge puts the 1px box-shadow border on a half
+    // pixel, which WebKit renders as a broken/blurry line.
+    const dpr = window.devicePixelRatio || 1;
+    const snap = (v: number) => Math.round(v * dpr) / dpr;
+    const top = snap(phRect.top - parentRect.top);
+    const left = snap(phRect.left - parentRect.left);
+    wrapperRef.style.top = `${top}px`;
+    wrapperRef.style.left = `${left}px`;
+    wrapperRef.style.width = `${snap(phRect.right - parentRect.left) - left}px`;
+    wrapperRef.style.height = `${snap(phRect.bottom - parentRect.top) - top}px`;
   };
 
   const scheduleUpdate = () => {

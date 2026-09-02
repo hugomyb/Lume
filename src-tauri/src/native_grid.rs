@@ -286,15 +286,21 @@ fn webview_origin(toplevel: &gtk::Widget) -> (i32, i32) {
 /// `queue_draw_area` for a DOM-coordinate rect: scale CSS→logical (see
 /// PAGE_DPR) and shift by the webview origin (see `WEBVIEW_OFFSET`). Main
 /// thread only, like every GTK call here.
+///
+/// The damage must not spill outside the pane rect: the 1px DOM border ring
+/// hugs the rect's bottom/right edges, and a spilled strip gets filled with
+/// the GTK theme background without the grid (clipped to the pane) or WebKit
+/// reliably repainting it — the border shows theme-gray gaps on focus change
+/// and resize. Scaling the edges (not the size) covers every device pixel
+/// the rect touches and nothing more; at k = 1 it is exact.
 fn queue_draw_area_dom(win: &gtk::ApplicationWindow, x: i32, y: i32, w: i32, h: i32) {
     let (ox, oy) = WEBVIEW_OFFSET.with(|o| o.get());
     let k = CSS_SCALE.with(|s| s.get());
-    win.queue_draw_area(
-        (x as f64 * k).floor() as i32 + ox,
-        (y as f64 * k).floor() as i32 + oy,
-        (w as f64 * k).ceil() as i32 + 1,
-        (h as f64 * k).ceil() as i32 + 1,
-    );
+    let x0 = (x as f64 * k).floor() as i32;
+    let y0 = (y as f64 * k).floor() as i32;
+    let x1 = ((x + w) as f64 * k).ceil() as i32;
+    let y1 = ((y + h) as f64 * k).ceil() as i32;
+    win.queue_draw_area(x0 + ox, y0 + oy, x1 - x0, y1 - y0);
 }
 
 /// Redraw request sent from the feed task to the main thread.
