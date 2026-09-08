@@ -534,7 +534,16 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
     // Secondary family matches the web renderer's tail fallback: icon
     // codepoints missing from the user's font resolve to Unifont CSUR's
     // real glyphs instead of Unifont Sample's hex-boxes ("tofu").
-    desc.set_family(&format!("{},Unifont CSUR", style.font));
+    // `monospace` closes the list: if NOTHING in the user's stack resolves,
+    // fontconfig's generic substitution can hand back a proportional face,
+    // whose advances have nothing to do with the cell grid xterm measured.
+    // (The frontend strips the CSS generics, so the stack can come in empty.)
+    let family = if style.font.trim().is_empty() {
+        "Unifont CSUR,monospace".to_string()
+    } else {
+        format!("{},Unifont CSUR,monospace", style.font)
+    };
+    desc.set_family(&family);
     desc.set_absolute_size(style.font_px * gtk::pango::SCALE as f64);
     layout.set_font_description(Some(&desc));
     let mut bold_desc = desc.clone();
@@ -655,6 +664,26 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
         let k = CSS_SCALE.with(|s| s.get());
         (ds.0 * k, ds.1 * k)
     };
+    // Font options for the atlas. GDK put the desktop's Xft settings on the
+    // draw context; a context created from scratch on an offscreen surface
+    // gets cairo's defaults instead, so the grid was rasterizing with a
+    // different hinting/antialiasing setup than every other app on screen.
+    // Carry them over — except subpixel (RGB) antialiasing: it needs the real
+    // background under the glyph, and ours is rasterized on a TRANSPARENT
+    // atlas, so the per-channel coverage collapses into the single alpha
+    // channel and blits back as colour fringing (text reads blurry). Grayscale
+    // is what every glyph-atlas renderer uses for exactly this reason.
+    let glyph_font_opts = {
+        let mut o = cr
+            .font_options()
+            .unwrap_or_else(|_| gtk::cairo::FontOptions::new().unwrap());
+        if o.antialias() == gtk::cairo::Antialias::Subpixel
+            || o.antialias() == gtk::cairo::Antialias::Default
+        {
+            o.set_antialias(gtk::cairo::Antialias::Gray);
+        }
+        o
+    };
     GLYPH_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let gen = GLYPH_GEN.load(std::sync::atomic::Ordering::Relaxed);
@@ -689,6 +718,9 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
                 };
                 surf.set_device_scale(scale.0, scale.1);
                 if let Ok(gcr) = gtk::cairo::Context::new(&surf) {
+                    // Before create_layout: pango_cairo_create_layout() snapshots
+                    // the context's font options into the layout's context.
+                    gcr.set_font_options(&glyph_font_opts);
                     let l = pangocairo::functions::create_layout(&gcr);
                     l.set_font_description(Some(if bold { &bold_desc } else { &desc }));
                     let mut buf = [0u8; 4];

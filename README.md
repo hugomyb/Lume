@@ -128,6 +128,27 @@ npm run tauri dev      # run in dev
 npm run tauri build    # build bundles (target/release/bundle/)
 ```
 
+## Troubleshooting
+
+**Text looks blurry (Linux, Wayland session).** Lume paints its terminal grid
+natively with cairo, which WebKitGTK's Wayland compositing path makes
+impossible — so on a Wayland session that also has XWayland, Lume starts on
+GDK's x11 backend. Under a compositor set to a fractional/HiDPI scale
+(Hyprland, sway, GNOME at 125–150%), XWayland windows are rendered at 1× and
+then upscaled by the compositor, which softens the whole window. Two ways out:
+
+```bash
+GDK_BACKEND=wayland lume   # crisp: native Wayland, web renderer instead of the native grid
+```
+
+or tell the compositor not to upscale XWayland clients (`xwayland { force_zero_scaling = true }`
+on Hyprland, `xwayland scale 1` on sway). An explicit `GDK_BACKEND` is always
+honored.
+
+**Glyphs look wrong / not monospaced.** Check the font in Settings → Appearance:
+the default stack starts with Menlo, which only exists on macOS. Pick a family
+you actually have installed (any Nerd Font, DejaVu Sans Mono, JetBrains Mono…).
+
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set

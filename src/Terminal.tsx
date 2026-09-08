@@ -23,6 +23,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 import { type Appearance, toXtermTheme } from "./config";
+import { IconChevronDown, IconChevronUp, IconX } from "./icons";
 import { t } from "./i18n";
 import type { PtyBlock } from "./blocks";
 import Autocomplete, { type AcPosition } from "./Autocomplete";
@@ -854,12 +855,23 @@ export default function Terminal(props: TerminalProps) {
       // `nativeGridReattach` (the grid learns font/theme ONLY through attach).
       const attachPayload = () => ({
         ...gridRect(),
-        // Single primary family: pango/fontconfig does automatic per-glyph
-        // fallback on its own (comma lists degrade the metrics resolution).
+        // The WHOLE stack, not just its head: the first family of the default
+        // config is "Menlo", which exists on macOS only — on Linux fontconfig
+        // substitutes it with an arbitrary (often proportional) face, while
+        // xterm sizes its cells from the first family that actually resolves
+        // further down the list. The grid then painted a different font than
+        // the one the grid geometry was measured for. Pango's set_family()
+        // takes a comma-separated list and walks it like CSS does, so passing
+        // the stack verbatim makes both renderers land on the same face.
+        // The CSS generics are dropped here rather than passed through: the
+        // grid appends its own tail (Unifont CSUR for nerd/powerline glyphs,
+        // then monospace), and a `monospace` sitting in the middle of the
+        // list would resolve first and swallow that fallback.
         fontFamily: (props.appearance.fontFamily || "monospace")
-          .split(",")[0]
-          .replace(/["']/g, "")
-          .trim(),
+          .split(",")
+          .map((f) => f.replace(/["']/g, "").trim())
+          .filter((f) => f && !/^(monospace|sans-serif|serif|system-ui)$/i.test(f))
+          .join(","),
         fontPx: props.appearance.fontSize,
         cursorBlink: props.appearance.cursorBlink,
         // Native scrollback sized like xterm's: the mirrored viewport offset
@@ -1389,7 +1401,19 @@ export default function Terminal(props: TerminalProps) {
       const btn = document.createElement("button");
       btn.className = "lume-block-copy";
       btn.title = t("term.copyBlock");
-      btn.textContent = "⎘";
+      // Built by hand (this button lives outside the Solid tree, hovering the
+      // xterm viewport): both icons ship in the markup and .copied swaps which
+      // one is displayed — same shapes as the ones in icons.tsx.
+      btn.innerHTML =
+        '<svg class="i-copy" width="13" height="13" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+        'stroke-linejoin="round" aria-hidden="true">' +
+        '<rect x="9" y="9" width="12" height="12" rx="2" ry="2"/>' +
+        '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
+        '<svg class="i-check" width="13" height="13" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+        'stroke-linejoin="round" aria-hidden="true">' +
+        '<polyline points="20 6 9 17 4 12"/></svg>';
       btn.style.display = "none";
       btn.addEventListener("mouseenter", clearCopyHide);
       btn.addEventListener("mouseleave", scheduleHideCopyBtn);
@@ -1668,7 +1692,7 @@ export default function Terminal(props: TerminalProps) {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => runSearch(false)}
             >
-              ↑
+              <IconChevronUp size={13} />
             </button>
             <button
               class="term-search-btn"
@@ -1676,7 +1700,7 @@ export default function Terminal(props: TerminalProps) {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => runSearch(true)}
             >
-              ↓
+              <IconChevronDown size={13} />
             </button>
             <button
               class="term-search-btn"
@@ -1684,7 +1708,7 @@ export default function Terminal(props: TerminalProps) {
               onMouseDown={(e) => e.preventDefault()}
               onClick={closeSearchBar}
             >
-              ✕
+              <IconX size={13} />
             </button>
           </div>
         </Portal>
