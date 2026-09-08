@@ -60,9 +60,9 @@ export const ar: Dict = {
   "general.exportImport": "تصدير / استيراد كامل الإعداد",
   "general.export": "تصدير",
   "general.import": "استيراد",
-  "general.exported": "تم تصدير الإعدادات ✓",
+  "general.exported": "تم تصدير الإعدادات",
   "general.exportFailed": "فشل التصدير",
-  "general.imported": "تم استيراد الإعدادات ✓",
+  "general.imported": "تم استيراد الإعدادات",
   "general.importFailed": "ملف غير صالح",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const ar: Dict = {
   "about.updates": "التحديثات",
   "about.check": "تحقّق",
   "about.checking": "جارٍ التحقق…",
-  "about.uptodate": "Lume محدَّث ✓",
+  "about.uptodate": "Lume محدَّث",
   "about.checkError": "تعذّر التحقق (غير متصل، أو لا يوجد إصدار).",
   "about.available": "<strong>Lume {version}</strong> متوفّر.",
   "about.installRestart": "تثبيت وإعادة تشغيل",
@@ -103,21 +103,21 @@ export const ar: Dict = {
     "يبقى الطرفي النشط في الخانة الأولى. تُغلَق الأصداف الأخرى لعلامة التبويب.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ نسخ (Ctrl+Shift+C)",
-  "pane.paste": "⎘ لصق (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ تقسيم أفقي",
-  "pane.splitV": "⬍ تقسيم رأسي",
-  "pane.remote": "⇆ تحكّم عن بُعد",
-  "pane.newTab": "+ علامة تبويب جديدة",
-  "pane.close": "× إغلاق هذا اللوح",
+  "pane.copy": "نسخ (Ctrl+Shift+C)",
+  "pane.paste": "لصق (Ctrl+Shift+V)",
+  "pane.splitH": "تقسيم أفقي",
+  "pane.splitV": "تقسيم رأسي",
+  "pane.remote": "تحكّم عن بُعد",
+  "pane.newTab": "علامة تبويب جديدة",
+  "pane.close": "إغلاق هذا اللوح",
   "pane.closeTab": " (يُغلِق علامة التبويب)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ إعادة تسمية (نقر مزدوج)",
-  "tab.splitH": "⬌ تقسيم أفقي (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ تقسيم رأسي (Ctrl+Shift+E)",
-  "tab.newTab": "+ علامة تبويب جديدة (Ctrl+Shift+T)",
-  "tab.close": "× إغلاق علامة التبويب",
+  "tab.rename": "إعادة تسمية (نقر مزدوج)",
+  "tab.splitH": "تقسيم أفقي (Ctrl+Shift+D)",
+  "tab.splitV": "تقسيم رأسي (Ctrl+Shift+E)",
+  "tab.newTab": "علامة تبويب جديدة (Ctrl+Shift+T)",
+  "tab.close": "إغلاق علامة التبويب",
   "tab.panes": " ({n} ألواح)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const ar: Dict = {
   "remote.copy": "نسخ",
   "remote.installHint":
     "ثبّت <code>cloudflared</code> للتحكم من خارج الشبكة المحلية.",
-  "remote.warn": "⚠️ أي شخص لديه هذا الرابط يمكنه التحكم بهذا الطرفي.",
+  "remote.warn": "أي شخص لديه هذا الرابط يمكنه التحكم بهذا الطرفي.",
   "remote.installBtn": "تثبيت وتفعيل النفق",
   "remote.installing": "جارٍ التثبيت…",
   "remote.stop": "إيقاف التحكم عن بُعد",
@@ -190,8 +190,8 @@ export const ar: Dict = {
   "term.copyBlock": "نسخ الأمر + مخرجاته",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ انتهى الأمر",
-  "notif.cmdFailed": "✗ فشل (خروج {code})",
+  "notif.cmdDone": "انتهى الأمر",
+  "notif.cmdFailed": "فشل (خروج {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "إليك كتلة طرفية:",
@@ -270,8 +270,8 @@ export const ar: Dict = {
   "blocks.promptNotTracked": "(سطر الموجِّه غير متتبَّع)",
   "blocks.rightClickActions": "نقر يمين ← نسخ، إدراج، شرح…",
   "blocks.promptNoCommand": "(موجِّه بدون أمر)",
-  "blocks.outputCopied": "تم نسخ المخرجات ✓",
-  "blocks.commandCopied": "تم نسخ الأمر ✓",
+  "blocks.outputCopied": "تم نسخ المخرجات",
+  "blocks.commandCopied": "تم نسخ الأمر",
   "blocks.outputCaptured": "تم التقاط المخرجات — Shift+Click لنسخها",
   "blocks.aiNoCli": "تعذّر العثور على {provider} CLI في PATH",
   "blocks.aiBlockNotDone": "يجب أن تكون الكتلة منتهية",
@@ -281,7 +281,7 @@ export const ar: Dict = {
   "blocks.aiExplainBlock": "اشرح هذه الكتلة باستخدام {provider}",
   "blocks.insertTerminal": "إدراج في الطرفي",
   "blocks.gotoCommand": "الانتقال إلى الأمر في الطرفي",
-  "blocks.explainClaude": "✨ اشرح باستخدام {provider}",
+  "blocks.explainClaude": "اشرح باستخدام {provider}",
   "blocks.closeAiPanel": "إغلاق لوحة {provider}",
   "blocks.removeBlock": "إزالة هذه الكتلة",
 
@@ -334,8 +334,8 @@ export const ar: Dict = {
   "ai.model": "النموذج",
   "ai.modelHint": "افتراضي",
   "ai.status": "الحالة",
-  "ai.detected": "✓ تم اكتشاف {cmd}",
-  "ai.notFound": "✗ لم يُعثر على {cmd} في PATH",
+  "ai.detected": "تم اكتشاف {cmd}",
+  "ai.notFound": "لم يُعثر على {cmd} في PATH",
   "ai.recheck": "إعادة الفحص",
   "ai.apiKey": "مفتاح API",
   "ai.command": "الأمر",
@@ -347,8 +347,8 @@ export const ar: Dict = {
   "ai.keysNote": "تُخزَّن مفاتيح API محليًا في <code>~/.config/lume/config.toml</code> وتُستبعَد من تصدير الإعدادات.",
   "ai.customApi": "واجهة برمجة متوافقة مع OpenAI",
   "ai.baseUrl": "عنوان URL الأساسي",
-  "ai.configured": "✓ تم الإعداد",
-  "ai.missingKey": "✗ مفتاح API مطلوب",
+  "ai.configured": "تم الإعداد",
+  "ai.missingKey": "مفتاح API مطلوب",
   "ai.openaiNote": "يستخدم واجهة OpenAI. أنشئ مفتاحًا على <code>platform.openai.com</code>.",
   "ai.deepseekNote": "يستخدم واجهة DeepSeek (متوافقة مع OpenAI). المفتاح على <code>platform.deepseek.com</code>.",
   "ai.apiNote": "أي نقطة نهاية متوافقة مع OpenAI (Ollama، Groq، OpenRouter…). حدِّد عنوان URL الأساسي والمفتاح والنموذج.",

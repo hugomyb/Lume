@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { hostTarget, listSshHosts, type SshHost } from "./ssh";
+import { IconEnter, IconSsh } from "./icons";
 import { t } from "./i18n";
 
 type Props = {
@@ -97,7 +98,9 @@ export default function SshPalette(props: Props) {
           onClick={(e) => e.stopPropagation()}
         >
           <div class="palette-header">
-            <span class="palette-prompt">⇆</span>
+            <span class="palette-prompt">
+              <IconSsh size={14} />
+            </span>
             <input
               ref={searchRef}
               class="palette-input"
@@ -156,7 +159,9 @@ export default function SshPalette(props: Props) {
                         </span>
                       </div>
                     </Show>
-                    <span class="ssh-item-go">↵</span>
+                    <span class="ssh-item-go">
+                      <IconEnter size={13} />
+                    </span>
                   </div>
                 )}
               </For>

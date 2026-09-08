@@ -60,9 +60,9 @@ export const nl: Dict = {
   "general.exportImport": "De hele configuratie exporteren / importeren",
   "general.export": "Exporteren",
   "general.import": "Importeren",
-  "general.exported": "Instellingen geëxporteerd ✓",
+  "general.exported": "Instellingen geëxporteerd",
   "general.exportFailed": "Exporteren mislukt",
-  "general.imported": "Instellingen geïmporteerd ✓",
+  "general.imported": "Instellingen geïmporteerd",
   "general.importFailed": "Ongeldig bestand",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const nl: Dict = {
   "about.updates": "Updates",
   "about.check": "Controleren",
   "about.checking": "Controleren…",
-  "about.uptodate": "Lume is up-to-date ✓",
+  "about.uptodate": "Lume is up-to-date",
   "about.checkError": "Controleren mislukt (offline of geen release).",
   "about.available": "<strong>Lume {version}</strong> is beschikbaar.",
   "about.installRestart": "Installeren en herstarten",
@@ -103,21 +103,21 @@ export const nl: Dict = {
     "De actieve terminal blijft in de eerste positie staan. De andere shells van het tabblad worden gesloten.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ Kopiëren (Ctrl+Shift+C)",
-  "pane.paste": "⎘ Plakken (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ Horizontaal splitsen",
-  "pane.splitV": "⬍ Verticaal splitsen",
-  "pane.remote": "⇆ Op afstand bedienen",
-  "pane.newTab": "+ Nieuw tabblad",
-  "pane.close": "× Dit deelvenster sluiten",
+  "pane.copy": "Kopiëren (Ctrl+Shift+C)",
+  "pane.paste": "Plakken (Ctrl+Shift+V)",
+  "pane.splitH": "Horizontaal splitsen",
+  "pane.splitV": "Verticaal splitsen",
+  "pane.remote": "Op afstand bedienen",
+  "pane.newTab": "Nieuw tabblad",
+  "pane.close": "Dit deelvenster sluiten",
   "pane.closeTab": " (sluit het tabblad)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ Hernoemen (dubbelklik)",
-  "tab.splitH": "⬌ Horizontaal splitsen (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ Verticaal splitsen (Ctrl+Shift+E)",
-  "tab.newTab": "+ Nieuw tabblad (Ctrl+Shift+T)",
-  "tab.close": "× Dit tabblad sluiten",
+  "tab.rename": "Hernoemen (dubbelklik)",
+  "tab.splitH": "Horizontaal splitsen (Ctrl+Shift+D)",
+  "tab.splitV": "Verticaal splitsen (Ctrl+Shift+E)",
+  "tab.newTab": "Nieuw tabblad (Ctrl+Shift+T)",
+  "tab.close": "Dit tabblad sluiten",
   "tab.panes": " ({n} deelvensters)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const nl: Dict = {
   "remote.copy": "Kopiëren",
   "remote.installHint":
     "Installeer <code>cloudflared</code> om buiten het lokale netwerk te bedienen.",
-  "remote.warn": "⚠️ Iedereen met deze link kan deze terminal bedienen.",
+  "remote.warn": "Iedereen met deze link kan deze terminal bedienen.",
   "remote.installBtn": "Tunnel installeren en inschakelen",
   "remote.installing": "Installeren…",
   "remote.stop": "Bediening op afstand stoppen",
@@ -190,8 +190,8 @@ export const nl: Dict = {
   "term.copyBlock": "Het commando + de uitvoer kopiëren",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ Commando voltooid",
-  "notif.cmdFailed": "✗ Mislukt (exit {code})",
+  "notif.cmdDone": "Commando voltooid",
+  "notif.cmdFailed": "Mislukt (exit {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "Hier is een terminalblok:",
@@ -270,8 +270,8 @@ export const nl: Dict = {
   "blocks.promptNotTracked": "(promptregel niet bijgehouden)",
   "blocks.rightClickActions": "Rechtsklik → kopiëren, invoegen, uitleggen…",
   "blocks.promptNoCommand": "(prompt zonder commando)",
-  "blocks.outputCopied": "Uitvoer gekopieerd ✓",
-  "blocks.commandCopied": "Commando gekopieerd ✓",
+  "blocks.outputCopied": "Uitvoer gekopieerd",
+  "blocks.commandCopied": "Commando gekopieerd",
   "blocks.outputCaptured": "Uitvoer vastgelegd — Shift+Klik om te kopiëren",
   "blocks.aiNoCli": "{provider} CLI niet gevonden in PATH",
   "blocks.aiBlockNotDone": "Het blok moet voltooid zijn",
@@ -281,7 +281,7 @@ export const nl: Dict = {
   "blocks.aiExplainBlock": "Dit blok uitleggen met {provider}",
   "blocks.insertTerminal": "Invoegen in de terminal",
   "blocks.gotoCommand": "Naar het commando in de terminal gaan",
-  "blocks.explainClaude": "✨ Uitleggen met {provider}",
+  "blocks.explainClaude": "Uitleggen met {provider}",
   "blocks.closeAiPanel": "Het {provider}-paneel sluiten",
   "blocks.removeBlock": "Dit blok verwijderen",
 
@@ -334,8 +334,8 @@ export const nl: Dict = {
   "ai.model": "Model",
   "ai.modelHint": "standaard",
   "ai.status": "Status",
-  "ai.detected": "✓ {cmd} gedetecteerd",
-  "ai.notFound": "✗ {cmd} niet gevonden in PATH",
+  "ai.detected": "{cmd} gedetecteerd",
+  "ai.notFound": "{cmd} niet gevonden in PATH",
   "ai.recheck": "Opnieuw controleren",
   "ai.apiKey": "API-sleutel",
   "ai.command": "Opdracht",
@@ -347,8 +347,8 @@ export const nl: Dict = {
   "ai.keysNote": "API-sleutels worden lokaal opgeslagen in <code>~/.config/lume/config.toml</code> en worden uitgesloten van de export van instellingen.",
   "ai.customApi": "OpenAI-compatibele API",
   "ai.baseUrl": "Basis-URL",
-  "ai.configured": "✓ geconfigureerd",
-  "ai.missingKey": "✗ API-sleutel vereist",
+  "ai.configured": "geconfigureerd",
+  "ai.missingKey": "API-sleutel vereist",
   "ai.openaiNote": "Gebruikt de OpenAI-API. Maak een sleutel aan op <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Gebruikt de DeepSeek-API (OpenAI-compatibel). Sleutel op <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Elk OpenAI-compatibel eindpunt (Ollama, Groq, OpenRouter…). Stel de basis-URL, sleutel en het model in.",

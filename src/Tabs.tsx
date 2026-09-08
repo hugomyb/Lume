@@ -57,12 +57,20 @@ import {
   IconBlocks,
   IconChevronLeft,
   IconChevronRight,
+  IconClipboard,
+  IconCopy,
   IconFolder,
   IconLayouts,
+  IconPencil,
+  IconPlus,
+  IconRemote,
   IconSettings,
   IconSmartphone,
+  IconSplitH,
+  IconSplitV,
   IconSsh,
   IconWorkflow,
+  IconX,
 } from "./icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";
@@ -721,7 +729,7 @@ export default function Tabs() {
       await new Promise((r) => setTimeout(r, 3000));
       try {
         await invoke("notify", {
-          title: `🔔 Test Lume #${testNotifN}`,
+          title: `Test Lume #${testNotifN}`,
           body: `Notification n°${testNotifN} — ${new Date().toLocaleTimeString()}`,
           sound: config.notifications.sound,
         });
@@ -2261,7 +2269,7 @@ export default function Tabs() {
                       closeTab(tab.id);
                     }}
                   >
-                    ×
+                    <IconX size={11} />
                   </button>
                 </div>
               )}
@@ -2271,7 +2279,7 @@ export default function Tabs() {
               title={t("toolbar.newTab")}
               onClick={addTab}
             >
-              +
+              <IconPlus size={13} />
             </button>
               </div>
               <Show when={tabScroll().right}>
@@ -2436,6 +2444,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
+                    <IconCopy />
                     {t("pane.copy")}
                   </button>
                   <button
@@ -2445,6 +2454,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
+                    <IconClipboard />
                     {t("pane.paste")}
                   </button>
                   <div class="ctx-sep" />
@@ -2459,6 +2469,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
+                    <IconSplitH />
                     {t("pane.splitH")}
                   </button>
                   <button
@@ -2471,6 +2482,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
+                    <IconSplitV />
                     {t("pane.splitV")}
                   </button>
                   <div class="ctx-sep" />
@@ -2484,6 +2496,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
+                    <IconRemote />
                     {t("pane.remote")}
                   </button>
                   <div class="ctx-sep" />
@@ -2494,6 +2507,7 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
+                    <IconPlus />
                     {t("pane.newTab")}
                   </button>
                   <div class="ctx-sep" />
@@ -2504,8 +2518,11 @@ export default function Tabs() {
                       setPaneCtxMenu(null);
                     }}
                   >
-                    {t("pane.close")}
-                    <Show when={paneCount === 1}>{t("pane.closeTab")}</Show>
+                    <IconX />
+                    <span>
+                      {t("pane.close")}
+                      <Show when={paneCount === 1}>{t("pane.closeTab")}</Show>
+                    </span>
                   </button>
                 </div>
               );
@@ -2529,6 +2546,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
+                    <IconPencil />
                     {t("tab.rename")}
                   </button>
                   <div class="ctx-sep" />
@@ -2539,6 +2557,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
+                    <IconSplitH />
                     {t("tab.splitH")}
                   </button>
                   <button
@@ -2548,6 +2567,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
+                    <IconSplitV />
                     {t("tab.splitV")}
                   </button>
                   <div class="ctx-sep" />
@@ -2558,6 +2578,7 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
+                    <IconPlus />
                     {t("tab.newTab")}
                   </button>
                   <div class="ctx-sep" />
@@ -2568,8 +2589,13 @@ export default function Tabs() {
                       setTabCtxMenu(null);
                     }}
                   >
-                    {t("tab.close")}
-                    <Show when={paneCount > 1}>{t("tab.panes", { n: paneCount })}</Show>
+                    <IconX />
+                    <span>
+                      {t("tab.close")}
+                      <Show when={paneCount > 1}>
+                        {t("tab.panes", { n: paneCount })}
+                      </Show>
+                    </span>
                   </button>
                 </div>
               );

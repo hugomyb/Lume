@@ -354,7 +354,7 @@ export default function MarkdownRender(props: Props) {
         }}
       </For>
       <Show when={props.streaming}>
-        <span class="ai-cursor">▌</span>
+        <span class="ai-cursor" />
       </Show>
     </>
   );

@@ -19,6 +19,10 @@ import { checkForUpdate, installUpdate, type Update } from "./updater";
 import {
   IconAppearance,
   IconBell,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconDownload,
   IconFolder,
   IconInfo,
   IconKeyboard,
@@ -26,6 +30,7 @@ import {
   IconSettings,
   IconSparkles,
   IconSsh,
+  IconX,
 } from "./icons";
 import {
   ACTIONS,
@@ -429,7 +434,7 @@ export default function Settings(props: Props) {
                       </optgroup>
                     </select>
                     <label class="settings-import-btn" title={t("appearance.importTitle")}>
-                      ⬇ {t("appearance.import")}
+                      <IconDownload size={13} /> {t("appearance.import")}
                       <input
                         type="file"
                         accept=".ttf,.otf,.woff,.woff2"
@@ -566,7 +571,12 @@ export default function Settings(props: Props) {
                   class="settings-collapse"
                   onClick={() => setAnsiOpen(!ansiOpen())}
                 >
-                  {ansiOpen() ? "▾" : "▸"} {t("appearance.ansi")}
+                  {ansiOpen() ? (
+                    <IconChevronDown size={12} />
+                  ) : (
+                    <IconChevronRight size={12} />
+                  )}{" "}
+                  {t("appearance.ansi")}
                 </button>
                 <Show when={ansiOpen()}>
                   <div class="settings-colors ansi">
@@ -698,11 +708,19 @@ export default function Settings(props: Props) {
                             "ai-bad": aiDetected() === false,
                           }}
                         >
-                          {aiDetected() === undefined || aiDetected() === null
-                            ? "…"
-                            : aiDetected()
-                            ? t("ai.detected", { cmd: aiCommand() })
-                            : t("ai.notFound", { cmd: aiCommand() || "—" })}
+                          {aiDetected() === undefined || aiDetected() === null ? (
+                            "…"
+                          ) : aiDetected() ? (
+                            <>
+                              <IconCheck size={12} />{" "}
+                              {t("ai.detected", { cmd: aiCommand() })}
+                            </>
+                          ) : (
+                            <>
+                              <IconX size={12} />{" "}
+                              {t("ai.notFound", { cmd: aiCommand() || "—" })}
+                            </>
+                          )}
                         </span>
                         <button
                           class="ai-recheck"
@@ -722,7 +740,15 @@ export default function Settings(props: Props) {
                         "ai-bad": !apiConfigured(),
                       }}
                     >
-                      {apiConfigured() ? t("ai.configured") : t("ai.missingKey")}
+                      {apiConfigured() ? (
+                        <>
+                          <IconCheck size={12} /> {t("ai.configured")}
+                        </>
+                      ) : (
+                        <>
+                          <IconX size={12} /> {t("ai.missingKey")}
+                        </>
+                      )}
                     </span>
                   </Show>
                 </div>
@@ -1078,7 +1104,9 @@ export default function Settings(props: Props) {
                   </button>
                 </div>
                 <Show when={updateState() === "uptodate"}>
-                  <p class="settings-note">{t("about.uptodate")}</p>
+                  <p class="settings-note">
+                    <IconCheck size={12} /> {t("about.uptodate")}
+                  </p>
                 </Show>
                 <Show when={updateState() === "error"}>
                   <p class="settings-note">{t("about.checkError")}</p>

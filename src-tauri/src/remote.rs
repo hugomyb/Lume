@@ -817,7 +817,9 @@ const INDEX_HTML: &str = r##"<!doctype html>
   .key.on{background:#2b6cff;border-color:#2b6cff;color:#fff}
   #overlay{display:none;position:fixed;inset:0;z-index:50;background:rgba(8,10,14,0.93);align-items:center;justify-content:center;padding:26px}
   #overlay .box{max-width:330px;text-align:center;color:#e6e6e6}
-  #ov-icon{font-size:42px;margin-bottom:10px}
+  #ov-icon{margin-bottom:10px;color:#ffb454}
+  #ov-icon svg{width:42px;height:42px}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#56d364;margin-right:6px;vertical-align:1px}
   #ov-title{font-size:19px;font-weight:600;margin-bottom:6px}
   #ov-sub{font-size:13px;color:#9aa4b2;margin-bottom:20px;line-height:1.45}
   #reconnect{background:#101a2b;color:#e8f2ff;border:1px solid #4ea1ff;border-radius:10px;padding:12px 26px;font-size:15px;font-weight:600;letter-spacing:.02em;box-shadow:0 0 0 1px rgba(78,161,255,.25), 0 0 20px rgba(78,161,255,.45), inset 0 0 14px rgba(78,161,255,.12);animation:rcGlow 2.4s ease-in-out infinite;transition:background .15s}
@@ -832,7 +834,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
   <div id="term"></div>
   <div id="assist"><div id="chips"></div><div id="keys"></div></div>
 </div>
-<div id="overlay"><div class="box"><div id="ov-icon">⚠️</div><div id="ov-title">Connexion perdue</div><div id="ov-sub"></div><button id="reconnect">Reconnecter</button></div></div>
+<div id="overlay"><div class="box"><div id="ov-icon"></div><div id="ov-title">Connexion perdue</div><div id="ov-sub"></div><button id="reconnect">Reconnecter</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script>
@@ -948,8 +950,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
   })();
 
   var overlay=$('overlay'), ovTitle=$('ov-title'), ovSub=$('ov-sub'), ovIcon=$('ov-icon');
+  var WARN_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  var PLUG_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6z"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
   function showOverlay(byUser){
-    ovIcon.textContent = byUser ? '🔌' : '⚠️';
+    ovIcon.innerHTML = byUser ? PLUG_SVG : WARN_SVG;
     ovTitle.textContent = byUser ? 'Déconnecté' : 'Connexion perdue';
     ovSub.textContent = byUser ? "Tu es déconnecté du terminal distant." : "Le tunnel ou le réseau s'est interrompu.";
     overlay.style.display='flex';
@@ -968,7 +972,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       }
       term.write(new Uint8Array(e.data));
     };
-    ws.onopen = function(){ msg.textContent='● Connecté'; dc.style.display=''; layout(); term.focus(); };
+    ws.onopen = function(){ msg.innerHTML='<i class="dot"></i>Connecté'; dc.style.display=''; layout(); term.focus(); };
     ws.onclose = function(){ msg.textContent = closedByUser ? 'Déconnecté' : 'Connexion perdue'; dc.style.display='none'; showOverlay(closedByUser); };
     ws.onerror = function(){ msg.textContent='Erreur de connexion'; };
   }

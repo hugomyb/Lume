@@ -60,9 +60,9 @@ export const ja: Dict = {
   "general.exportImport": "設定全体をエクスポート / インポート",
   "general.export": "エクスポート",
   "general.import": "インポート",
-  "general.exported": "設定をエクスポートしました ✓",
+  "general.exported": "設定をエクスポートしました",
   "general.exportFailed": "エクスポートに失敗しました",
-  "general.imported": "設定をインポートしました ✓",
+  "general.imported": "設定をインポートしました",
   "general.importFailed": "無効なファイルです",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const ja: Dict = {
   "about.updates": "アップデート",
   "about.check": "確認",
   "about.checking": "確認中…",
-  "about.uptodate": "Lume は最新です ✓",
+  "about.uptodate": "Lume は最新です",
   "about.checkError": "確認できませんでした (オフライン、またはリリースがありません)。",
   "about.available": "<strong>Lume {version}</strong> が利用可能です。",
   "about.installRestart": "インストールして再起動",
@@ -103,21 +103,21 @@ export const ja: Dict = {
     "アクティブなターミナルが最初のスロットに保持されます。タブの他のシェルは閉じられます。",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ コピー (Ctrl+Shift+C)",
-  "pane.paste": "⎘ 貼り付け (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ 水平に分割",
-  "pane.splitV": "⬍ 垂直に分割",
-  "pane.remote": "⇆ リモート操作",
-  "pane.newTab": "+ 新しいタブ",
-  "pane.close": "× このペインを閉じる",
+  "pane.copy": "コピー (Ctrl+Shift+C)",
+  "pane.paste": "貼り付け (Ctrl+Shift+V)",
+  "pane.splitH": "水平に分割",
+  "pane.splitV": "垂直に分割",
+  "pane.remote": "リモート操作",
+  "pane.newTab": "新しいタブ",
+  "pane.close": "このペインを閉じる",
   "pane.closeTab": " (タブを閉じます)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ 名前を変更 (ダブルクリック)",
-  "tab.splitH": "⬌ 水平に分割 (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ 垂直に分割 (Ctrl+Shift+E)",
-  "tab.newTab": "+ 新しいタブ (Ctrl+Shift+T)",
-  "tab.close": "× このタブを閉じる",
+  "tab.rename": "名前を変更 (ダブルクリック)",
+  "tab.splitH": "水平に分割 (Ctrl+Shift+D)",
+  "tab.splitV": "垂直に分割 (Ctrl+Shift+E)",
+  "tab.newTab": "新しいタブ (Ctrl+Shift+T)",
+  "tab.close": "このタブを閉じる",
   "tab.panes": " ({n} ペイン)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const ja: Dict = {
   "remote.copy": "コピー",
   "remote.installHint":
     "ローカルネットワークの外から操作するには <code>cloudflared</code> をインストールしてください。",
-  "remote.warn": "⚠️ このリンクを知っている人は誰でもこのターミナルを操作できます。",
+  "remote.warn": "このリンクを知っている人は誰でもこのターミナルを操作できます。",
   "remote.installBtn": "インストールしてトンネルを有効化",
   "remote.installing": "インストール中…",
   "remote.stop": "リモート操作を停止",
@@ -190,8 +190,8 @@ export const ja: Dict = {
   "term.copyBlock": "コマンドと出力をコピー",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ コマンドが完了しました",
-  "notif.cmdFailed": "✗ 失敗 (exit {code})",
+  "notif.cmdDone": "コマンドが完了しました",
+  "notif.cmdFailed": "失敗 (exit {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "ターミナルのブロックです:",
@@ -270,8 +270,8 @@ export const ja: Dict = {
   "blocks.promptNotTracked": "(プロンプト行は追跡されていません)",
   "blocks.rightClickActions": "右クリック → コピー、挿入、説明…",
   "blocks.promptNoCommand": "(コマンドなしのプロンプト)",
-  "blocks.outputCopied": "出力をコピーしました ✓",
-  "blocks.commandCopied": "コマンドをコピーしました ✓",
+  "blocks.outputCopied": "出力をコピーしました",
+  "blocks.commandCopied": "コマンドをコピーしました",
   "blocks.outputCaptured": "出力をキャプチャしました — Shift+クリックでコピー",
   "blocks.aiNoCli": "PATH に {provider} CLI が見つかりません",
   "blocks.aiBlockNotDone": "ブロックが完了している必要があります",
@@ -281,7 +281,7 @@ export const ja: Dict = {
   "blocks.aiExplainBlock": "{provider} でこのブロックを説明",
   "blocks.insertTerminal": "ターミナルに挿入",
   "blocks.gotoCommand": "ターミナルのコマンドへ移動",
-  "blocks.explainClaude": "✨ {provider} で説明",
+  "blocks.explainClaude": "{provider} で説明",
   "blocks.closeAiPanel": "{provider} パネルを閉じる",
   "blocks.removeBlock": "このブロックを削除",
 
@@ -334,8 +334,8 @@ export const ja: Dict = {
   "ai.model": "モデル",
   "ai.modelHint": "デフォルト",
   "ai.status": "ステータス",
-  "ai.detected": "✓ {cmd} を検出しました",
-  "ai.notFound": "✗ {cmd} が PATH に見つかりません",
+  "ai.detected": "{cmd} を検出しました",
+  "ai.notFound": "{cmd} が PATH に見つかりません",
   "ai.recheck": "再チェック",
   "ai.apiKey": "API キー",
   "ai.command": "コマンド",
@@ -347,8 +347,8 @@ export const ja: Dict = {
   "ai.keysNote": "API キーはローカルの <code>~/.config/lume/config.toml</code> に保存され、設定のエクスポートから除外されます。",
   "ai.customApi": "OpenAI 互換 API",
   "ai.baseUrl": "ベース URL",
-  "ai.configured": "✓ 設定済み",
-  "ai.missingKey": "✗ API キーが必要です",
+  "ai.configured": "設定済み",
+  "ai.missingKey": "API キーが必要です",
   "ai.openaiNote": "OpenAI API を使用します。<code>platform.openai.com</code> でキーを作成してください。",
   "ai.deepseekNote": "DeepSeek API を使用します（OpenAI 互換）。キーは <code>platform.deepseek.com</code> で取得できます。",
   "ai.apiNote": "OpenAI 互換のエンドポイントすべて（Ollama、Groq、OpenRouter…）。ベース URL、キー、モデルを設定してください。",

@@ -60,9 +60,9 @@ export const ru: Dict = {
   "general.exportImport": "Экспорт / импорт всей конфигурации",
   "general.export": "Экспорт",
   "general.import": "Импорт",
-  "general.exported": "Настройки экспортированы ✓",
+  "general.exported": "Настройки экспортированы",
   "general.exportFailed": "Не удалось экспортировать",
-  "general.imported": "Настройки импортированы ✓",
+  "general.imported": "Настройки импортированы",
   "general.importFailed": "Недопустимый файл",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const ru: Dict = {
   "about.updates": "Обновления",
   "about.check": "Проверить",
   "about.checking": "Проверка…",
-  "about.uptodate": "Lume обновлена до последней версии ✓",
+  "about.uptodate": "Lume обновлена до последней версии",
   "about.checkError": "Не удалось проверить (нет сети или нет релиза).",
   "about.available": "Доступна <strong>Lume {version}</strong>.",
   "about.installRestart": "Установить и перезапустить",
@@ -103,21 +103,21 @@ export const ru: Dict = {
     "Активный терминал остаётся в первом слоте. Остальные shell-сессии вкладки закрываются.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ Копировать (Ctrl+Shift+C)",
-  "pane.paste": "⎘ Вставить (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ Разделить по горизонтали",
-  "pane.splitV": "⬍ Разделить по вертикали",
-  "pane.remote": "⇆ Управлять удалённо",
-  "pane.newTab": "+ Новая вкладка",
-  "pane.close": "× Закрыть эту панель",
+  "pane.copy": "Копировать (Ctrl+Shift+C)",
+  "pane.paste": "Вставить (Ctrl+Shift+V)",
+  "pane.splitH": "Разделить по горизонтали",
+  "pane.splitV": "Разделить по вертикали",
+  "pane.remote": "Управлять удалённо",
+  "pane.newTab": "Новая вкладка",
+  "pane.close": "Закрыть эту панель",
   "pane.closeTab": " (закрывает вкладку)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ Переименовать (двойной клик)",
-  "tab.splitH": "⬌ Разделить по горизонтали (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ Разделить по вертикали (Ctrl+Shift+E)",
-  "tab.newTab": "+ Новая вкладка (Ctrl+Shift+T)",
-  "tab.close": "× Закрыть эту вкладку",
+  "tab.rename": "Переименовать (двойной клик)",
+  "tab.splitH": "Разделить по горизонтали (Ctrl+Shift+D)",
+  "tab.splitV": "Разделить по вертикали (Ctrl+Shift+E)",
+  "tab.newTab": "Новая вкладка (Ctrl+Shift+T)",
+  "tab.close": "Закрыть эту вкладку",
   "tab.panes": " ({n} панелей)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const ru: Dict = {
   "remote.copy": "Копировать",
   "remote.installHint":
     "Установите <code>cloudflared</code>, чтобы управлять извне локальной сети.",
-  "remote.warn": "⚠️ Любой, у кого есть эта ссылка, сможет управлять этим терминалом.",
+  "remote.warn": "Любой, у кого есть эта ссылка, сможет управлять этим терминалом.",
   "remote.installBtn": "Установить и включить туннель",
   "remote.installing": "Установка…",
   "remote.stop": "Остановить удалённое управление",
@@ -190,8 +190,8 @@ export const ru: Dict = {
   "term.copyBlock": "Копировать команду + её вывод",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ Команда завершена",
-  "notif.cmdFailed": "✗ Ошибка (код {code})",
+  "notif.cmdDone": "Команда завершена",
+  "notif.cmdFailed": "Ошибка (код {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "Вот блок терминала:",
@@ -270,8 +270,8 @@ export const ru: Dict = {
   "blocks.promptNotTracked": "(строка приглашения не отслеживается)",
   "blocks.rightClickActions": "Правый клик → копировать, вставить, объяснить…",
   "blocks.promptNoCommand": "(приглашение без команды)",
-  "blocks.outputCopied": "Вывод скопирован ✓",
-  "blocks.commandCopied": "Команда скопирована ✓",
+  "blocks.outputCopied": "Вывод скопирован",
+  "blocks.commandCopied": "Команда скопирована",
   "blocks.outputCaptured": "Вывод захвачен — Shift+Click, чтобы скопировать его",
   "blocks.aiNoCli": "{provider} CLI не найден в PATH",
   "blocks.aiBlockNotDone": "Блок должен быть завершён",
@@ -281,7 +281,7 @@ export const ru: Dict = {
   "blocks.aiExplainBlock": "Объяснить этот блок с помощью {provider}",
   "blocks.insertTerminal": "Вставить в терминал",
   "blocks.gotoCommand": "Перейти к команде в терминале",
-  "blocks.explainClaude": "✨ Объяснить с помощью {provider}",
+  "blocks.explainClaude": "Объяснить с помощью {provider}",
   "blocks.closeAiPanel": "Закрыть панель {provider}",
   "blocks.removeBlock": "Удалить этот блок",
 
@@ -334,8 +334,8 @@ export const ru: Dict = {
   "ai.model": "Модель",
   "ai.modelHint": "по умолчанию",
   "ai.status": "Статус",
-  "ai.detected": "✓ {cmd} обнаружен",
-  "ai.notFound": "✗ {cmd} не найден в PATH",
+  "ai.detected": "{cmd} обнаружен",
+  "ai.notFound": "{cmd} не найден в PATH",
   "ai.recheck": "Перепроверить",
   "ai.apiKey": "Ключ API",
   "ai.command": "Команда",
@@ -347,8 +347,8 @@ export const ru: Dict = {
   "ai.keysNote": "Ключи API хранятся локально в <code>~/.config/lume/config.toml</code> и исключаются из экспорта настроек.",
   "ai.customApi": "API, совместимый с OpenAI",
   "ai.baseUrl": "Базовый URL",
-  "ai.configured": "✓ настроено",
-  "ai.missingKey": "✗ требуется ключ API",
+  "ai.configured": "настроено",
+  "ai.missingKey": "требуется ключ API",
   "ai.openaiNote": "Использует API OpenAI. Создайте ключ на <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Использует API DeepSeek (совместимый с OpenAI). Ключ на <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Любая конечная точка, совместимая с OpenAI (Ollama, Groq, OpenRouter…). Укажите базовый URL, ключ и модель.",

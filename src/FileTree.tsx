@@ -1,7 +1,13 @@
 import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
-import { IconChevronRight, IconFile, IconFolder } from "./icons";
+import {
+  IconChevronRight,
+  IconFile,
+  IconFolder,
+  IconRefresh,
+  IconX,
+} from "./icons";
 import { t } from "./i18n";
 import type { FileTreeConfig } from "./config";
 
@@ -260,10 +266,10 @@ export default function FileTree(props: {
               title={t("ft.refresh")}
               onClick={() => setRefreshKey(refreshKey() + 1)}
             >
-              ⟳
+              <IconRefresh size={13} />
             </button>
             <button class="ft-btn" title={t("ft.close")} onClick={() => props.onToggle()}>
-              ×
+              <IconX size={13} />
             </button>
           </div>
         </div>

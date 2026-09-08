@@ -60,9 +60,9 @@ export const tr: Dict = {
   "general.exportImport": "Tüm yapılandırmayı dışa / içe aktar",
   "general.export": "Dışa aktar",
   "general.import": "İçe aktar",
-  "general.exported": "Ayarlar dışa aktarıldı ✓",
+  "general.exported": "Ayarlar dışa aktarıldı",
   "general.exportFailed": "Dışa aktarma başarısız",
-  "general.imported": "Ayarlar içe aktarıldı ✓",
+  "general.imported": "Ayarlar içe aktarıldı",
   "general.importFailed": "Geçersiz dosya",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const tr: Dict = {
   "about.updates": "Güncellemeler",
   "about.check": "Denetle",
   "about.checking": "Denetleniyor…",
-  "about.uptodate": "Lume güncel ✓",
+  "about.uptodate": "Lume güncel",
   "about.checkError": "Denetlenemedi (çevrimdışı veya sürüm yok).",
   "about.available": "<strong>Lume {version}</strong> kullanılabilir.",
   "about.installRestart": "Kur ve yeniden başlat",
@@ -103,21 +103,21 @@ export const tr: Dict = {
     "Etkin terminal ilk yuvada tutulur. Sekmenin diğer shell'leri kapatılır.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ Kopyala (Ctrl+Shift+C)",
-  "pane.paste": "⎘ Yapıştır (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ Yatay böl",
-  "pane.splitV": "⬍ Dikey böl",
-  "pane.remote": "⇆ Uzaktan kontrol et",
-  "pane.newTab": "+ Yeni sekme",
-  "pane.close": "× Bu bölmeyi kapat",
+  "pane.copy": "Kopyala (Ctrl+Shift+C)",
+  "pane.paste": "Yapıştır (Ctrl+Shift+V)",
+  "pane.splitH": "Yatay böl",
+  "pane.splitV": "Dikey böl",
+  "pane.remote": "Uzaktan kontrol et",
+  "pane.newTab": "Yeni sekme",
+  "pane.close": "Bu bölmeyi kapat",
   "pane.closeTab": " (sekmeyi kapatır)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ Yeniden adlandır (çift tıkla)",
-  "tab.splitH": "⬌ Yatay böl (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ Dikey böl (Ctrl+Shift+E)",
-  "tab.newTab": "+ Yeni sekme (Ctrl+Shift+T)",
-  "tab.close": "× Bu sekmeyi kapat",
+  "tab.rename": "Yeniden adlandır (çift tıkla)",
+  "tab.splitH": "Yatay böl (Ctrl+Shift+D)",
+  "tab.splitV": "Dikey böl (Ctrl+Shift+E)",
+  "tab.newTab": "Yeni sekme (Ctrl+Shift+T)",
+  "tab.close": "Bu sekmeyi kapat",
   "tab.panes": " ({n} bölme)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const tr: Dict = {
   "remote.copy": "Kopyala",
   "remote.installHint":
     "Yerel ağ dışından kontrol etmek için <code>cloudflared</code> kurun.",
-  "remote.warn": "⚠️ Bu bağlantıya sahip herkes bu terminali kontrol edebilir.",
+  "remote.warn": "Bu bağlantıya sahip herkes bu terminali kontrol edebilir.",
   "remote.installBtn": "Tüneli kur ve etkinleştir",
   "remote.installing": "Kuruluyor…",
   "remote.stop": "Uzaktan kontrolü durdur",
@@ -190,8 +190,8 @@ export const tr: Dict = {
   "term.copyBlock": "Komutu + çıktısını kopyala",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ Komut tamamlandı",
-  "notif.cmdFailed": "✗ Başarısız (çıkış {code})",
+  "notif.cmdDone": "Komut tamamlandı",
+  "notif.cmdFailed": "Başarısız (çıkış {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "İşte bir terminal bloğu:",
@@ -270,8 +270,8 @@ export const tr: Dict = {
   "blocks.promptNotTracked": "(prompt satırı izlenmiyor)",
   "blocks.rightClickActions": "Sağ tıkla → kopyala, ekle, açıkla…",
   "blocks.promptNoCommand": "(komutsuz prompt)",
-  "blocks.outputCopied": "Çıktı kopyalandı ✓",
-  "blocks.commandCopied": "Komut kopyalandı ✓",
+  "blocks.outputCopied": "Çıktı kopyalandı",
+  "blocks.commandCopied": "Komut kopyalandı",
   "blocks.outputCaptured": "Çıktı yakalandı — kopyalamak için Shift+Tık",
   "blocks.aiNoCli": "{provider} CLI PATH'te bulunamadı",
   "blocks.aiBlockNotDone": "Blok tamamlanmış olmalı",
@@ -281,7 +281,7 @@ export const tr: Dict = {
   "blocks.aiExplainBlock": "Bu bloğu {provider} ile açıkla",
   "blocks.insertTerminal": "Terminale ekle",
   "blocks.gotoCommand": "Terminaldeki komuta git",
-  "blocks.explainClaude": "✨ {provider} ile açıkla",
+  "blocks.explainClaude": "{provider} ile açıkla",
   "blocks.closeAiPanel": "{provider} panelini kapat",
   "blocks.removeBlock": "Bu bloğu kaldır",
 
@@ -334,8 +334,8 @@ export const tr: Dict = {
   "ai.model": "Model",
   "ai.modelHint": "varsayılan",
   "ai.status": "Durum",
-  "ai.detected": "✓ {cmd} algılandı",
-  "ai.notFound": "✗ {cmd} PATH içinde bulunamadı",
+  "ai.detected": "{cmd} algılandı",
+  "ai.notFound": "{cmd} PATH içinde bulunamadı",
   "ai.recheck": "Tekrar denetle",
   "ai.apiKey": "API anahtarı",
   "ai.command": "Komut",
@@ -347,8 +347,8 @@ export const tr: Dict = {
   "ai.keysNote": "API anahtarları yerel olarak <code>~/.config/lume/config.toml</code> dosyasında saklanır ve ayar dışa aktarmasının dışında tutulur.",
   "ai.customApi": "OpenAI uyumlu API",
   "ai.baseUrl": "Temel URL",
-  "ai.configured": "✓ yapılandırıldı",
-  "ai.missingKey": "✗ API anahtarı gerekli",
+  "ai.configured": "yapılandırıldı",
+  "ai.missingKey": "API anahtarı gerekli",
   "ai.openaiNote": "OpenAI API'sini kullanır. <code>platform.openai.com</code> adresinde bir anahtar oluşturun.",
   "ai.deepseekNote": "DeepSeek API'sini kullanır (OpenAI uyumlu). Anahtar için <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Herhangi bir OpenAI uyumlu uç nokta (Ollama, Groq, OpenRouter…). Temel URL'yi, anahtarı ve modeli ayarlayın.",

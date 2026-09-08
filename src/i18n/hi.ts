@@ -60,9 +60,9 @@ export const hi: Dict = {
   "general.exportImport": "पूरी कॉन्फ़िग निर्यात / आयात करें",
   "general.export": "निर्यात करें",
   "general.import": "आयात करें",
-  "general.exported": "सेटिंग्स निर्यात की गईं ✓",
+  "general.exported": "सेटिंग्स निर्यात की गईं",
   "general.exportFailed": "निर्यात विफल",
-  "general.imported": "सेटिंग्स आयात की गईं ✓",
+  "general.imported": "सेटिंग्स आयात की गईं",
   "general.importFailed": "अमान्य फ़ाइल",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const hi: Dict = {
   "about.updates": "अपडेट",
   "about.check": "जाँचें",
   "about.checking": "जाँच हो रही है…",
-  "about.uptodate": "Lume अद्यतित है ✓",
+  "about.uptodate": "Lume अद्यतित है",
   "about.checkError": "जाँच नहीं हो सकी (ऑफ़लाइन, या कोई रिलीज़ नहीं)।",
   "about.available": "<strong>Lume {version}</strong> उपलब्ध है।",
   "about.installRestart": "इंस्टॉल करें और पुनः आरंभ करें",
@@ -103,21 +103,21 @@ export const hi: Dict = {
     "सक्रिय टर्मिनल पहले स्लॉट में रखा जाता है। टैब के अन्य shell बंद कर दिए जाते हैं।",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ कॉपी करें (Ctrl+Shift+C)",
-  "pane.paste": "⎘ पेस्ट करें (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ क्षैतिज विभाजन",
-  "pane.splitV": "⬍ ऊर्ध्वाधर विभाजन",
-  "pane.remote": "⇆ दूरस्थ नियंत्रण करें",
-  "pane.newTab": "+ नया टैब",
-  "pane.close": "× यह पेन बंद करें",
+  "pane.copy": "कॉपी करें (Ctrl+Shift+C)",
+  "pane.paste": "पेस्ट करें (Ctrl+Shift+V)",
+  "pane.splitH": "क्षैतिज विभाजन",
+  "pane.splitV": "ऊर्ध्वाधर विभाजन",
+  "pane.remote": "दूरस्थ नियंत्रण करें",
+  "pane.newTab": "नया टैब",
+  "pane.close": "यह पेन बंद करें",
   "pane.closeTab": " (टैब बंद कर देता है)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ नाम बदलें (डबल-क्लिक)",
-  "tab.splitH": "⬌ क्षैतिज विभाजन (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ ऊर्ध्वाधर विभाजन (Ctrl+Shift+E)",
-  "tab.newTab": "+ नया टैब (Ctrl+Shift+T)",
-  "tab.close": "× यह टैब बंद करें",
+  "tab.rename": "नाम बदलें (डबल-क्लिक)",
+  "tab.splitH": "क्षैतिज विभाजन (Ctrl+Shift+D)",
+  "tab.splitV": "ऊर्ध्वाधर विभाजन (Ctrl+Shift+E)",
+  "tab.newTab": "नया टैब (Ctrl+Shift+T)",
+  "tab.close": "यह टैब बंद करें",
   "tab.panes": " ({n} पेन)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const hi: Dict = {
   "remote.copy": "कॉपी करें",
   "remote.installHint":
     "लोकल नेटवर्क के बाहर से नियंत्रण करने के लिए <code>cloudflared</code> इंस्टॉल करें।",
-  "remote.warn": "⚠️ इस लिंक वाला कोई भी व्यक्ति इस टर्मिनल को नियंत्रित कर सकता है।",
+  "remote.warn": "इस लिंक वाला कोई भी व्यक्ति इस टर्मिनल को नियंत्रित कर सकता है।",
   "remote.installBtn": "टनल इंस्टॉल करें और सक्षम करें",
   "remote.installing": "इंस्टॉल हो रहा है…",
   "remote.stop": "रिमोट नियंत्रण रोकें",
@@ -190,8 +190,8 @@ export const hi: Dict = {
   "term.copyBlock": "कमांड + उसका आउटपुट कॉपी करें",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ कमांड पूर्ण हुई",
-  "notif.cmdFailed": "✗ विफल (exit {code})",
+  "notif.cmdDone": "कमांड पूर्ण हुई",
+  "notif.cmdFailed": "विफल (exit {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "यह एक टर्मिनल ब्लॉक है:",
@@ -270,8 +270,8 @@ export const hi: Dict = {
   "blocks.promptNotTracked": "(प्रॉम्प्ट पंक्ति ट्रैक नहीं हुई)",
   "blocks.rightClickActions": "राइट-क्लिक → कॉपी, डालें, समझाएँ…",
   "blocks.promptNoCommand": "(बिना कमांड का प्रॉम्प्ट)",
-  "blocks.outputCopied": "आउटपुट कॉपी हुआ ✓",
-  "blocks.commandCopied": "कमांड कॉपी हुई ✓",
+  "blocks.outputCopied": "आउटपुट कॉपी हुआ",
+  "blocks.commandCopied": "कमांड कॉपी हुई",
   "blocks.outputCaptured": "आउटपुट कैप्चर हुआ — कॉपी करने के लिए Shift+Click",
   "blocks.aiNoCli": "{provider} CLI PATH में नहीं मिला",
   "blocks.aiBlockNotDone": "ब्लॉक पूर्ण होना चाहिए",
@@ -281,7 +281,7 @@ export const hi: Dict = {
   "blocks.aiExplainBlock": "{provider} से यह ब्लॉक समझाएँ",
   "blocks.insertTerminal": "टर्मिनल में डालें",
   "blocks.gotoCommand": "टर्मिनल में कमांड पर जाएँ",
-  "blocks.explainClaude": "✨ {provider} से समझाएँ",
+  "blocks.explainClaude": "{provider} से समझाएँ",
   "blocks.closeAiPanel": "{provider} पैनल बंद करें",
   "blocks.removeBlock": "यह ब्लॉक हटाएँ",
 
@@ -334,8 +334,8 @@ export const hi: Dict = {
   "ai.model": "मॉडल",
   "ai.modelHint": "डिफ़ॉल्ट",
   "ai.status": "स्थिति",
-  "ai.detected": "✓ {cmd} का पता चला",
-  "ai.notFound": "✗ {cmd} PATH में नहीं मिला",
+  "ai.detected": "{cmd} का पता चला",
+  "ai.notFound": "{cmd} PATH में नहीं मिला",
   "ai.recheck": "फिर से जाँचें",
   "ai.apiKey": "API कुंजी",
   "ai.command": "कमांड",
@@ -347,8 +347,8 @@ export const hi: Dict = {
   "ai.keysNote": "API कुंजियाँ स्थानीय रूप से <code>~/.config/lume/config.toml</code> में संग्रहीत होती हैं और सेटिंग्स निर्यात से बाहर रखी जाती हैं।",
   "ai.customApi": "OpenAI-संगत API",
   "ai.baseUrl": "बेस URL",
-  "ai.configured": "✓ कॉन्फ़िगर किया गया",
-  "ai.missingKey": "✗ API कुंजी आवश्यक है",
+  "ai.configured": "कॉन्फ़िगर किया गया",
+  "ai.missingKey": "API कुंजी आवश्यक है",
   "ai.openaiNote": "OpenAI API का उपयोग करता है। <code>platform.openai.com</code> पर एक कुंजी बनाएँ।",
   "ai.deepseekNote": "DeepSeek API का उपयोग करता है (OpenAI-संगत)। कुंजी <code>platform.deepseek.com</code> पर।",
   "ai.apiNote": "कोई भी OpenAI-संगत एंडपॉइंट (Ollama, Groq, OpenRouter…)। बेस URL, कुंजी और मॉडल सेट करें।",

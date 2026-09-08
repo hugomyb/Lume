@@ -8,6 +8,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { aiCancel, type AiChunkEvent, type AiDoneEvent, type AiErrorEvent } from "./ai";
+import { IconSparkles } from "./icons";
 import { t } from "./i18n";
 
 type Stage = "input" | "streaming" | "ready" | "error";
@@ -155,7 +156,9 @@ export default function CommandPalette(props: Props) {
       <div class="palette-overlay" onClick={close}>
         <div class="palette" onClick={(e) => e.stopPropagation()}>
           <div class="palette-header">
-            <span class="palette-prompt">✨</span>
+            <span class="palette-prompt">
+              <IconSparkles size={14} />
+            </span>
             <input
               ref={inputRef}
               class="palette-input"
@@ -185,7 +188,7 @@ export default function CommandPalette(props: Props) {
           <Show when={stage() === "streaming"}>
             <div class="palette-response streaming">
               <code>{cleanResponse(response()) || "…"}</code>
-              <span class="ai-cursor">▌</span>
+              <span class="ai-cursor" />
             </div>
             <div class="palette-footer">
               <button class="palette-btn ghost" onClick={cancelStreaming}>

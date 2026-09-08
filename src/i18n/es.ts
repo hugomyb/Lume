@@ -60,9 +60,9 @@ export const es: Dict = {
   "general.exportImport": "Exportar / importar toda la configuración",
   "general.export": "Exportar",
   "general.import": "Importar",
-  "general.exported": "Ajustes exportados ✓",
+  "general.exported": "Ajustes exportados",
   "general.exportFailed": "Error al exportar",
-  "general.imported": "Ajustes importados ✓",
+  "general.imported": "Ajustes importados",
   "general.importFailed": "Archivo no válido",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const es: Dict = {
   "about.updates": "Actualizaciones",
   "about.check": "Comprobar",
   "about.checking": "Comprobando…",
-  "about.uptodate": "Lume está actualizado ✓",
+  "about.uptodate": "Lume está actualizado",
   "about.checkError": "No se pudo comprobar (sin conexión o sin versión).",
   "about.available": "<strong>Lume {version}</strong> está disponible.",
   "about.installRestart": "Instalar y reiniciar",
@@ -103,21 +103,21 @@ export const es: Dict = {
     "La terminal activa se mantiene en la primera posición. Los demás shells de la pestaña se cierran.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ Copiar (Ctrl+Shift+C)",
-  "pane.paste": "⎘ Pegar (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ Dividir horizontalmente",
-  "pane.splitV": "⬍ Dividir verticalmente",
-  "pane.remote": "⇆ Controlar a distancia",
-  "pane.newTab": "+ Nueva pestaña",
-  "pane.close": "× Cerrar este panel",
+  "pane.copy": "Copiar (Ctrl+Shift+C)",
+  "pane.paste": "Pegar (Ctrl+Shift+V)",
+  "pane.splitH": "Dividir horizontalmente",
+  "pane.splitV": "Dividir verticalmente",
+  "pane.remote": "Controlar a distancia",
+  "pane.newTab": "Nueva pestaña",
+  "pane.close": "Cerrar este panel",
   "pane.closeTab": " (cierra la pestaña)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ Renombrar (doble clic)",
-  "tab.splitH": "⬌ Dividir horizontalmente (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ Dividir verticalmente (Ctrl+Shift+E)",
-  "tab.newTab": "+ Nueva pestaña (Ctrl+Shift+T)",
-  "tab.close": "× Cerrar esta pestaña",
+  "tab.rename": "Renombrar (doble clic)",
+  "tab.splitH": "Dividir horizontalmente (Ctrl+Shift+D)",
+  "tab.splitV": "Dividir verticalmente (Ctrl+Shift+E)",
+  "tab.newTab": "Nueva pestaña (Ctrl+Shift+T)",
+  "tab.close": "Cerrar esta pestaña",
   "tab.panes": " ({n} paneles)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const es: Dict = {
   "remote.copy": "Copiar",
   "remote.installHint":
     "Instala <code>cloudflared</code> para controlar fuera de la red local.",
-  "remote.warn": "⚠️ Cualquiera con este enlace puede manejar esta terminal.",
+  "remote.warn": "Cualquiera con este enlace puede manejar esta terminal.",
   "remote.installBtn": "Instalar y activar el túnel",
   "remote.installing": "Instalando…",
   "remote.stop": "Detener el control remoto",
@@ -190,8 +190,8 @@ export const es: Dict = {
   "term.copyBlock": "Copiar el comando + su salida",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ Comando finalizado",
-  "notif.cmdFailed": "✗ Fallido (salida {code})",
+  "notif.cmdDone": "Comando finalizado",
+  "notif.cmdFailed": "Fallido (salida {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "Aquí tienes un bloque de terminal:",
@@ -270,8 +270,8 @@ export const es: Dict = {
   "blocks.promptNotTracked": "(línea del prompt no rastreada)",
   "blocks.rightClickActions": "Clic derecho → copiar, insertar, explicar…",
   "blocks.promptNoCommand": "(prompt sin comando)",
-  "blocks.outputCopied": "Salida copiada ✓",
-  "blocks.commandCopied": "Comando copiado ✓",
+  "blocks.outputCopied": "Salida copiada",
+  "blocks.commandCopied": "Comando copiado",
   "blocks.outputCaptured": "Salida capturada — Shift+Clic para copiarla",
   "blocks.aiNoCli": "No se encontró el CLI de {provider} en el PATH",
   "blocks.aiBlockNotDone": "El bloque debe estar finalizado",
@@ -281,7 +281,7 @@ export const es: Dict = {
   "blocks.aiExplainBlock": "Explicar este bloque con {provider}",
   "blocks.insertTerminal": "Insertar en la terminal",
   "blocks.gotoCommand": "Ir al comando en la terminal",
-  "blocks.explainClaude": "✨ Explicar con {provider}",
+  "blocks.explainClaude": "Explicar con {provider}",
   "blocks.closeAiPanel": "Cerrar el panel de {provider}",
   "blocks.removeBlock": "Eliminar este bloque",
 
@@ -334,8 +334,8 @@ export const es: Dict = {
   "ai.model": "Modelo",
   "ai.modelHint": "predeterminado",
   "ai.status": "Estado",
-  "ai.detected": "✓ {cmd} detectado",
-  "ai.notFound": "✗ {cmd} no se encontró en PATH",
+  "ai.detected": "{cmd} detectado",
+  "ai.notFound": "{cmd} no se encontró en PATH",
   "ai.recheck": "Volver a comprobar",
   "ai.apiKey": "Clave de API",
   "ai.command": "Comando",
@@ -347,8 +347,8 @@ export const es: Dict = {
   "ai.keysNote": "Las claves de API se almacenan localmente en <code>~/.config/lume/config.toml</code> y se excluyen de la exportación de ajustes.",
   "ai.customApi": "API compatible con OpenAI",
   "ai.baseUrl": "URL base",
-  "ai.configured": "✓ configurado",
-  "ai.missingKey": "✗ se requiere clave de API",
+  "ai.configured": "configurado",
+  "ai.missingKey": "se requiere clave de API",
   "ai.openaiNote": "Usa la API de OpenAI. Crea una clave en <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Usa la API de DeepSeek (compatible con OpenAI). Clave en <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Cualquier endpoint compatible con OpenAI (Ollama, Groq, OpenRouter…). Define la URL base, la clave y el modelo.",

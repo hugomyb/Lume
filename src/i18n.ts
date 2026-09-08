@@ -101,9 +101,9 @@ const en: Dict = {
   "general.exportImport": "Export / import the whole config",
   "general.export": "Export",
   "general.import": "Import",
-  "general.exported": "Settings exported ✓",
+  "general.exported": "Settings exported",
   "general.exportFailed": "Export failed",
-  "general.imported": "Settings imported ✓",
+  "general.imported": "Settings imported",
   "general.importFailed": "Invalid file",
 
   // --- AI provider ---
@@ -112,8 +112,8 @@ const en: Dict = {
   "ai.model": "Model",
   "ai.modelHint": "default",
   "ai.status": "Status",
-  "ai.detected": "✓ {cmd} detected",
-  "ai.notFound": "✗ {cmd} not found in PATH",
+  "ai.detected": "{cmd} detected",
+  "ai.notFound": "{cmd} not found in PATH",
   "ai.recheck": "Re-check",
   "ai.apiKey": "API key",
   "ai.command": "Command",
@@ -129,8 +129,8 @@ const en: Dict = {
     "API keys are stored locally in <code>~/.config/lume/config.toml</code> and are excluded from the settings export.",
   "ai.customApi": "OpenAI-compatible API",
   "ai.baseUrl": "Base URL",
-  "ai.configured": "✓ configured",
-  "ai.missingKey": "✗ API key required",
+  "ai.configured": "configured",
+  "ai.missingKey": "API key required",
   "ai.openaiNote":
     "Uses the OpenAI API. Create a key at <code>platform.openai.com</code>.",
   "ai.deepseekNote":
@@ -143,7 +143,7 @@ const en: Dict = {
   "about.updates": "Updates",
   "about.check": "Check",
   "about.checking": "Checking…",
-  "about.uptodate": "Lume is up to date ✓",
+  "about.uptodate": "Lume is up to date",
   "about.checkError": "Couldn't check (offline, or no release).",
   "about.available": "<strong>Lume {version}</strong> is available.",
   "about.installRestart": "Install and restart",
@@ -176,21 +176,21 @@ const en: Dict = {
     "The active terminal is kept in the first slot. The tab's other shells are closed.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ Copy (Ctrl+Shift+C)",
-  "pane.paste": "⎘ Paste (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ Split horizontally",
-  "pane.splitV": "⬍ Split vertically",
-  "pane.remote": "⇆ Control remotely",
-  "pane.newTab": "+ New tab",
-  "pane.close": "× Close this pane",
+  "pane.copy": "Copy (Ctrl+Shift+C)",
+  "pane.paste": "Paste (Ctrl+Shift+V)",
+  "pane.splitH": "Split horizontally",
+  "pane.splitV": "Split vertically",
+  "pane.remote": "Control remotely",
+  "pane.newTab": "New tab",
+  "pane.close": "Close this pane",
   "pane.closeTab": " (closes the tab)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ Rename (double-click)",
-  "tab.splitH": "⬌ Split horizontally (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ Split vertically (Ctrl+Shift+E)",
-  "tab.newTab": "+ New tab (Ctrl+Shift+T)",
-  "tab.close": "× Close this tab",
+  "tab.rename": "Rename (double-click)",
+  "tab.splitH": "Split horizontally (Ctrl+Shift+D)",
+  "tab.splitV": "Split vertically (Ctrl+Shift+E)",
+  "tab.newTab": "New tab (Ctrl+Shift+T)",
+  "tab.close": "Close this tab",
   "tab.panes": " ({n} panes)",
 
   // --- File tree ---
@@ -237,7 +237,7 @@ const en: Dict = {
   "remote.copy": "Copy",
   "remote.installHint":
     "Install <code>cloudflared</code> to control from outside the local network.",
-  "remote.warn": "⚠️ Anyone with this link can drive this terminal.",
+  "remote.warn": "Anyone with this link can drive this terminal.",
   "remote.installBtn": "Install and enable the tunnel",
   "remote.installing": "Installing…",
   "remote.stop": "Stop remote control",
@@ -265,8 +265,8 @@ const en: Dict = {
   "term.copyBlock": "Copy the command + its output",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ Command finished",
-  "notif.cmdFailed": "✗ Failed (exit {code})",
+  "notif.cmdDone": "Command finished",
+  "notif.cmdFailed": "Failed (exit {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "Here is a terminal block:",
@@ -367,8 +367,8 @@ const en: Dict = {
   "blocks.promptNotTracked": "(prompt line not tracked)",
   "blocks.rightClickActions": "Right-click → copy, insert, explain…",
   "blocks.promptNoCommand": "(prompt without command)",
-  "blocks.outputCopied": "Output copied ✓",
-  "blocks.commandCopied": "Command copied ✓",
+  "blocks.outputCopied": "Output copied",
+  "blocks.commandCopied": "Command copied",
   "blocks.outputCaptured": "Output captured — Shift+Click to copy it",
   "blocks.aiNoCli": "{provider} CLI not found in PATH",
   "blocks.aiBlockNotDone": "The block must be finished",
@@ -378,7 +378,7 @@ const en: Dict = {
   "blocks.aiExplainBlock": "Explain this block with {provider}",
   "blocks.insertTerminal": "Insert into the terminal",
   "blocks.gotoCommand": "Go to the command in the terminal",
-  "blocks.explainClaude": "✨ Explain with {provider}",
+  "blocks.explainClaude": "Explain with {provider}",
   "blocks.closeAiPanel": "Close the {provider} panel",
   "blocks.removeBlock": "Remove this block",
 
@@ -483,9 +483,9 @@ const fr: Dict = {
   "general.exportImport": "Exporter / importer toute la config",
   "general.export": "Exporter",
   "general.import": "Importer",
-  "general.exported": "Réglages exportés ✓",
+  "general.exported": "Réglages exportés",
   "general.exportFailed": "Échec de l'export",
-  "general.imported": "Réglages importés ✓",
+  "general.imported": "Réglages importés",
   "general.importFailed": "Fichier invalide",
 
   // --- AI provider ---
@@ -494,8 +494,8 @@ const fr: Dict = {
   "ai.model": "Modèle",
   "ai.modelHint": "par défaut",
   "ai.status": "État",
-  "ai.detected": "✓ {cmd} détecté",
-  "ai.notFound": "✗ {cmd} introuvable dans le PATH",
+  "ai.detected": "{cmd} détecté",
+  "ai.notFound": "{cmd} introuvable dans le PATH",
   "ai.recheck": "Revérifier",
   "ai.apiKey": "Clé API",
   "ai.command": "Commande",
@@ -511,8 +511,8 @@ const fr: Dict = {
     "Les clés API sont stockées localement dans <code>~/.config/lume/config.toml</code> et exclues de l'export des réglages.",
   "ai.customApi": "API compatible OpenAI",
   "ai.baseUrl": "URL de base",
-  "ai.configured": "✓ configuré",
-  "ai.missingKey": "✗ clé API requise",
+  "ai.configured": "configuré",
+  "ai.missingKey": "clé API requise",
   "ai.openaiNote":
     "Utilise l'API OpenAI. Crée une clé sur <code>platform.openai.com</code>.",
   "ai.deepseekNote":
@@ -524,7 +524,7 @@ const fr: Dict = {
   "about.updates": "Mises à jour",
   "about.check": "Vérifier",
   "about.checking": "Vérification…",
-  "about.uptodate": "Lume est à jour ✓",
+  "about.uptodate": "Lume est à jour",
   "about.checkError": "Impossible de vérifier (hors-ligne, ou pas de release).",
   "about.available": "<strong>Lume {version}</strong> est disponible.",
   "about.installRestart": "Installer et redémarrer",
@@ -554,20 +554,20 @@ const fr: Dict = {
   "layouts.note":
     "Le terminal actif est conservé en premier slot. Les autres shells du tab sont fermés.",
 
-  "pane.copy": "⧉ Copier (Ctrl+Shift+C)",
-  "pane.paste": "⎘ Coller (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ Split horizontal",
-  "pane.splitV": "⬍ Split vertical",
-  "pane.remote": "⇆ Contrôler à distance",
-  "pane.newTab": "+ Nouveau tab",
-  "pane.close": "× Fermer ce pane",
+  "pane.copy": "Copier (Ctrl+Shift+C)",
+  "pane.paste": "Coller (Ctrl+Shift+V)",
+  "pane.splitH": "Split horizontal",
+  "pane.splitV": "Split vertical",
+  "pane.remote": "Contrôler à distance",
+  "pane.newTab": "Nouveau tab",
+  "pane.close": "Fermer ce pane",
   "pane.closeTab": " (ferme le tab)",
 
-  "tab.rename": "✎ Renommer (double-clic)",
-  "tab.splitH": "⬌ Split horizontal (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ Split vertical (Ctrl+Shift+E)",
-  "tab.newTab": "+ Nouveau tab (Ctrl+Shift+T)",
-  "tab.close": "× Fermer ce tab",
+  "tab.rename": "Renommer (double-clic)",
+  "tab.splitH": "Split horizontal (Ctrl+Shift+D)",
+  "tab.splitV": "Split vertical (Ctrl+Shift+E)",
+  "tab.newTab": "Nouveau tab (Ctrl+Shift+T)",
+  "tab.close": "Fermer ce tab",
   "tab.panes": " ({n} panes)",
 
   "ft.hidden": "Fichiers cachés",
@@ -611,7 +611,7 @@ const fr: Dict = {
   "remote.copy": "Copier",
   "remote.installHint":
     "Installe <code>cloudflared</code> pour piloter hors du réseau local.",
-  "remote.warn": "⚠️ Quiconque a ce lien peut piloter ce terminal.",
+  "remote.warn": "Quiconque a ce lien peut piloter ce terminal.",
   "remote.installBtn": "Installer et activer le tunnel",
   "remote.installing": "Installation en cours…",
   "remote.stop": "Arrêter le contrôle à distance",
@@ -637,8 +637,8 @@ const fr: Dict = {
   "term.copyBlock": "Copier la commande + sa sortie",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ Commande terminée",
-  "notif.cmdFailed": "✗ Échec (exit {code})",
+  "notif.cmdDone": "Commande terminée",
+  "notif.cmdFailed": "Échec (exit {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "Voici un bloc de terminal :",
@@ -740,8 +740,8 @@ const fr: Dict = {
   "blocks.promptNotTracked": "(ligne du prompt non trackée)",
   "blocks.rightClickActions": "Right-click → copier, insérer, expliquer…",
   "blocks.promptNoCommand": "(prompt sans commande)",
-  "blocks.outputCopied": "Sortie copiée ✓",
-  "blocks.commandCopied": "Commande copiée ✓",
+  "blocks.outputCopied": "Sortie copiée",
+  "blocks.commandCopied": "Commande copiée",
   "blocks.outputCaptured": "Sortie capturée — Shift+Click pour la copier",
   "blocks.aiNoCli": "CLI {provider} introuvable dans le PATH",
   "blocks.aiBlockNotDone": "Le bloc doit être terminé",
@@ -751,7 +751,7 @@ const fr: Dict = {
   "blocks.aiExplainBlock": "Expliquer ce bloc avec {provider}",
   "blocks.insertTerminal": "Insérer dans le terminal",
   "blocks.gotoCommand": "Aller à la commande dans le terminal",
-  "blocks.explainClaude": "✨ Expliquer avec {provider}",
+  "blocks.explainClaude": "Expliquer avec {provider}",
   "blocks.closeAiPanel": "Fermer le panneau {provider}",
   "blocks.removeBlock": "Supprimer ce bloc",
 

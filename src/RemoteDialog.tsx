@@ -1,6 +1,7 @@
 import { createEffect, createSignal, Show } from "solid-js";
 import QRCode from "qrcode";
 import { copyText } from "./clipboard";
+import { IconWarning, IconX } from "./icons";
 import type { RemoteInfo } from "./remote";
 import { t } from "./i18n";
 
@@ -47,7 +48,7 @@ export default function RemoteDialog(props: {
           <div class="remote-head">
             <span class="remote-title">{t("remote.title")}</span>
             <button class="remote-x" onClick={() => props.onClose()}>
-              ×
+              <IconX size={14} />
             </button>
           </div>
 
@@ -112,7 +113,9 @@ export default function RemoteDialog(props: {
 
           <div class="remote-spacer" />
 
-          <p class="remote-warn">{t("remote.warn")}</p>
+          <p class="remote-warn">
+            <IconWarning size={13} /> {t("remote.warn")}
+          </p>
           <button class="remote-stop" onClick={() => props.onStop()}>
             {t("remote.stop")}
           </button>

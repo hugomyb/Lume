@@ -60,9 +60,9 @@ export const ko: Dict = {
   "general.exportImport": "전체 구성 내보내기 / 가져오기",
   "general.export": "내보내기",
   "general.import": "가져오기",
-  "general.exported": "설정을 내보냈습니다 ✓",
+  "general.exported": "설정을 내보냈습니다",
   "general.exportFailed": "내보내기 실패",
-  "general.imported": "설정을 가져왔습니다 ✓",
+  "general.imported": "설정을 가져왔습니다",
   "general.importFailed": "잘못된 파일",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const ko: Dict = {
   "about.updates": "업데이트",
   "about.check": "확인",
   "about.checking": "확인 중…",
-  "about.uptodate": "Lume이 최신 버전입니다 ✓",
+  "about.uptodate": "Lume이 최신 버전입니다",
   "about.checkError": "확인할 수 없습니다 (오프라인이거나 릴리스가 없습니다).",
   "about.available": "<strong>Lume {version}</strong>을(를) 사용할 수 있습니다.",
   "about.installRestart": "설치 후 다시 시작",
@@ -103,21 +103,21 @@ export const ko: Dict = {
     "활성 터미널은 첫 번째 슬롯에 유지됩니다. 탭의 다른 셸은 닫힙니다.",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ 복사 (Ctrl+Shift+C)",
-  "pane.paste": "⎘ 붙여넣기 (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ 가로로 분할",
-  "pane.splitV": "⬍ 세로로 분할",
-  "pane.remote": "⇆ 원격으로 제어",
-  "pane.newTab": "+ 새 탭",
-  "pane.close": "× 이 창 닫기",
+  "pane.copy": "복사 (Ctrl+Shift+C)",
+  "pane.paste": "붙여넣기 (Ctrl+Shift+V)",
+  "pane.splitH": "가로로 분할",
+  "pane.splitV": "세로로 분할",
+  "pane.remote": "원격으로 제어",
+  "pane.newTab": "새 탭",
+  "pane.close": "이 창 닫기",
   "pane.closeTab": " (탭을 닫습니다)",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ 이름 변경 (더블 클릭)",
-  "tab.splitH": "⬌ 가로로 분할 (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ 세로로 분할 (Ctrl+Shift+E)",
-  "tab.newTab": "+ 새 탭 (Ctrl+Shift+T)",
-  "tab.close": "× 이 탭 닫기",
+  "tab.rename": "이름 변경 (더블 클릭)",
+  "tab.splitH": "가로로 분할 (Ctrl+Shift+D)",
+  "tab.splitV": "세로로 분할 (Ctrl+Shift+E)",
+  "tab.newTab": "새 탭 (Ctrl+Shift+T)",
+  "tab.close": "이 탭 닫기",
   "tab.panes": " ({n}개 창)",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const ko: Dict = {
   "remote.copy": "복사",
   "remote.installHint":
     "로컬 네트워크 외부에서 제어하려면 <code>cloudflared</code>를 설치하세요.",
-  "remote.warn": "⚠️ 이 링크가 있는 사람은 누구나 이 터미널을 조작할 수 있습니다.",
+  "remote.warn": "이 링크가 있는 사람은 누구나 이 터미널을 조작할 수 있습니다.",
   "remote.installBtn": "터널 설치 및 활성화",
   "remote.installing": "설치 중…",
   "remote.stop": "원격 제어 중지",
@@ -190,8 +190,8 @@ export const ko: Dict = {
   "term.copyBlock": "명령 + 출력 복사",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ 명령 완료",
-  "notif.cmdFailed": "✗ 실패 (종료 {code})",
+  "notif.cmdDone": "명령 완료",
+  "notif.cmdFailed": "실패 (종료 {code})",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "다음은 터미널 블록입니다:",
@@ -270,8 +270,8 @@ export const ko: Dict = {
   "blocks.promptNotTracked": "(프롬프트 줄이 추적되지 않음)",
   "blocks.rightClickActions": "오른쪽 클릭 → 복사, 삽입, 설명…",
   "blocks.promptNoCommand": "(명령 없는 프롬프트)",
-  "blocks.outputCopied": "출력이 복사되었습니다 ✓",
-  "blocks.commandCopied": "명령이 복사되었습니다 ✓",
+  "blocks.outputCopied": "출력이 복사되었습니다",
+  "blocks.commandCopied": "명령이 복사되었습니다",
   "blocks.outputCaptured": "출력이 캡처되었습니다 — 복사하려면 Shift+Click",
   "blocks.aiNoCli": "PATH에서 {provider} CLI를 찾을 수 없습니다",
   "blocks.aiBlockNotDone": "블록이 완료되어야 합니다",
@@ -281,7 +281,7 @@ export const ko: Dict = {
   "blocks.aiExplainBlock": "{provider}으로 이 블록 설명하기",
   "blocks.insertTerminal": "터미널에 삽입",
   "blocks.gotoCommand": "터미널의 명령으로 이동",
-  "blocks.explainClaude": "✨ {provider}으로 설명",
+  "blocks.explainClaude": "{provider}으로 설명",
   "blocks.closeAiPanel": "{provider} 패널 닫기",
   "blocks.removeBlock": "이 블록 제거",
 
@@ -334,8 +334,8 @@ export const ko: Dict = {
   "ai.model": "모델",
   "ai.modelHint": "기본값",
   "ai.status": "상태",
-  "ai.detected": "✓ {cmd} 감지됨",
-  "ai.notFound": "✗ PATH에서 {cmd}를 찾을 수 없음",
+  "ai.detected": "{cmd} 감지됨",
+  "ai.notFound": "PATH에서 {cmd}를 찾을 수 없음",
   "ai.recheck": "다시 확인",
   "ai.apiKey": "API 키",
   "ai.command": "명령",
@@ -347,8 +347,8 @@ export const ko: Dict = {
   "ai.keysNote": "API 키는 <code>~/.config/lume/config.toml</code>에 로컬로 저장되며 설정 내보내기에서 제외됩니다.",
   "ai.customApi": "OpenAI 호환 API",
   "ai.baseUrl": "기본 URL",
-  "ai.configured": "✓ 구성됨",
-  "ai.missingKey": "✗ API 키가 필요합니다",
+  "ai.configured": "구성됨",
+  "ai.missingKey": "API 키가 필요합니다",
   "ai.openaiNote": "OpenAI API를 사용합니다. <code>platform.openai.com</code>에서 키를 생성하세요.",
   "ai.deepseekNote": "DeepSeek API를 사용합니다(OpenAI 호환). 키는 <code>platform.deepseek.com</code>에서 발급받으세요.",
   "ai.apiNote": "모든 OpenAI 호환 엔드포인트(Ollama, Groq, OpenRouter…). 기본 URL, 키, 모델을 설정하세요.",

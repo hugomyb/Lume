@@ -60,9 +60,9 @@ export const zh: Dict = {
   "general.exportImport": "导出 / 导入整个配置",
   "general.export": "导出",
   "general.import": "导入",
-  "general.exported": "设置已导出 ✓",
+  "general.exported": "设置已导出",
   "general.exportFailed": "导出失败",
-  "general.imported": "设置已导入 ✓",
+  "general.imported": "设置已导入",
   "general.importFailed": "文件无效",
 
   // --- About ---
@@ -70,7 +70,7 @@ export const zh: Dict = {
   "about.updates": "更新",
   "about.check": "检查",
   "about.checking": "正在检查…",
-  "about.uptodate": "Lume 已是最新版本 ✓",
+  "about.uptodate": "Lume 已是最新版本",
   "about.checkError": "无法检查（离线，或没有可用版本）。",
   "about.available": "<strong>Lume {version}</strong> 现已可用。",
   "about.installRestart": "安装并重启",
@@ -103,21 +103,21 @@ export const zh: Dict = {
     "活动终端保留在第一个位置。该标签页的其他 shell 将被关闭。",
 
   // --- Pane context menu ---
-  "pane.copy": "⧉ 复制 (Ctrl+Shift+C)",
-  "pane.paste": "⎘ 粘贴 (Ctrl+Shift+V)",
-  "pane.splitH": "⬌ 水平拆分",
-  "pane.splitV": "⬍ 垂直拆分",
-  "pane.remote": "⇆ 远程控制",
-  "pane.newTab": "+ 新建标签页",
-  "pane.close": "× 关闭此窗格",
+  "pane.copy": "复制 (Ctrl+Shift+C)",
+  "pane.paste": "粘贴 (Ctrl+Shift+V)",
+  "pane.splitH": "水平拆分",
+  "pane.splitV": "垂直拆分",
+  "pane.remote": "远程控制",
+  "pane.newTab": "新建标签页",
+  "pane.close": "关闭此窗格",
   "pane.closeTab": "（关闭标签页）",
 
   // --- Tab context menu ---
-  "tab.rename": "✎ 重命名（双击）",
-  "tab.splitH": "⬌ 水平拆分 (Ctrl+Shift+D)",
-  "tab.splitV": "⬍ 垂直拆分 (Ctrl+Shift+E)",
-  "tab.newTab": "+ 新建标签页 (Ctrl+Shift+T)",
-  "tab.close": "× 关闭此标签页",
+  "tab.rename": "重命名（双击）",
+  "tab.splitH": "水平拆分 (Ctrl+Shift+D)",
+  "tab.splitV": "垂直拆分 (Ctrl+Shift+E)",
+  "tab.newTab": "新建标签页 (Ctrl+Shift+T)",
+  "tab.close": "关闭此标签页",
   "tab.panes": " （{n} 个窗格）",
 
   // --- File tree ---
@@ -162,7 +162,7 @@ export const zh: Dict = {
   "remote.copy": "复制",
   "remote.installHint":
     "安装 <code>cloudflared</code> 即可从局域网外进行控制。",
-  "remote.warn": "⚠️ 任何拥有此链接的人都能操控此终端。",
+  "remote.warn": "任何拥有此链接的人都能操控此终端。",
   "remote.installBtn": "安装并启用隧道",
   "remote.installing": "正在安装…",
   "remote.stop": "停止远程控制",
@@ -190,8 +190,8 @@ export const zh: Dict = {
   "term.copyBlock": "复制命令及其输出",
 
   // --- Notifications (banner bodies) ---
-  "notif.cmdDone": "✓ 命令已完成",
-  "notif.cmdFailed": "✗ 失败（退出码 {code}）",
+  "notif.cmdDone": "命令已完成",
+  "notif.cmdFailed": "失败（退出码 {code}）",
 
   // --- AI explain seed prompt ---
   "ai.seedHeader": "这是一个终端区块：",
@@ -270,8 +270,8 @@ export const zh: Dict = {
   "blocks.promptNotTracked": "（提示符行未跟踪）",
   "blocks.rightClickActions": "右键单击 → 复制、插入、解释…",
   "blocks.promptNoCommand": "（提示符无命令）",
-  "blocks.outputCopied": "输出已复制 ✓",
-  "blocks.commandCopied": "命令已复制 ✓",
+  "blocks.outputCopied": "输出已复制",
+  "blocks.commandCopied": "命令已复制",
   "blocks.outputCaptured": "输出已捕获 — Shift+单击 即可复制",
   "blocks.aiNoCli": "在 PATH 中未找到 {provider} CLI",
   "blocks.aiBlockNotDone": "区块必须已完成",
@@ -281,7 +281,7 @@ export const zh: Dict = {
   "blocks.aiExplainBlock": "用 {provider} 解释此区块",
   "blocks.insertTerminal": "插入到终端",
   "blocks.gotoCommand": "跳转到终端中的命令",
-  "blocks.explainClaude": "✨ 用 {provider} 解释",
+  "blocks.explainClaude": "用 {provider} 解释",
   "blocks.closeAiPanel": "关闭 {provider} 面板",
   "blocks.removeBlock": "移除此区块",
 
@@ -334,8 +334,8 @@ export const zh: Dict = {
   "ai.model": "模型",
   "ai.modelHint": "默认",
   "ai.status": "状态",
-  "ai.detected": "✓ 已检测到 {cmd}",
-  "ai.notFound": "✗ 在 PATH 中未找到 {cmd}",
+  "ai.detected": "已检测到 {cmd}",
+  "ai.notFound": "在 PATH 中未找到 {cmd}",
   "ai.recheck": "重新检测",
   "ai.apiKey": "API 密钥",
   "ai.command": "命令",
@@ -347,8 +347,8 @@ export const zh: Dict = {
   "ai.keysNote": "API 密钥存储在本地的 <code>~/.config/lume/config.toml</code> 中，并从设置导出中排除。",
   "ai.customApi": "OpenAI 兼容 API",
   "ai.baseUrl": "基础 URL",
-  "ai.configured": "✓ 已配置",
-  "ai.missingKey": "✗ 需要 API 密钥",
+  "ai.configured": "已配置",
+  "ai.missingKey": "需要 API 密钥",
   "ai.openaiNote": "使用 OpenAI API。在 <code>platform.openai.com</code> 上创建密钥。",
   "ai.deepseekNote": "使用 DeepSeek API（OpenAI 兼容）。密钥在 <code>platform.deepseek.com</code>。",
   "ai.apiNote": "任何 OpenAI 兼容的端点（Ollama、Groq、OpenRouter…）。设置基础 URL、密钥和模型。",

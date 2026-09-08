@@ -777,6 +777,16 @@ body,
   content: "Copier";
 }
 
+/* Copy / check icons both live in the button; .copied flips which one shows. */
+.lume-block-copy .i-check,
+.lume-block-copy.copied .i-copy {
+  display: none;
+}
+
+.lume-block-copy.copied .i-check {
+  display: block;
+}
+
 .lume-block-copy:hover {
   opacity: 1;
   background: var(--accent);
@@ -792,7 +802,7 @@ body,
 }
 
 .lume-block-copy.copied::after {
-  content: "Copié ✓";
+  content: "Copié";
 }
 
 .lume-block-flash {
@@ -1319,7 +1329,9 @@ body,
 }
 
 .ctx-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -1330,6 +1342,19 @@ body,
   cursor: pointer;
   border-radius: 4px;
   font-family: inherit;
+}
+
+/* Leading icon of a menu row: dimmer than the label, and a fixed box so
+   every label starts on the same x whatever the glyph inside. */
+.ctx-item > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  opacity: 0.75;
+}
+
+.ctx-item.danger > svg {
+  opacity: 1;
 }
 
 .ctx-item:hover:not(:disabled) {
@@ -1355,6 +1380,30 @@ body,
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+/* Icon-only controls: these used to hold a text glyph, so their boxes are
+   sized by font-size/line-height. An inline <svg> would sit on the (now
+   empty) text baseline and hang below it — centre it in the box instead. */
+.tab-close,
+.tab-new,
+.remote-x,
+.blocks-search-close,
+.block-ai-dismiss,
+.block-ai-followup-send,
+.copy-btn,
+.wf-item-action,
+.blocks-search-icon,
+.palette-prompt,
+.ssh-item-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* …except when the action is showing its confirmation label instead. */
+.wf-item-action {
+  gap: 4px;
 }
 
 .blocks-panel-header {
@@ -1979,9 +2028,14 @@ body,
 }
 
 .ai-cursor {
+  /* Drawn, not typed: a U+258C block glyph renders at a different width in
+     every font (and is plain missing from some), so the caret is a box. */
   display: inline-block;
+  width: 0.5em;
+  height: 1em;
   margin-left: 2px;
-  color: var(--accent);
+  vertical-align: -0.15em;
+  background: var(--accent);
   animation: blink 1s steps(2, end) infinite;
 }
 
@@ -2888,6 +2942,12 @@ select.settings-input optgroup {
   color: var(--fg-dim);
   font-size: 12.5px;
   font-family: ui-monospace, monospace;
+}
+/* Status icons sit on the text baseline instead of the line box. */
+.settings-value svg,
+.settings-note svg,
+.settings-import-btn svg {
+  vertical-align: -2px;
 }
 .settings-value.ai-ok {
   color: var(--green, #56d364);

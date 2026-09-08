@@ -14,6 +14,7 @@ import {
   saveWorkflow,
   type Workflow,
 } from "./workflows";
+import { IconPencil, IconWorkflow, IconX } from "./icons";
 import { t } from "./i18n";
 
 type Props = {
@@ -261,7 +262,9 @@ export default function WorkflowsPalette(props: Props) {
             fallback={
               <>
                 <div class="palette-header">
-                  <span class="palette-prompt">⚡</span>
+                  <span class="palette-prompt">
+                  <IconWorkflow size={14} />
+                </span>
                   <input
                     ref={searchRef}
                     class="palette-input"
@@ -319,7 +322,7 @@ export default function WorkflowsPalette(props: Props) {
                                 openEditor(w);
                               }}
                             >
-                              ✎
+                              <IconPencil size={12} />
                             </button>
                             <button
                               class="wf-item-action danger"
@@ -332,9 +335,11 @@ export default function WorkflowsPalette(props: Props) {
                                 void removeWorkflow(w);
                               }}
                             >
-                              {confirmDelete() === w.source
-                                ? t("wf.confirmDelete")
-                                : "✕"}
+                              {confirmDelete() === w.source ? (
+                                t("wf.confirmDelete")
+                              ) : (
+                                <IconX size={12} />
+                              )}
                             </button>
                           </div>
                         </div>

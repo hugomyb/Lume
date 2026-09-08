@@ -3,10 +3,23 @@ import {
   createResource,
   createSignal,
   For,
+  Match,
   onCleanup,
   Show,
+  Switch,
   type Accessor,
+  type JSX,
 } from "solid-js";
+import {
+  IconArrowRight,
+  IconCheck,
+  IconCopy,
+  IconPlay,
+  IconSearch,
+  IconSparkles,
+  IconStop,
+  IconX,
+} from "./icons";
 import type { Block } from "./blocks";
 import { stripAnsi } from "./blocks";
 import type { AiState } from "./ai";
@@ -57,7 +70,7 @@ function BlockAiPanel(props: {
             : props.provider}
         </span>
         <button class="block-ai-dismiss" title={t("blocks.aiClose")} onClick={props.onDismiss}>
-          ×
+          <IconX size={12} />
         </button>
       </div>
       <Show when={ai().status === "error"}>
@@ -103,7 +116,7 @@ function BlockAiPanel(props: {
             onClick={submit}
             title={t("blocks.send")}
           >
-            →
+            <IconArrowRight size={14} />
           </button>
         </div>
       </Show>
@@ -150,11 +163,21 @@ function formatCommand(cmd: string | null): string {
   return trimmed;
 }
 
-function formatExitCode(b: Block): string {
-  if (b.status === "pending") return "…";
-  if (b.status === "running") return "▶";
-  if (b.exitCode === 0) return "✓";
-  return String(b.exitCode ?? "?");
+/** Exit badge content: an icon for the two symbolic states (still running /
+ *  succeeded), the raw code for anything else. Switch, not plain ifs: the
+ *  block mutates in place as the command progresses. */
+function ExitCode(props: { b: Block }): JSX.Element {
+  return (
+    <Switch fallback={<>{String(props.b.exitCode ?? "?")}</>}>
+      <Match when={props.b.status === "pending"}>…</Match>
+      <Match when={props.b.status === "running"}>
+        <IconPlay size={10} />
+      </Match>
+      <Match when={props.b.exitCode === 0}>
+        <IconCheck size={12} />
+      </Match>
+    </Switch>
+  );
 }
 
 function formatDuration(b: Block): string | null {
@@ -214,7 +237,7 @@ function EmptyState(props: { active: () => boolean }) {
                 title={t("blocks.copy")}
                 onClick={() => copy(h().sourceLine)}
               >
-                {copied() ? "✓" : "⎘"}
+                {copied() ? <IconCheck size={13} /> : <IconCopy size={13} />}
               </button>
             </div>
             <p
@@ -247,13 +270,17 @@ function HelpPopover() {
           <p>{t("blocks.helpIntro")}</p>
           <ul>
             <li>
-              <span class="block-exit exit-ok">✓</span> {t("blocks.exitOk")}
+              <span class="block-exit exit-ok">
+                <IconCheck size={12} />
+              </span> {t("blocks.exitOk")}
             </li>
             <li>
               <span class="block-exit exit-err">1</span> {t("blocks.exitErr")}
             </li>
             <li>
-              <span class="block-exit exit-pending">▶</span> {t("blocks.exitRunning")}
+              <span class="block-exit exit-pending">
+                <IconPlay size={10} />
+              </span> {t("blocks.exitRunning")}
             </li>
           </ul>
           <p class="muted" innerHTML={t("blocks.helpKeys")} />
@@ -413,7 +440,9 @@ export default function BlocksPanel(props: Props) {
         />
         <Show when={props.searchOpen()}>
           <div class="blocks-search">
-            <span class="blocks-search-icon">⌕</span>
+            <span class="blocks-search-icon">
+              <IconSearch size={13} />
+            </span>
             <input
               ref={searchInputRef}
               class="blocks-search-input"
@@ -431,7 +460,7 @@ export default function BlocksPanel(props: Props) {
               title={t("blocks.searchClose")}
               onClick={() => props.onSearchClose()}
             >
-              ×
+              <IconX size={13} />
             </button>
           </div>
         </Show>
@@ -483,14 +512,19 @@ export default function BlocksPanel(props: Props) {
                   onContextMenu={(e) => openContextMenu(e, b.id)}
                 >
                   <span class={`block-exit ${exitClass(b)}`}>
-                    {formatExitCode(b)}
+                    <ExitCode b={b} />
                   </span>
                   <span class="block-command">
-                    {copiedId() === b.id
-                      ? copyKind() === "output"
-                        ? t("blocks.outputCopied")
-                        : t("blocks.commandCopied")
-                      : formatCommand(b.command)}
+                    {copiedId() === b.id ? (
+                      <>
+                        <IconCheck size={12} />{" "}
+                        {copyKind() === "output"
+                          ? t("blocks.outputCopied")
+                          : t("blocks.commandCopied")}
+                      </>
+                    ) : (
+                      formatCommand(b.command)
+                    )}
                   </span>
                   <Show when={b.output && b.status === "done"}>
                     <span
@@ -522,7 +556,11 @@ export default function BlocksPanel(props: Props) {
                       }
                     }}
                   >
-                    {b.ai?.status === "streaming" ? "■" : "✨"}
+                    {b.ai?.status === "streaming" ? (
+                      <IconStop size={11} />
+                    ) : (
+                      <IconSparkles size={13} />
+                    )}
                   </button>
                   <Show when={formatDuration(b)}>
                     {(d) => <span class="block-duration">{d()}</span>}
