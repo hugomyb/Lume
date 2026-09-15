@@ -47,3 +47,25 @@ export function b64ToString(b64: string): string {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
+
+/** Threshold above which decoding moves off the event handler: a captured
+ *  1 MiB build log means an atob + 1M-iteration loop right when the prompt
+ *  returns — a visible input hitch. (Requires `data:` in the CSP connect-src.) */
+const ASYNC_DECODE_MIN = 64 * 1024;
+
+export function isLargeB64(b64: string | null): b64 is string {
+  return !!b64 && b64.length >= ASYNC_DECODE_MIN;
+}
+
+/** Decode a LARGE base64 chunk asynchronously: a data: URL fetch does the
+ *  base64 work in the engine's loader instead of a JS loop on the main
+ *  thread. Falls back to the sync path if fetch is unavailable/blocked. */
+export async function b64ToStringAsync(b64: string): Promise<string> {
+  try {
+    const resp = await fetch(`data:application/octet-stream;base64,${b64}`);
+    const buf = await resp.arrayBuffer();
+    return new TextDecoder("utf-8", { fatal: false }).decode(buf);
+  } catch {
+    return b64ToString(b64);
+  }
+}

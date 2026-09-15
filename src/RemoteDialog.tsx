@@ -89,6 +89,11 @@ export default function RemoteDialog(props: {
                 {t("remote.copy")}
               </button>
             </div>
+            <Show when={!props.info()?.tunnelRequested}>
+              <p class="remote-warn">
+                <IconWarning size={13} /> {t("remote.lanClear")}
+              </p>
+            </Show>
           </Show>
 
           <Show

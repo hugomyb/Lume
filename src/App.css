@@ -226,14 +226,14 @@ body,
   font-size: 16px;
 }
 
+/* Deliberately muted and flush with the tab text: the previous accent pill
+   read as a separate (selected) tab in the tab bar. */
 .tab-panes-badge {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  background: rgba(var(--accent-rgb), 0.18);
-  color: var(--accent);
-  border-radius: 3px;
-  padding: 1px 5px;
-  margin-left: 2px;
+  color: var(--fg-dim);
+  margin-left: 4px;
+  white-space: nowrap;
 }
 
 /* --- Layouts popup --- */
@@ -748,6 +748,19 @@ body,
 .terminal-host {
   position: absolute;
   inset: 0;
+}
+
+/* Fish-style history ghost: dim continuation drawn after the cursor. Sits on
+   the terminal's own glyph grid (font/size/line-height set from JS), so it
+   must not wrap, be clickable, or outlive its row. */
+.lume-ghost {
+  position: absolute;
+  z-index: 21;
+  pointer-events: none;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--fg-dim);
+  opacity: 0.6;
 }
 
 .lume-block-copy {
@@ -1422,6 +1435,15 @@ body,
   font-weight: 600;
 }
 
+/* "· pane 2/3" next to the title when the tab is split: the panel follows the
+   focused pane, so say WHICH pane's history is being shown. */
+.blocks-pane-indicator {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg-dim);
+}
+
 .blocks-panel-actions {
   display: flex;
   align-items: center;
@@ -1569,6 +1591,36 @@ body,
   word-break: break-all;
   user-select: all;
   color: var(--fg);
+}
+
+.blocks-install-btn {
+  display: block;
+  margin: 2px 0 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  border-radius: 5px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.blocks-install-btn:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.2);
+}
+
+.blocks-install-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.blocks-install-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #56d364;
+  font-size: 12px;
+  margin: 2px 0 6px;
 }
 
 .copy-btn {

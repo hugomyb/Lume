@@ -61,7 +61,9 @@ function TreeRow(props: {
 
   const toggle = () => {
     if (!props.isDir) {
-      props.onInsert(props.path);
+      // Quoted like the context-menu "insert path": a raw path would let a
+      // hostile file name (spaces, quotes, embedded newlines) reach the shell.
+      props.onInsert(q(props.path) + " ");
       return;
     }
     const next = !open();

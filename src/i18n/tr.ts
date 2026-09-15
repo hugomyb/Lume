@@ -163,6 +163,7 @@ export const tr: Dict = {
   "remote.installHint":
     "Yerel ağ dışından kontrol etmek için <code>cloudflared</code> kurun.",
   "remote.warn": "Bu bağlantıya sahip herkes bu terminali kontrol edebilir.",
+  "remote.lanClear": "LAN bağlantısı şifrelenmemiş HTTP kullanır: güvenilmeyen bir ağda yazılan ve görüntülenen her şey ele geçirilebilir — İnternet tüneli tercih edin.",
   "remote.installBtn": "Tüneli kur ve etkinleştir",
   "remote.installing": "Kuruluyor…",
   "remote.stop": "Uzaktan kontrolü durdur",

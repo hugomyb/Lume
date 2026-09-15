@@ -64,9 +64,29 @@ impl OscParser {
     pub fn feed(&mut self, data: &[u8]) -> FeedResult {
         let mut passthrough = Vec::with_capacity(data.len());
         let mut events = Vec::new();
-        for &b in data {
+        let mut i = 0;
+        while i < data.len() {
+            // Hot path: 100% of the stream funnels through this parser, and
+            // the dominant case (builds, cat…) is long ESC-free spans — copy
+            // them in one memcpy instead of a per-byte state machine walk.
+            if let State::Idle = self.state {
+                match data[i..].iter().position(|&c| c == 0x1b) {
+                    Some(off) => {
+                        passthrough.extend_from_slice(&data[i..i + off]);
+                        self.state = State::SawEsc;
+                        i += off + 1;
+                    }
+                    None => {
+                        passthrough.extend_from_slice(&data[i..]);
+                        break;
+                    }
+                }
+                continue;
+            }
+            let b = data[i];
             match self.state {
                 State::Idle => {
+                    // Unreachable (handled above); kept as a safe fallback.
                     if b == 0x1b {
                         self.state = State::SawEsc;
                     } else {
@@ -110,18 +130,21 @@ impl OscParser {
                         self.buf.clear();
                         self.state = State::Idle;
                     } else {
+                        // Push BOTH bytes before the overflow check so the
+                        // current byte isn't lost when the flush triggers.
                         self.buf.push(0x1b);
+                        self.buf.push(b);
                         if self.buf.len() > MAX_OSC_LEN {
                             flush_runaway(&self.buf, &mut passthrough);
                             self.buf.clear();
                             self.state = State::Idle;
                         } else {
-                            self.buf.push(b);
                             self.state = State::InOsc;
                         }
                     }
                 }
             }
+            i += 1;
         }
         FeedResult {
             passthrough,
@@ -432,6 +455,21 @@ mod tests {
         // After runaway, parser should accept new sequences again
         let r2 = p.feed(b"\x1b]133;A\x07");
         assert_eq!(events_only(&r2), vec![OscEvent::PromptStart]);
+    }
+
+    #[test]
+    fn runaway_esc_overflow_keeps_current_byte() {
+        let mut p = OscParser::new();
+        let mut bytes = vec![0x1b, b']'];
+        // Fill the buffer to exactly MAX, then ESC + a non-backslash byte so
+        // the overflow triggers in the InOscSawEsc branch.
+        bytes.extend(std::iter::repeat(b'a').take(MAX_OSC_LEN));
+        bytes.push(0x1b);
+        bytes.push(b'x');
+        let r = p.feed(&bytes);
+        assert!(r.events.is_empty());
+        // The byte that triggered the flush must not be dropped.
+        assert!(r.passthrough.ends_with(b"\x1bx"));
     }
 
     #[test]

@@ -163,6 +163,7 @@ export const de: Dict = {
   "remote.installHint":
     "Installiere <code>cloudflared</code>, um außerhalb des lokalen Netzwerks zu steuern.",
   "remote.warn": "Jeder mit diesem Link kann dieses Terminal steuern.",
+  "remote.lanClear": "Der LAN-Link ist unverschlüsseltes HTTP: In einem nicht vertrauenswürdigen Netzwerk kann alles Eingegebene oder Angezeigte abgefangen werden — bevorzugen Sie den Internet-Tunnel.",
   "remote.installBtn": "Tunnel installieren und aktivieren",
   "remote.installing": "Wird installiert…",
   "remote.stop": "Fernsteuerung beenden",

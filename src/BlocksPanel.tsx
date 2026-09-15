@@ -23,10 +23,10 @@ import {
 import type { Block } from "./blocks";
 import { stripAnsi } from "./blocks";
 import type { AiState } from "./ai";
-import { getShellSetupHint } from "./shellSetup";
+import { getShellSetupHint, installShellIntegration } from "./shellSetup";
 import { copyText } from "./clipboard";
 import MarkdownRender from "./markdown";
-import { t } from "./i18n";
+import { t, tHtml } from "./i18n";
 
 function BlockAiPanel(props: {
   ai: Accessor<AiState>;
@@ -130,6 +130,10 @@ type Props = {
   /** True once OSC 133 markers have ever been seen — i.e. shell integration is
    *  working. Drives the empty state: setup instructions vs. a neutral hint. */
   integrationActive: () => boolean;
+  /** Position of the pane whose blocks are shown, when the tab is split —
+   *  the panel follows the FOCUSED pane, which surprises after a split
+   *  (fresh pane → empty panel while history sits in the neighbour). */
+  paneInfo?: () => { idx: number; total: number } | null;
   selectedBlockId: () => number | null;
   navMode: () => boolean;
   visible: () => boolean;
@@ -204,6 +208,11 @@ function EmptyState(props: { active: () => boolean }) {
     getShellSetupHint
   );
   const [copied, setCopied] = createSignal(false);
+  const [installing, setInstalling] = createSignal(false);
+  const [installed, setInstalled] = createSignal<"done" | "already" | null>(
+    null
+  );
+  const [installError, setInstallError] = createSignal("");
 
   const copy = async (line: string) => {
     try {
@@ -212,6 +221,19 @@ function EmptyState(props: { active: () => boolean }) {
       setTimeout(() => setCopied(false), 1500);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const install = async () => {
+    setInstalling(true);
+    setInstallError("");
+    try {
+      const r = await installShellIntegration();
+      setInstalled(r.already ? "already" : "done");
+    } catch (e) {
+      setInstallError(String(e));
+    } finally {
+      setInstalling(false);
     }
   };
 
@@ -240,9 +262,36 @@ function EmptyState(props: { active: () => boolean }) {
                 {copied() ? <IconCheck size={13} /> : <IconCopy size={13} />}
               </button>
             </div>
+            <Show when={h().shell !== "powershell"}>
+              <Show
+                when={installed() === null}
+                fallback={
+                  <p class="blocks-install-done">
+                    <IconCheck size={12} />{" "}
+                    {t(
+                      installed() === "done"
+                        ? "blocks.installDone"
+                        : "blocks.installAlready",
+                      { rc: h().rcFile }
+                    )}
+                  </p>
+                }
+              >
+                <button
+                  class="blocks-install-btn"
+                  disabled={installing()}
+                  onClick={install}
+                >
+                  {t("blocks.installAuto", { rc: h().rcFile })}
+                </button>
+                <Show when={installError()}>
+                  <p class="muted">{installError()}</p>
+                </Show>
+              </Show>
+            </Show>
             <p
               class="muted"
-              innerHTML={t("blocks.detected", {
+              innerHTML={tHtml("blocks.detected", {
                 shell: h().shell || t("blocks.shellUnknown"),
               })}
             />
@@ -256,6 +305,19 @@ function EmptyState(props: { active: () => boolean }) {
 
 function HelpPopover() {
   const [open, setOpen] = createSignal(false);
+  // Escape must close the popover (capture phase, before the app-level
+  // handlers grab the key for the terminal/panel).
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setOpen(false);
+    }
+  };
+  createEffect(() => {
+    if (open()) document.addEventListener("keydown", onKey, true);
+    else document.removeEventListener("keydown", onKey, true);
+  });
+  onCleanup(() => document.removeEventListener("keydown", onKey, true));
   return (
     <div class="help-popover-container">
       <button
@@ -465,7 +527,17 @@ export default function BlocksPanel(props: Props) {
           </div>
         </Show>
         <div class="blocks-panel-header">
-          <span class="blocks-panel-title">{t("blocks.title")}</span>
+          <span class="blocks-panel-title">
+            {t("blocks.title")}
+            <Show when={props.paneInfo?.()}>
+              {(p) => (
+                <span class="blocks-pane-indicator">
+                  {" · "}
+                  {t("blocks.pane", { n: p().idx, total: p().total })}
+                </span>
+              )}
+            </Show>
+          </span>
           <div class="blocks-panel-actions">
             <HelpPopover />
             <button
@@ -489,7 +561,18 @@ export default function BlocksPanel(props: Props) {
                   "has-ai": b.ai !== null,
                   "nav-selected": props.selectedBlockId() === b.id,
                 }}
-                ref={(el) => blockRefs.set(b.id, el)}
+                ref={(el) => {
+                  const id = b.id;
+                  blockRefs.set(id, el);
+                  // Purge on row disposal (block removed, cap eviction, leaf
+                  // switch) — the map would otherwise retain every detached
+                  // row subtree for the whole session. Guarded by identity:
+                  // ids restart at 0 per leaf, so a NEW row may have claimed
+                  // this id before the old row's cleanup runs.
+                  onCleanup(() => {
+                    if (blockRefs.get(id) === el) blockRefs.delete(id);
+                  });
+                }}
               >
                 <div
                   class="block-item"

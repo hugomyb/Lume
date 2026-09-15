@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { aiCancel, type AiChunkEvent, type AiDoneEvent, type AiErrorEvent } from "./ai";
 import { IconSparkles } from "./icons";
-import { t } from "./i18n";
+import { t, tHtml } from "./i18n";
 
 type Stage = "input" | "streaming" | "ready" | "error";
 
@@ -179,7 +179,7 @@ export default function CommandPalette(props: Props) {
               class="palette-warning"
               innerHTML={
                 props.aiCommand?.()
-                  ? t("cmd.noCli", { cmd: props.aiCommand!() })
+                  ? tHtml("cmd.noCli", { cmd: props.aiCommand!() })
                   : t("cmd.noProvider")
               }
             />

@@ -30,8 +30,11 @@ pub fn run() {
     // An explicit user GDK_BACKEND is honored; pure-Wayland setups without
     // XWayland keep the wayland backend and the grid declines to attach
     // (native_grid.rs), letting the xterm.js fallback paint instead.
+    // An empty GDK_BACKEND (e.g. exported by a wrapper script) means "unset"
+    // to GDK — treat it the same here, and keep native_grid.rs's
+    // wayland_backend_active() mirroring this exact policy.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("GDK_BACKEND").is_none()
+    if std::env::var("GDK_BACKEND").map_or(true, |v| v.trim().is_empty())
         && std::env::var_os("WAYLAND_DISPLAY").is_some()
         && std::env::var_os("DISPLAY").is_some()
     {
@@ -84,6 +87,7 @@ pub fn run() {
             config::export_config,
             config::import_config,
             shell::get_shell_setup_hint,
+            shell::install_shell_integration,
             complete::fs_complete,
             complete::read_dir,
             workflows::list_workflows,

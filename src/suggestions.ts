@@ -220,6 +220,39 @@ export async function pathSuggestions(
   });
 }
 
+/** The single best history line continuing `input`, for the fish-style ghost
+ *  text drawn after the cursor. History is deliberately absent from the popup:
+ *  its entries are whole command LINES, which buried the suggestions that
+ *  complete the token under the cursor. The two surfaces are now disjoint —
+ *  ghost = "the line I ran before", popup = "how this token completes". */
+export function ghostCompletion(input: string): string | null {
+  if (!input) return null;
+  const best = historySuggestions(input, 1)[0];
+  if (!best || best.value.length <= input.length) return null;
+  return best.value.slice(input.length);
+}
+
+/** Priority-ordered lists for `mergeSuggestions` (popup only — see
+ *  `ghostCompletion` for history). Order by what the user is doing:
+ *   - first token ("what do I run?") → aliases, then command names: both
+ *     complete the token itself and are short.
+ *   - past the first token ("which file?") → paths first. (Alias/command
+ *     lists are empty in this position by construction.) */
+export function orderSuggestionLists(
+  input: string,
+  parts: {
+    aliases: Suggestion[];
+    commands: Suggestion[];
+    paths?: Suggestion[];
+  }
+): Suggestion[][] {
+  const { aliases, commands, paths = [] } = parts;
+  const completingArgument = /\s/.test(input);
+  return completingArgument
+    ? [paths, aliases, commands]
+    : [aliases, commands, paths];
+}
+
 /** Merge suggestion lists, dropping duplicates by `value` and anything equal to
  *  the current input. Keeps the first occurrence (so caller controls priority
  *  via argument order). */

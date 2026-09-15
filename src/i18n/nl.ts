@@ -163,6 +163,7 @@ export const nl: Dict = {
   "remote.installHint":
     "Installeer <code>cloudflared</code> om buiten het lokale netwerk te bedienen.",
   "remote.warn": "Iedereen met deze link kan deze terminal bedienen.",
+  "remote.lanClear": "De LAN-link is onversleuteld HTTP: op een onbetrouwbaar netwerk kan alles wat je typt of ziet worden onderschept — gebruik bij voorkeur de internettunnel.",
   "remote.installBtn": "Tunnel installeren en inschakelen",
   "remote.installing": "Installeren…",
   "remote.stop": "Bediening op afstand stoppen",

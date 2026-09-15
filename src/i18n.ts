@@ -184,6 +184,7 @@ const en: Dict = {
   "pane.newTab": "New tab",
   "pane.close": "Close this pane",
   "pane.closeTab": " (closes the tab)",
+  "pane.closeTabOnly": "Close tab",
 
   // --- Tab context menu ---
   "tab.rename": "Rename (double-click)",
@@ -238,6 +239,7 @@ const en: Dict = {
   "remote.installHint":
     "Install <code>cloudflared</code> to control from outside the local network.",
   "remote.warn": "Anyone with this link can drive this terminal.",
+  "remote.lanClear": "The LAN link is plain HTTP (unencrypted): on an untrusted network, anything typed or displayed can be intercepted — prefer the Internet tunnel.",
   "remote.installBtn": "Install and enable the tunnel",
   "remote.installing": "Installing…",
   "remote.stop": "Stop remote control",
@@ -250,6 +252,10 @@ const en: Dict = {
 
   // --- Blocks panel ---
   "blocks.title": "Blocks",
+  "blocks.pane": "pane {n}/{total}",
+  "blocks.installAuto": "Add it to {rc} for me",
+  "blocks.installDone": "Added to {rc} — open a new tab to activate.",
+  "blocks.installAlready": "Already set up in {rc} — open a new tab if blocks don't appear.",
   "blocks.empty": "No command blocks yet.",
   "blocks.setupTitle": "Enable command blocks",
   "blocks.copyCmd": "Copy command",
@@ -421,6 +427,7 @@ const en: Dict = {
   // --- Autocomplete footer ---
   "ac.complete": "<kbd>Tab</kbd> complete",
   "ac.navigate": "<kbd>↑</kbd><kbd>↓</kbd> navigate",
+  "ac.ghost": "<kbd>→</kbd> history",
   "ac.close": "<kbd>Esc</kbd> close",
 };
 
@@ -562,6 +569,7 @@ const fr: Dict = {
   "pane.newTab": "Nouveau tab",
   "pane.close": "Fermer ce pane",
   "pane.closeTab": " (ferme le tab)",
+  "pane.closeTabOnly": "Fermer l'onglet",
 
   "tab.rename": "Renommer (double-clic)",
   "tab.splitH": "Split horizontal (Ctrl+Shift+D)",
@@ -612,6 +620,7 @@ const fr: Dict = {
   "remote.installHint":
     "Installe <code>cloudflared</code> pour piloter hors du réseau local.",
   "remote.warn": "Quiconque a ce lien peut piloter ce terminal.",
+  "remote.lanClear": "Le lien LAN est en HTTP non chiffré : sur un réseau non fiable, tout ce qui est tapé ou affiché peut être intercepté — préférez le tunnel Internet.",
   "remote.installBtn": "Installer et activer le tunnel",
   "remote.installing": "Installation en cours…",
   "remote.stop": "Arrêter le contrôle à distance",
@@ -622,6 +631,10 @@ const fr: Dict = {
   "search.close": "Fermer",
 
   "blocks.title": "Blocs",
+  "blocks.pane": "pane {n}/{total}",
+  "blocks.installAuto": "Ajouter automatiquement à {rc}",
+  "blocks.installDone": "Ajouté à {rc} — ouvre un nouvel onglet pour activer.",
+  "blocks.installAlready": "Déjà présent dans {rc} — ouvre un nouvel onglet si les blocs n'apparaissent pas.",
   "blocks.empty": "Aucun bloc de commande pour l'instant.",
   "blocks.setupTitle": "Activer les blocs de commande",
   "blocks.copyCmd": "Copier la commande",
@@ -794,6 +807,7 @@ const fr: Dict = {
   // --- Autocomplete footer ---
   "ac.complete": "<kbd>Tab</kbd> compléter",
   "ac.navigate": "<kbd>↑</kbd><kbd>↓</kbd> naviguer",
+  "ac.ghost": "<kbd>→</kbd> historique",
   "ac.close": "<kbd>Esc</kbd> fermer",
 };
 
@@ -828,4 +842,29 @@ export function t(key: string, params?: Record<string, string | number>): string
     for (const k in params) s = s.split(`{${k}}`).join(String(params[k]));
   }
   return s;
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!
+  );
+
+/** t() for strings rendered via innerHTML. The TRANSLATION may carry markup
+ *  (that's why innerHTML is used), but interpolated params come from outside
+ *  (update-manifest version, user-typed command, detected shell…) and must
+ *  never be able to inject markup into the privileged webview. */
+export function tHtml(
+  key: string,
+  params?: Record<string, string | number>
+): string {
+  const esc =
+    params &&
+    Object.fromEntries(
+      Object.entries(params).map(([k, v]) => [k, escapeHtml(String(v))])
+    );
+  return t(key, esc);
 }

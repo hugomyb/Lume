@@ -163,6 +163,7 @@ export const zh: Dict = {
   "remote.installHint":
     "安装 <code>cloudflared</code> 即可从局域网外进行控制。",
   "remote.warn": "任何拥有此链接的人都能操控此终端。",
+  "remote.lanClear": "局域网链接使用未加密的 HTTP：在不受信任的网络上，输入和显示的内容都可能被截获——建议使用互联网隧道。",
   "remote.installBtn": "安装并启用隧道",
   "remote.installing": "正在安装…",
   "remote.stop": "停止远程控制",

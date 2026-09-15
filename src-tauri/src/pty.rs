@@ -17,8 +17,15 @@ use crate::config::{Config, ShellConfig};
 use crate::osc::{BlockEvent, OscEvent, OscParser};
 
 pub struct PtySession {
-    writer: Box<dyn Write + Send>,
+    /// Behind its own lock (not the sessions map's): writes block when the
+    /// foreground process stops reading stdin, and must not freeze every
+    /// other session — or the UI — behind the global map lock.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn portable_pty::MasterPty + Send>,
+    /// Signals the child on pty_kill: closing the master fd only delivers the
+    /// kernel's SIGHUP, which processes are free to ignore — those would
+    /// otherwise outlive their tab (and pin their reaper thread) forever.
+    killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
     cwd: Arc<Mutex<Option<String>>>,
     /// Raw terminal output, fanned out to remote-control subscribers.
     output_tx: broadcast::Sender<Vec<u8>>,
@@ -55,15 +62,14 @@ impl PtyManager {
 
     /// Write raw bytes to a session. Returns false if the id is unknown.
     pub fn write_bytes(&self, id: u64, bytes: &[u8]) -> bool {
-        let mut sessions = self.sessions.lock();
-        match sessions.get_mut(&id) {
-            Some(s) => {
-                let _ = s.writer.write_all(bytes);
-                let _ = s.writer.flush();
-                true
-            }
-            None => false,
-        }
+        let writer = match self.sessions.lock().get(&id) {
+            Some(s) => s.writer.clone(),
+            None => return false,
+        };
+        let mut w = writer.lock();
+        let _ = w.write_all(bytes);
+        let _ = w.flush();
+        true
     }
 
     /// Resize a session's PTY (used when a remote client drives the size).
@@ -196,9 +202,10 @@ fn spawn_impl(
     crate::env_fix::sanitize_pty(&mut cmd);
 
     let mut child = pair.slave.spawn_command(cmd).context("spawn shell")?;
+    let killer = child.clone_killer();
     drop(pair.slave);
 
-    let writer = pair.master.take_writer().context("take_writer")?;
+    let writer = Arc::new(Mutex::new(pair.master.take_writer().context("take_writer")?));
     let mut reader = pair.master.try_clone_reader().context("clone_reader")?;
 
     let id = pty_state.next_id.fetch_add(1, Ordering::Relaxed);
@@ -208,7 +215,11 @@ fn spawn_impl(
 
     // Fan-out of raw output to remote-control subscribers. The receiver held
     // here is dropped immediately; subscribers are created on demand.
-    let (output_tx, _) = broadcast::channel::<Vec<u8>>(2048);
+    // Capacity is deliberately small: the ring RETAINS its last N values until
+    // overwritten (2048 × 64 KiB reads ≈ 128 MiB parked per pane after a burst);
+    // 128 absorbs consumer latency, and the 256 KiB replay buffer already
+    // covers reconnect/resync.
+    let (output_tx, _) = broadcast::channel::<Vec<u8>>(128);
     let output_tx_reader = output_tx.clone();
     let replay = Arc::new(Mutex::new(Vec::<u8>::new()));
     let replay_for_reader = replay.clone();
@@ -220,6 +231,7 @@ fn spawn_impl(
         PtySession {
             writer,
             master: pair.master,
+            killer,
             cwd,
             output_tx,
             replay,
@@ -366,7 +378,7 @@ fn spawn_impl(
 }
 
 #[tauri::command]
-pub fn pty_write(
+pub async fn pty_write(
     state: State<'_, Arc<PtyManager>>,
     id: u64,
     data_b64: String,
@@ -374,16 +386,21 @@ pub fn pty_write(
     let bytes = B64
         .decode(data_b64.as_bytes())
         .map_err(|e| format!("invalid base64: {e}"))?;
-    let mut sessions = state.sessions.lock();
-    let session = sessions
-        .get_mut(&id)
+    let writer = state
+        .sessions
+        .lock()
+        .get(&id)
+        .map(|s| s.writer.clone())
         .ok_or_else(|| format!("unknown pty {id}"))?;
-    session
-        .writer
-        .write_all(&bytes)
-        .map_err(|e| e.to_string())?;
-    session.writer.flush().map_err(|e| e.to_string())?;
-    Ok(())
+    // Off the main thread: a paste larger than the kernel's tty input buffer
+    // blocks until the foreground process reads — the UI must not wait on it.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut w = writer.lock();
+        w.write_all(&bytes).map_err(|e| e.to_string())?;
+        w.flush().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -410,12 +427,15 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_kill(state: State<'_, Arc<PtyManager>>, id: u64) -> Result<(), String> {
-    state
+    let mut session = state
         .sessions
         .lock()
         .remove(&id)
-        .ok_or_else(|| format!("unknown pty {id}"))
-        .map(|_| ())
+        .ok_or_else(|| format!("unknown pty {id}"))?;
+    // Signal the child explicitly — SIGHUP-ignoring processes must not
+    // survive their tab. This also lets the reaper thread's wait() return.
+    let _ = session.killer.kill();
+    Ok(())
 }
 
 /// Read the last-known cwd for a session. Tracked via OSC 7 emitted by the

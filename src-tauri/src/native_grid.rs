@@ -70,7 +70,9 @@ type Rgb = (f64, f64, f64);
 
 fn parse_hex(s: &str, fallback: Rgb) -> Rgb {
     let h = s.trim_start_matches('#');
-    if h.len() < 6 {
+    // Byte-check the ASCII prefix before slicing: a multi-byte char in a
+    // user-typed theme color would make `&h[i..i+2]` panic on a char boundary.
+    if h.len() < 6 || !h.as_bytes()[..6].is_ascii() {
         return fallback;
     }
     let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
@@ -254,10 +256,12 @@ thread_local! {
 /// from any thread (commands don't run on the GTK main thread).
 fn wayland_backend_active() -> bool {
     match std::env::var("GDK_BACKEND") {
-        // Explicit backend (user, or run()'s x11 forcing).
-        Ok(b) => b.contains("wayland"),
+        // Explicit backend (user, or run()'s x11 forcing). An EMPTY value
+        // means "unset" to GDK (and to run()'s policy) — attaching the grid
+        // on it while GDK picked wayland would paint an invisible pane.
+        Ok(b) if !b.trim().is_empty() => b.contains("wayland"),
         // GDK's own default: wayland when available, else x11.
-        Err(_) => {
+        _ => {
             std::env::var_os("WAYLAND_DISPLAY").is_some()
                 && std::env::var_os("DISPLAY").is_none()
         }
@@ -303,6 +307,58 @@ fn queue_draw_area_dom(win: &gtk::ApplicationWindow, x: i32, y: i32, w: i32, h: 
     win.queue_draw_area(x0 + ox, y0 + oy, x1 - x0, y1 - y0);
 }
 
+/// Queue a damage rect MINUS the DOM overlay rects (context menus, popups…).
+/// The draw pass clips the grid out of those rects, so invalidating pixels
+/// under them repaints nothing there — GTK's theme-gray clear then shows
+/// through until WebKit happens to recomposite (a gray veil flickering over
+/// an open context menu, every cursor blink / PTY chunk). Only the pieces the
+/// grid will actually repaint are invalidated.
+fn queue_draw_area_minus_overlays(
+    win: &gtk::ApplicationWindow,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) {
+    let overlays: Vec<(i32, i32, i32, i32)> = OVERLAY_RECTS.lock().clone();
+    let mut pieces: Vec<(i32, i32, i32, i32)> = vec![(x, y, w, h)];
+    for (ox, oy, ow, oh) in overlays {
+        // Pathological overlay counts: stop subtracting, over-invalidating is
+        // only the old (cosmetic) behavior, never incorrect.
+        if pieces.len() > 64 {
+            break;
+        }
+        let mut next: Vec<(i32, i32, i32, i32)> = Vec::with_capacity(pieces.len() + 3);
+        for (px, py, pw, ph) in pieces {
+            let ix = px.max(ox);
+            let iy = py.max(oy);
+            let ix2 = (px + pw).min(ox + ow);
+            let iy2 = (py + ph).min(oy + oh);
+            if ix2 <= ix || iy2 <= iy {
+                next.push((px, py, pw, ph));
+                continue;
+            }
+            // Top / bottom bands, then left / right slivers of the middle band.
+            if iy > py {
+                next.push((px, py, pw, iy - py));
+            }
+            if iy2 < py + ph {
+                next.push((px, iy2, pw, py + ph - iy2));
+            }
+            if ix > px {
+                next.push((px, iy, ix - px, iy2 - iy));
+            }
+            if ix2 < px + pw {
+                next.push((ix2, iy, px + pw - ix2, iy2 - iy));
+            }
+        }
+        pieces = next;
+    }
+    for (px, py, pw, ph) in pieces {
+        queue_draw_area_dom(win, px, py, pw, ph);
+    }
+}
+
 /// Redraw request sent from the feed task to the main thread.
 /// `None` lines = full redraw of the pane rect.
 struct Redraw {
@@ -322,7 +378,7 @@ fn queue_model_redraw(model: &GridModel, _lines: Option<&[(usize, usize)]>) {
     let (x, y, w, h) = *model.rect.lock();
     HOOKED.with(|hw| {
         if let Some(win) = hw.borrow().as_ref() {
-            queue_draw_area_dom(win, x, y, w, h);
+            queue_draw_area_minus_overlays(win, x, y, w, h);
         }
     });
 }
@@ -349,6 +405,45 @@ fn ensure_glib_bridge() -> std::sync::mpsc::Sender<Redraw> {
         tx
     })
     .clone()
+}
+
+thread_local! {
+    /// CSS provider that paints the GTK toplevel in the terminal theme's
+    /// background (see `apply_window_bg`). One per process, content updated
+    /// on every attach (theme changes re-attach).
+    static BG_PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
+}
+
+/// Match the GTK toplevel background to the terminal theme. GTK clears
+/// damaged regions with theme_bg_color before children repaint; wherever
+/// neither the grid (clipped out: overlay holes, DOM border ring) nor WebKit
+/// (async compositing) covers the clear in the same frame, that gray flashes
+/// through. With the window painted in the theme's own background the
+/// transient clears become invisible. Main thread only.
+fn apply_window_bg(gtk_window: &gtk::ApplicationWindow, bg: Rgb) {
+    let css = format!(
+        "window {{ background-color: rgb({},{},{}); }}",
+        (bg.0 * 255.0).round() as u8,
+        (bg.1 * 255.0).round() as u8,
+        (bg.2 * 255.0).round() as u8
+    );
+    BG_PROVIDER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            let provider = gtk::CssProvider::new();
+            if let Some(screen) = WidgetExt::screen(gtk_window) {
+                gtk::StyleContext::add_provider_for_screen(
+                    &screen,
+                    &provider,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                );
+            }
+            *slot = Some(provider);
+        }
+        if let Some(provider) = slot.as_ref() {
+            let _ = provider.load_from_data(css.as_bytes());
+        }
+    });
 }
 
 /// Hook the toplevel once: paint every visible grid AFTER GTK drew the
@@ -955,6 +1050,10 @@ pub fn native_grid_attach(
             .run_on_main_thread(move || {
                 if ensure_draw_hook(&window_ui, cursor_blink) {
                     let _ = ensure_glib_bridge();
+                    let bg = model_ui.style.lock().bg;
+                    if let Ok(gtk_window) = window_ui.gtk_window() {
+                        apply_window_bg(&gtk_window, bg);
+                    }
                     queue_model_redraw(&model_ui, None);
                 }
             })

@@ -1,7 +1,7 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { checkForUpdate, installUpdate, type Update } from "./updater";
-import { t } from "./i18n";
+import { t, tHtml } from "./i18n";
 
 /** A slim banner that appears when a new Lume version is available. Auto-checks
  *  shortly after launch; lets the user install + relaunch in one click.
@@ -47,7 +47,7 @@ export default function UpdateBanner() {
     <Show when={update() && !dismissed()}>
       <div class="update-banner">
         <span class="update-banner-text">
-          <span innerHTML={t("update.available", { version: update()!.version })} />
+          <span innerHTML={tHtml("update.available", { version: update()!.version })} />
           <Show when={error()}>
             {" "}
             — <span class="update-banner-err">{t("update.failed")}</span>

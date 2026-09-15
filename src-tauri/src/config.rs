@@ -256,6 +256,33 @@ pub fn config_path() -> Option<PathBuf> {
     crate::paths::config_dir().map(|d| d.join("config.toml"))
 }
 
+/// Write via a same-directory temp file + rename: a crash/power-cut mid-write
+/// can't leave a truncated config (fs::write truncates first). Perms are
+/// forced to 0600 — the file holds API keys and must not be world-readable.
+fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let tmp = path.with_extension("toml.tmp");
+    {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        f.write_all(body.as_bytes())?;
+        f.sync_all()?;
+    }
+    // mode() only applies when the temp file is created — cover reuse too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, path)
+}
+
 pub fn load() -> Config {
     let Some(path) = config_path() else {
         eprintln!("[lume] HOME not set — using defaults");
@@ -272,6 +299,13 @@ pub fn load() -> Config {
         }
         return Config::default();
     }
+    // Tighten perms on configs written by older versions (fs::write → 0644):
+    // the file holds API keys.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
     match std::fs::read_to_string(&path) {
         Ok(s) => match toml::from_str::<Config>(&s) {
             Ok(c) => c,
@@ -280,6 +314,12 @@ pub fn load() -> Config {
                     "[lume] config parse error in {}: {e} — using defaults",
                     path.display()
                 );
+                // Move the broken file aside: the next save_config would
+                // silently overwrite what the user could still hand-fix.
+                let backup = path.with_extension("toml.broken");
+                if std::fs::rename(&path, &backup).is_ok() {
+                    eprintln!("[lume] broken config moved to {}", backup.display());
+                }
                 Config::default()
             }
         },
@@ -307,7 +347,7 @@ pub fn save_config(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let body = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, body).map_err(|e| e.to_string())?;
+    write_atomic(&path, &body).map_err(|e| e.to_string())?;
     *state.lock() = config;
     Ok(())
 }
@@ -337,8 +377,41 @@ fn write_default(path: &Path) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create dir {}", parent.display()))?;
     }
-    std::fs::write(path, DEFAULT_TOML).with_context(|| format!("write {}", path.display()))?;
+    write_atomic(path, DEFAULT_TOML).with_context(|| format!("write {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_atomic_roundtrips_and_replaces() {
+        let dir = std::env::temp_dir().join("lume_cfg_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.toml");
+        write_atomic(&path, "a = 1\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a = 1\n");
+        // Overwrite goes through the same tmp+rename path.
+        write_atomic(&path, "a = 2\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a = 2\n");
+        // No stray temp file left behind.
+        assert!(!path.with_extension("toml.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_sets_owner_only_perms() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join("lume_cfg_perm_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.toml");
+        write_atomic(&path, "k = \"secret\"\n").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 const DEFAULT_TOML: &str = r##"# Lume configuration

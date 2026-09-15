@@ -55,7 +55,9 @@ function parseInline(s: string): Inline[] {
       i = end + 2;
       continue;
     }
-    // Link: [text](url)
+    // Link: [text](url). Only http(s) URLs become anchors — a model's output
+    // is untrusted, and javascript:/file:/custom schemes must never reach an
+    // href (or be handed to openUrl). Anything else stays plain text.
     if (s[i] === "[") {
       const closeText = s.indexOf("]", i + 1);
       if (closeText !== -1 && s[closeText + 1] === "(") {
@@ -63,9 +65,11 @@ function parseInline(s: string): Inline[] {
         if (closeUrl !== -1) {
           const text = s.slice(i + 1, closeText);
           const href = s.slice(closeText + 2, closeUrl).trim();
-          nodes.push({ type: "link", text, href });
-          i = closeUrl + 1;
-          continue;
+          if (/^https?:\/\//i.test(href)) {
+            nodes.push({ type: "link", text, href });
+            i = closeUrl + 1;
+            continue;
+          }
         }
       }
     }

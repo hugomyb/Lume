@@ -46,6 +46,63 @@ pub fn ensure_integration_scripts() {
     }
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallResult {
+    pub rc_file: String,
+    pub already: bool,
+}
+
+/// One-click setup: append the source line to the user's rc file. Idempotent
+/// (skips if the file already mentions the integration script) and append-only
+/// — the rc file is USER data, it must never be truncated or rewritten.
+#[tauri::command]
+pub fn install_shell_integration() -> Result<InstallResult, String> {
+    #[cfg(windows)]
+    {
+        // $PROFILE's location depends on the PowerShell host — leave Windows
+        // on the copy-paste path (the UI hides the button there).
+        Err("Ajout automatique non supporté sur Windows — ajoute la ligne à $PROFILE.".to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        use std::io::Write as _;
+        let hint = unix_hint();
+        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+        let rc_path = hint.rc_file.replacen("~", &home, 1);
+        if let Some(parent) = std::path::Path::new(&rc_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let existing = std::fs::read_to_string(&rc_path).unwrap_or_default();
+        if existing.contains("lume-shell-init") {
+            return Ok(InstallResult {
+                rc_file: hint.rc_file,
+                already: true,
+            });
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&rc_path)
+            .map_err(|e| e.to_string())?;
+        let lead = if existing.is_empty() || existing.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
+        write!(
+            f,
+            "{lead}# Lume shell integration (added by Lume)\n{}\n",
+            hint.source_line
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(InstallResult {
+            rc_file: hint.rc_file,
+            already: false,
+        })
+    }
+}
+
 #[tauri::command]
 pub fn get_shell_setup_hint() -> ShellSetupHint {
     #[cfg(windows)]

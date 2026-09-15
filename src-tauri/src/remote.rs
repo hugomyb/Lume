@@ -48,6 +48,10 @@ struct RemoteInner {
     port: u16,
     token: String,
     shutdown: Option<oneshot::Sender<()>>,
+    /// Aborts live WebSocket bridges on stop: axum's graceful shutdown only
+    /// stops accepting NEW connections — upgraded sockets outlive it, so
+    /// without this an already-connected client keeps driving the terminal.
+    kill: Option<broadcast::Sender<()>>,
     /// cloudflared quick-tunnel child (cross-network public URL).
     tunnel_child: Option<std::process::Child>,
     /// Public https URL (with token) once the tunnel is up; None until then.
@@ -66,6 +70,7 @@ impl RemoteState {
                 port: 0,
                 token: String::new(),
                 shutdown: None,
+                kill: None,
                 tunnel_child: None,
                 public_url: Arc::new(Mutex::new(None)),
                 tunnel_requested: false,
@@ -83,6 +88,8 @@ struct AppState {
     target_tx: watch::Sender<Option<u64>>,
     tabs_tx: watch::Sender<Vec<TabInfo>>,
     clients: Arc<AtomicUsize>,
+    /// Subscribed by each bridge; fired by `remote_stop` to force-close it.
+    kill_tx: broadcast::Sender<()>,
     /// To signal the desktop frontend (e.g. "create a new tab" from the phone).
     app: AppHandle,
 }
@@ -323,14 +330,63 @@ pub fn remote_status(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
     info(&remote.inner.lock(), remote.clients.load(Ordering::Relaxed))
 }
 
+/// Pinned cloudflared release. "latest" made installs unreproducible and
+/// unverifiable — a hijacked release (or MITM'd TLS via a corporate CA) would
+/// have executed an arbitrary binary. Bump the version AND the sums together.
+const CLOUDFLARED_VERSION: &str = "2026.9.1";
+
+/// Per-asset SHA-256, cross-checked against the sums Cloudflare publishes in
+/// the release notes. Exception: the darwin .tgz sums differ in the notes
+/// (generated before those assets were re-uploaded, e.g. re-notarized) — the
+/// two are pinned to the actually-served assets instead. Unknown asset →
+/// install refused (fail closed).
+fn cloudflared_asset_sha256(asset: &str) -> Option<&'static str> {
+    Some(match asset {
+        "cloudflared-linux-amd64" => "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc",
+        "cloudflared-linux-arm64" => "3d97437c71848bd8df68041e12436b484a661d95073ea1937f01a845ce88faa3",
+        "cloudflared-linux-arm" => "093ffa3638ab2b636de63c43a8c68f96a69cf71f9699dd8277a91b160b0f4fc0",
+        "cloudflared-linux-386" => "5d66134cf7646cb98f33aeee7bcc8b97d8feacd76db279f5903f9585226e0922",
+        "cloudflared-windows-amd64.exe" => "2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712",
+        "cloudflared-windows-386.exe" => "11b6e4b2d306950bd87e7caa4deee8e80a32d71ffee555a96237a76651eeae4c",
+        "cloudflared-darwin-amd64.tgz" => "ff0d3b51d5ff70eceef89d6b32145fee985018a2174596a5dbe405e2766e2ac4",
+        "cloudflared-darwin-arm64.tgz" => "c27ab8fd0aa489449e3d201eb02f957ef460a13b613662928b1b23394bf1bcfe",
+        _ => return None,
+    })
+}
+
+fn sha256_hex(path: &str) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+/// Download `asset` next to `dest` and verify its pinned SHA-256 BEFORE
+/// letting the caller touch it. On mismatch the file is deleted.
+fn download_verified(asset: &str, dest: &str) -> Result<(), String> {
+    let expected = cloudflared_asset_sha256(asset)
+        .ok_or_else(|| format!("Pas de checksum épinglé pour {asset}."))?;
+    let url = format!(
+        "https://github.com/cloudflare/cloudflared/releases/download/{CLOUDFLARED_VERSION}/{asset}"
+    );
+    if !download(&url, dest) {
+        return Err("Échec du téléchargement (curl ou wget requis).".into());
+    }
+    let actual = sha256_hex(dest)?;
+    if actual != expected {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "Checksum inattendu pour {asset} (obtenu {actual}) — binaire rejeté."
+        ));
+    }
+    Ok(())
+}
+
 /// Download + install the `cloudflared` binary into a Lume-owned location so
 /// cross-network tunnels work without the user touching a terminal. Picks the
-/// right asset for the current OS + architecture.
+/// right asset for the current OS + architecture; the download is pinned to
+/// CLOUDFLARED_VERSION and checksum-verified before being made executable.
 #[tauri::command]
 pub fn remote_install_cloudflared() -> Result<(), String> {
-    const BASE: &str =
-        "https://github.com/cloudflare/cloudflared/releases/latest/download";
-
     let arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
@@ -345,25 +401,16 @@ pub fn remote_install_cloudflared() -> Result<(), String> {
 
     match std::env::consts::OS {
         "linux" => {
-            let url = format!("{BASE}/cloudflared-linux-{arch}");
-            if !download(&url, &dest) {
-                return Err("Échec du téléchargement (curl ou wget requis).".into());
-            }
+            download_verified(&format!("cloudflared-linux-{arch}"), &dest)?;
             chmod_exec(&dest)?;
         }
         "windows" => {
-            let url = format!("{BASE}/cloudflared-windows-{arch}.exe");
-            if !download(&url, &dest) {
-                return Err("Échec du téléchargement.".into());
-            }
+            download_verified(&format!("cloudflared-windows-{arch}.exe"), &dest)?;
         }
         "macos" => {
             // Darwin assets ship as a .tgz containing the `cloudflared` binary.
             let tgz = format!("{dir}/cloudflared.tgz");
-            let url = format!("{BASE}/cloudflared-darwin-{arch}.tgz");
-            if !download(&url, &tgz) {
-                return Err("Échec du téléchargement.".into());
-            }
+            download_verified(&format!("cloudflared-darwin-{arch}.tgz"), &tgz)?;
             let ok = std::process::Command::new("tar")
                 .args(["-xzf", &tgz, "-C", &dir])
                 .status()
@@ -451,6 +498,10 @@ pub fn remote_stop(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
     if let Some(tx) = inner.shutdown.take() {
         let _ = tx.send(());
     }
+    // Disconnect every live client — stopping the share must revoke access.
+    if let Some(kill) = inner.kill.take() {
+        let _ = kill.send(());
+    }
     if let Some(mut child) = inner.tunnel_child.take() {
         let _ = child.kill();
     }
@@ -472,7 +523,8 @@ pub fn remote_start(
     if inner.running {
         return Ok(info(&inner, remote.clients.load(Ordering::Relaxed)));
     }
-    remote.clients.store(0, Ordering::Relaxed);
+    // NOTE: the client counter is NOT reset here — clients from a previous
+    // session decrement it on disconnect, and zeroing it would underflow.
 
     // If the preferred port is taken (e.g. a leftover Lume instance still owns
     // it), fall back to any free port instead of failing — the actual port is
@@ -484,12 +536,14 @@ pub fn remote_start(
     let actual_port = std_listener.local_addr().map_err(|e| e.to_string())?.port();
 
     let token = gen_token();
+    let (kill_tx, _) = broadcast::channel::<()>(1);
     let state = AppState {
         token: token.clone(),
         pty: pty.inner().clone(),
         target_tx: remote.target_tx.clone(),
         tabs_tx: remote.tabs_tx.clone(),
         clients: remote.clients.clone(),
+        kill_tx: kill_tx.clone(),
         app: app.clone(),
     };
     let app = Router::new()
@@ -514,6 +568,7 @@ pub fn remote_start(
     inner.port = actual_port;
     inner.token = token.clone();
     inner.shutdown = Some(shutdown_tx);
+    inner.kill = Some(kill_tx);
     inner.tunnel_requested = tunnel;
     *inner.public_url.lock() = None;
     inner.tunnel_child = None;
@@ -530,7 +585,20 @@ struct TokenQuery {
 }
 
 fn token_ok(q: &TokenQuery, st: &AppState) -> bool {
-    q.t.as_deref() == Some(st.token.as_str())
+    match q.t.as_deref() {
+        Some(t) => ct_eq(t.as_bytes(), st.token.as_bytes()),
+        None => false,
+    }
+}
+
+/// Constant-time comparison: `==` short-circuits on the first differing byte,
+/// which lets a LAN attacker time-probe the token character by character (the
+/// server has no rate limiting to compensate). Length is not secret.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 async fn index(Query(q): Query<TokenQuery>, AxState(st): AxState<AppState>) -> Response {
@@ -553,16 +621,22 @@ async fn ws_handler(
 
 async fn bridge(socket: WebSocket, st: AppState) {
     let _guard = ClientGuard::new(st.clients.clone());
+    let mut kill = st.kill_tx.subscribe();
     let (sender, receiver) = socket.split();
     // Side channel for server→client control frames (completion listings),
     // produced by the input task and forwarded as Text frames by the output task.
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<String>(16);
     let mut out = tokio::spawn(output_task(sender, st.clone(), ctrl_rx));
     let mut inp = tokio::spawn(input_task(receiver, st, ctrl_tx));
-    // When either direction ends (client disconnects, pty closed), stop both.
+    // When either direction ends (client disconnects, pty closed) — or the
+    // share is stopped (kill fires, or its sender is dropped) — stop both.
     tokio::select! {
         _ = &mut out => inp.abort(),
         _ = &mut inp => out.abort(),
+        _ = kill.recv() => {
+            out.abort();
+            inp.abort();
+        }
     }
 }
 
@@ -792,7 +866,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <title>Lume Remote</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" integrity="sha384-tStR1zLfWgsiXCF3IgfB3lBa8KmBe/lG287CL9WCeKgQYcp1bjb4/+mwN6oti4Co" crossorigin="anonymous"/>
 <style>
   html,body{margin:0;height:100%;background:#0e1014;overflow:hidden;font:13px system-ui,sans-serif}
   #app{position:fixed;left:0;top:0;right:0;display:flex;flex-direction:column;overflow:hidden}
@@ -835,8 +909,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
   <div id="assist"><div id="chips"></div><div id="keys"></div></div>
 </div>
 <div id="overlay"><div class="box"><div id="ov-icon"></div><div id="ov-title">Connexion perdue</div><div id="ov-sub"></div><button id="reconnect">Reconnecter</button></div></div>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" integrity="sha384-J4qzUjBl1FxyLsl/kQPQIOeINsmp17OHYXDOMpMxlKX53ZfYsL+aWHpgArvOuof9" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" integrity="sha384-XGqKrV8Jrukp1NITJbOEHwg01tNkuXr6uB6YEj69ebpYU3v7FvoGgEg23C1Gcehk" crossorigin="anonymous"></script>
 <script>
 (function(){
   var $=function(id){return document.getElementById(id);};
@@ -1002,6 +1076,50 @@ const INDEX_HTML: &str = r##"<!doctype html>
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn ct_eq_matches_equal_and_rejects_unequal() {
+        assert!(ct_eq(b"abc123", b"abc123"));
+        assert!(!ct_eq(b"abc123", b"abc124"));
+        assert!(!ct_eq(b"abc123", b"abc12"));
+        assert!(!ct_eq(b"", b"x"));
+        assert!(ct_eq(b"", b""));
+    }
+
+    #[test]
+    fn sha256_hex_known_vector() {
+        let p = std::env::temp_dir().join("lume_sha256_test.bin");
+        fs::write(&p, b"abc").unwrap();
+        let h = sha256_hex(p.to_str().unwrap()).unwrap();
+        assert_eq!(
+            h,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn cloudflared_checksums_fail_closed() {
+        // Every supported asset has a pinned sum; anything else is refused.
+        assert!(cloudflared_asset_sha256("cloudflared-linux-amd64").is_some());
+        assert!(cloudflared_asset_sha256("cloudflared-darwin-arm64.tgz").is_some());
+        assert!(cloudflared_asset_sha256("cloudflared-freebsd-amd64").is_none());
+        // 64 lowercase hex chars each.
+        for a in [
+            "cloudflared-linux-amd64",
+            "cloudflared-linux-arm64",
+            "cloudflared-linux-arm",
+            "cloudflared-linux-386",
+            "cloudflared-windows-amd64.exe",
+            "cloudflared-windows-386.exe",
+            "cloudflared-darwin-amd64.tgz",
+            "cloudflared-darwin-arm64.tgz",
+        ] {
+            let h = cloudflared_asset_sha256(a).unwrap();
+            assert_eq!(h.len(), 64, "{a}");
+            assert!(h.bytes().all(|b| b.is_ascii_hexdigit()), "{a}");
+        }
+    }
 
     #[test]
     fn list_entries_filters_orders_and_descends() {

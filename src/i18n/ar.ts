@@ -163,6 +163,7 @@ export const ar: Dict = {
   "remote.installHint":
     "ثبّت <code>cloudflared</code> للتحكم من خارج الشبكة المحلية.",
   "remote.warn": "أي شخص لديه هذا الرابط يمكنه التحكم بهذا الطرفي.",
+  "remote.lanClear": "رابط الشبكة المحلية يستخدم HTTP غير مشفّر: على شبكة غير موثوقة، يمكن اعتراض كل ما يُكتب أو يُعرض — يُفضَّل استخدام نفق الإنترنت.",
   "remote.installBtn": "تثبيت وتفعيل النفق",
   "remote.installing": "جارٍ التثبيت…",
   "remote.stop": "إيقاف التحكم عن بُعد",

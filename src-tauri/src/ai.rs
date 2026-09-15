@@ -648,7 +648,16 @@ fn stream_api(
         "messages": [{ "role": "user", "content": prompt }],
     });
 
-    let resp = ureq::post(&url)
+    // Connect + per-read timeouts: without them an unreachable/stalled endpoint
+    // parks this thread forever — the cancel flag is only re-checked between
+    // reads, so ai_cancel never takes effect and each retry leaks a thread.
+    // 120 s per read stays well clear of legitimate slow-model stalls.
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout_read(std::time::Duration::from_secs(120))
+        .build();
+    let resp = agent
+        .post(&url)
         .set("Authorization", &format!("Bearer {}", api.api_key))
         .set("Content-Type", "application/json")
         .send_json(body);

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Lume — a private, local, open-source alternative to Warp" width="100%">
+  <img src="assets/banner.png" alt="Lume — an open-source terminal you can drive from your phone" width="100%">
 </p>
 
 <p align="center">
@@ -10,10 +10,12 @@
   <a href="https://github.com/hugomyb/Lume/stargazers"><img src="https://img.shields.io/github/stars/hugomyb/Lume?cacheSeconds=3600" alt="Stars"></a>
 </p>
 
-A fast, lightweight, **open-source alternative to Warp** — command blocks,
-inline AI, panes, themes, remote control, and more. Built with
-**Rust + Tauri 2 + SolidJS + xterm.js**: a few-MB native binary, **fully local,
-no account, no telemetry**.
+An **open-source terminal emulator** with command blocks, inline AI and split
+panes — that you can also **drive from your phone** or any other device, on the
+LAN or across the Internet with a one-click tunnel.
+
+Built with **Rust + Tauri 2 + SolidJS + xterm.js**: a few-MB native binary,
+**fully local, no account, no telemetry**.
 
 > **Platforms:** **Linux** (X11 & Wayland), **macOS** (Intel & Apple Silicon)
 > and **Windows** — built for all three on every release. macOS & Windows
@@ -38,6 +40,10 @@ no account, no telemetry**.
 
 ## Features
 
+- **Remote control** — drive your terminals from your phone or another PC, on the
+  LAN or over the internet (cloudflared quick tunnel), with QR pairing. The mobile
+  page has a Termux-style key row, live directory completion, swipe-to-move-cursor,
+  and a tab bar to switch/create terminals.
 - **Command blocks** — each command + its output is an isolated, navigable block
   (via shell integration / OSC 133), with exit-code badges, copy, rerun.
 - **Inline AI** — explain a block or generate a command from natural language.
@@ -48,15 +54,13 @@ no account, no telemetry**.
 - **Autocomplete** — inline suggestions from history, files, aliases, commands.
 - **File tree sidebar** that follows the active pane's directory, with
   customizable right-click commands.
-- **Remote control** — drive your terminals from your phone or another PC, on the
-  LAN or over the internet (cloudflared quick tunnel), with QR pairing. The mobile
-  page has a Termux-style key row, live directory completion, swipe-to-move-cursor,
-  and a tab bar to switch/create terminals.
 - **Themes & fonts** — 9 built-in themes, custom font import, Nerd Font support,
   remappable keybindings, text zoom.
 - **14 languages** — fully translated UI, switchable in settings (English default).
 - **Desktop notifications** when long commands finish in the background.
 - **Self-updating** on every platform, with signature-verified updates.
+- **Small download** — 3.3 MB on Windows, 5 MB on Debian/Fedora, 8.2 MB as a
+  universal macOS disk image. Not Electron.
 
 ## Install
 

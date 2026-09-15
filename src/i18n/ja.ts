@@ -163,6 +163,7 @@ export const ja: Dict = {
   "remote.installHint":
     "ローカルネットワークの外から操作するには <code>cloudflared</code> をインストールしてください。",
   "remote.warn": "このリンクを知っている人は誰でもこのターミナルを操作できます。",
+  "remote.lanClear": "LAN リンクは暗号化されていない HTTP です。信頼できないネットワークでは入力・表示内容が傍受される可能性があります。インターネットトンネルの使用を推奨します。",
   "remote.installBtn": "インストールしてトンネルを有効化",
   "remote.installing": "インストール中…",
   "remote.stop": "リモート操作を停止",

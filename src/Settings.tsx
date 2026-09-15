@@ -1,7 +1,7 @@
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
 import { reconcile, type SetStoreFunction } from "solid-js/store";
 import { save, open } from "@tauri-apps/plugin-dialog";
-import { LANGUAGES, t } from "./i18n";
+import { LANGUAGES, t, tHtml } from "./i18n";
 import {
   DEFAULT_CONFIG,
   DEFAULT_THEME,
@@ -1115,7 +1115,7 @@ export default function Settings(props: Props) {
                   <div class="settings-update-box">
                     <p
                       class="settings-note"
-                      innerHTML={t("about.available", {
+                      innerHTML={tHtml("about.available", {
                         version: foundUpdate()!.version,
                       })}
                     />

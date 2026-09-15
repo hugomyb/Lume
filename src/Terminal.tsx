@@ -30,8 +30,9 @@ import Autocomplete, { type AcPosition } from "./Autocomplete";
 import {
   aliasSuggestions,
   commandSuggestions,
-  historySuggestions,
+  ghostCompletion,
   mergeSuggestions,
+  orderSuggestionLists,
   pathSuggestions,
   recordAliases,
   type AliasItem,
@@ -259,6 +260,15 @@ export default function Terminal(props: TerminalProps) {
   let typedSincePrompt = false;
   // Monotonic counter to discard stale async path-completion responses.
   let acReqSeq = 0;
+  // True once the user moved the selection with the arrows / mouse: only then
+  // is the highlighted row preserved across a list re-render.
+  let acUserPicked = false;
+  // Fish-style ghost text (best history continuation) drawn after the cursor.
+  // The DOM node is imperative (like the copy button), the signal only drives
+  // the popup's "→ history" footer hint.
+  let ghostEl: HTMLDivElement | undefined;
+  let ghostSuffix = "";
+  const [acGhost, setAcGhost] = createSignal(false);
   let acRaf = 0;
 
   // onMount below is async; past the first `await` Solid's reactive owner is
@@ -266,8 +276,15 @@ export default function Terminal(props: TerminalProps) {
   // runs (leaking listeners/observers). Capture the owner now and re-enter it
   // to register cleanups that actually dispose on unmount.
   const owner = getOwner();
-  const addCleanup = (fn: () => void) =>
-    owner ? runWithOwner(owner, () => onCleanup(fn)) : onCleanup(fn);
+  // Set by the top-level onCleanup: the async onMount continuation checks it
+  // after every await — a pane closed mid-mount must release whatever the
+  // already-run cleanup couldn't see (listeners, the spawned PTY, the grid).
+  let disposed = false;
+  const addCleanup = (fn: () => void) => {
+    // Registering on a disposed owner would silently never run: dispose now.
+    if (disposed) return fn();
+    return owner ? runWithOwner(owner, () => onCleanup(fn)) : onCleanup(fn);
+  };
 
   onMount(async () => {
     if (!containerRef) return;
@@ -385,16 +402,31 @@ export default function Terminal(props: TerminalProps) {
       }
     })();
     if (useWebgl) {
-      try {
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => {
-          console.warn("[lume] WebGL context lost, disposing addon");
-          webgl.dispose();
-        });
-        term.loadAddon(webgl);
-      } catch (e) {
-        console.warn("[lume] WebGL addon failed, falling back to DOM renderer", e);
-      }
+      // Context losses happen (GPU reset, VRAM pressure, suspend/resume —
+      // common with DisplayLink); without a retry the terminal silently runs
+      // on the much slower DOM renderer until an app restart.
+      let webglRetries = 0;
+      let webglRetryTimer: ReturnType<typeof setTimeout> | undefined;
+      const loadWebgl = () => {
+        if (disposed || !term) return;
+        try {
+          const webgl = new WebglAddon();
+          webgl.onContextLoss(() => {
+            console.warn("[lume] WebGL context lost, disposing addon");
+            webgl.dispose();
+            if (webglRetries++ < 3) {
+              webglRetryTimer = setTimeout(loadWebgl, 2000 * webglRetries);
+            }
+          });
+          term!.loadAddon(webgl);
+        } catch (e) {
+          console.warn("[lume] WebGL addon failed, falling back to DOM renderer", e);
+        }
+      };
+      loadWebgl();
+      addCleanup(() => {
+        if (webglRetryTimer) clearTimeout(webglRetryTimer);
+      });
     }
 
     // Clickable links: Ctrl/Cmd+click opens URLs externally (via the OS), like
@@ -417,6 +449,7 @@ export default function Terminal(props: TerminalProps) {
     await new Promise<void>((resolve) =>
       requestAnimationFrame(() => resolve())
     );
+    if (disposed) return;
     if (containerRef) {
       const rect = containerRef.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
@@ -447,6 +480,7 @@ export default function Terminal(props: TerminalProps) {
       if (wasOpen) setAcOpen(false);
       if (acItems().length) setAcItems([]);
       setAcIndex(0);
+      acUserPicked = false;
       if (wasOpen) requestRepaint();
     };
 
@@ -517,7 +551,12 @@ export default function Terminal(props: TerminalProps) {
       }
       acLog("show", items.length, items.map((s) => s.value));
       const wasOpen = acOpen();
-      const prevSel = wasOpen ? acItems()[acIndex()]?.value : undefined;
+      // Follow the user's pick across a re-render (the async path pass lands
+      // after the sync one) — but ONLY if they actually moved: otherwise the
+      // auto-selected first row is tracked by value and the highlight ends up
+      // on an arbitrary row once the list is reordered.
+      const prevSel =
+        wasOpen && acUserPicked ? acItems()[acIndex()]?.value : undefined;
       setAcItems(items);
       const found = prevSel ? items.findIndex((s) => s.value === prevSel) : -1;
       setAcIndex(found >= 0 ? found : 0);
@@ -528,30 +567,102 @@ export default function Terminal(props: TerminalProps) {
       }
     };
 
+    // --- Ghost text: the best history line, drawn dim after the cursor ---
+    // A plain DOM child of the host (like the copy button / block flash) so the
+    // WebGL canvas is untouched; reported as an overlay rect so the native grid
+    // leaves those pixels alone (see OVERLAY_SEL in Tabs.tsx).
+    const hideGhost = () => {
+      if (!ghostSuffix) return;
+      ghostSuffix = "";
+      setAcGhost(false);
+      if (ghostEl) ghostEl.style.display = "none";
+      window.dispatchEvent(new Event("lume-overlay-sync"));
+    };
+
+    const updateGhost = (input: string) => {
+      const suffix = ghostCompletion(input);
+      if (!suffix || !term || !containerRef) {
+        hideGhost();
+        return;
+      }
+      const buf = term.buffer.active;
+      const rowInView = buf.baseY + buf.cursorY - buf.viewportY;
+      const { w, h } = cellSize();
+      // Never spill past the pane's right edge — it would sit on the DOM
+      // border ring and, under the native grid, on pixels nobody repaints.
+      const room = Math.max(0, (term.cols - buf.cursorX) * w);
+      if (room < w) {
+        hideGhost();
+        return;
+      }
+      if (!ghostEl) {
+        ghostEl = document.createElement("div");
+        ghostEl.className = "lume-ghost";
+        containerRef.appendChild(ghostEl);
+      }
+      ghostSuffix = suffix;
+      ghostEl.textContent = suffix;
+      ghostEl.style.left = `${buf.cursorX * w}px`;
+      ghostEl.style.top = `${rowInView * h}px`;
+      ghostEl.style.height = `${h}px`;
+      ghostEl.style.lineHeight = `${h}px`;
+      ghostEl.style.maxWidth = `${room}px`;
+      ghostEl.style.fontFamily = withFallbacks(props.appearance.fontFamily);
+      ghostEl.style.fontSize = `${props.appearance.fontSize}px`;
+      // Opaque background in the terminal's own color: under the native grid
+      // the pixels behind an overlay rect are not painted by the grid.
+      ghostEl.style.background = props.appearance.theme.background;
+      ghostEl.style.display = "";
+      setAcGhost(true);
+      window.dispatchEvent(new Event("lume-overlay-sync"));
+    };
+
+    /** Append the ghost's suffix to the shell's line (fish's → / End). */
+    const acceptGhost = () => {
+      const suffix = ghostSuffix;
+      hideGhost();
+      closeAutocomplete();
+      if (!suffix || ptyId === undefined) return;
+      const bytes = encoder.encode(suffix);
+      invoke("pty_write", { id: ptyId, dataB64: bytesToB64(bytes) }).catch(
+        console.error
+      );
+    };
+
     const recompute = () => {
       const r = readInput();
       acLog("recompute", { anchor: anchorRow, cwd: currentCwd, result: r });
       if (!r || !r.atEnd || r.text.trim().length === 0) {
+        hideGhost();
         closeAutocomplete();
         return;
       }
-      // Only a genuine keystroke may OPEN the popup. A closed popup stays closed
-      // when the line changes for any other reason (history recall, output) so
-      // arrow-key history navigation isn't hijacked.
-      if (!acOpen() && !typedSincePrompt) return;
+      // Only a genuine keystroke may OPEN the popup (or raise the ghost). A
+      // line that changed for any other reason — shell history recall with
+      // ↑/↓, output redraw — leaves both closed, so arrow-key history
+      // navigation isn't hijacked and → keeps moving the cursor.
+      if (!acOpen() && !typedSincePrompt) {
+        hideGhost();
+        return;
+      }
       const input = r.text;
       if (dismissedInput !== null) {
         if (input === dismissedInput) return;
         dismissedInput = null;
       }
       const firstToken = /\s/.test(input) ? "" : input;
+      // History renders as ghost text after the cursor (fish-style), NOT in
+      // the popup: → accepts the ghost, Tab accepts the popup selection.
+      updateGhost(input);
       // Synchronous sources render instantly; the async path source augments.
       showSuggestions(
-        mergeSuggestions(input, [
-          historySuggestions(input),
-          aliasSuggestions(firstToken),
-          commandSuggestions(firstToken),
-        ])
+        mergeSuggestions(
+          input,
+          orderSuggestionLists(input, {
+            aliases: aliasSuggestions(firstToken),
+            commands: commandSuggestions(firstToken),
+          })
+        )
       );
       const req = ++acReqSeq;
       pathSuggestions(input, currentCwd)
@@ -560,12 +671,14 @@ export default function Terminal(props: TerminalProps) {
           const latest = readInput();
           if (!latest || latest.text !== input || !latest.atEnd) return;
           showSuggestions(
-            mergeSuggestions(input, [
-              historySuggestions(input),
-              aliasSuggestions(firstToken),
-              paths,
-              commandSuggestions(firstToken),
-            ])
+            mergeSuggestions(
+              input,
+              orderSuggestionLists(input, {
+                aliases: aliasSuggestions(firstToken),
+                commands: commandSuggestions(firstToken),
+                paths,
+              })
+            )
           );
         })
         .catch(() => {});
@@ -601,6 +714,7 @@ export default function Terminal(props: TerminalProps) {
     const dismissAutocomplete = () => {
       const r = readInput();
       dismissedInput = r ? r.text : "";
+      hideGhost();
       closeAutocomplete();
     };
 
@@ -741,6 +855,18 @@ export default function Terminal(props: TerminalProps) {
       }
     );
 
+    // Closed while the listens above were in flight: the top-level onCleanup
+    // already ran and saw nothing to release — undo what was just created.
+    // (Whatever it DID see has been unlistened already; a second call is a
+    // no-op.)
+    if (disposed) {
+      unlistenExit?.();
+      unlistenBlock?.();
+      unlistenCwd?.();
+      unlistenAliases?.();
+      return;
+    }
+
     const { cols, rows } = term;
     ptyId = await invoke<number>("pty_spawn", {
       rows,
@@ -748,6 +874,11 @@ export default function Terminal(props: TerminalProps) {
       cwd: props.initialCwd ?? null,
       onOutput: outputChannel,
     });
+    // Closed while spawning: nobody owns this shell anymore — kill it now.
+    if (disposed) {
+      invoke("pty_kill", { id: ptyId }).catch(() => {});
+      return;
+    }
     props.onSpawned?.(ptyId);
     props.onFocusReady?.(() => term?.focus());
     props.onSelectionReady?.(() => term?.getSelection() ?? "");
@@ -905,6 +1036,12 @@ export default function Terminal(props: TerminalProps) {
       const doAttach = () =>
         invoke("native_grid_attach", attachPayload())
         .then(() => {
+          // Attach resolved after the pane closed: the cleanup ran with
+          // nativeGridAttached=false — release the Rust model, wire nothing.
+          if (disposed) {
+            invoke("native_grid_detach", { id: ptyId }).catch(() => {});
+            return;
+          }
           nativeGridAttached = true;
           containerRef?.classList.add("native-grid");
           updateVisibility();
@@ -1113,7 +1250,7 @@ export default function Terminal(props: TerminalProps) {
                 // with the reflow: resync them against the fresh model. The
                 // rebuild cleared the model's selection — bust the dedup
                 // cache so the mirror is re-sent even if unchanged.
-                lastSelKey = " ";
+                lastSelKey = "\0";
                 syncSelectionNow();
                 syncOffset();
               };
@@ -1330,15 +1467,30 @@ export default function Terminal(props: TerminalProps) {
     // Otherwise every key flows through untouched — including a bare Tab, so the
     // shell's own completion still works when Lume has nothing to offer.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown" || !acOpen()) return true;
+      if (e.type !== "keydown") return true;
+      // Ghost text is accepted with → / End (fish, zsh-autosuggestions) and
+      // works whether or not the popup is open — the two surfaces never
+      // compete for a key. At end-of-line both are no-ops in the shell, so
+      // swallowing them costs nothing when a ghost is showing.
+      if (ghostSuffix && (e.key === "ArrowRight" || e.key === "End")) {
+        const r = readInput();
+        if (r && r.atEnd) {
+          e.preventDefault();
+          acceptGhost();
+          return false;
+        }
+      }
+      if (!acOpen()) return true;
       const len = acItems().length;
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
+          acUserPicked = true;
           setAcIndex((i) => (i + 1) % len);
           return false;
         case "ArrowUp":
           e.preventDefault();
+          acUserPicked = true;
           setAcIndex((i) => (i - 1 + len) % len);
           return false;
         case "Tab":
@@ -1346,6 +1498,8 @@ export default function Terminal(props: TerminalProps) {
           acceptCurrent();
           return false;
         case "ArrowRight": {
+          // No ghost to take (handled above): → still accepts the popup's
+          // selection at end-of-line, where the key would do nothing anyway.
           const r = readInput();
           if (r && r.atEnd) {
             e.preventDefault();
@@ -1361,6 +1515,7 @@ export default function Terminal(props: TerminalProps) {
         case "Enter":
           // Let the command run; just drop the overlay and stale anchor.
           anchorRow = null;
+          hideGhost();
           closeAutocomplete();
           return true;
         default:
@@ -1445,11 +1600,11 @@ export default function Terminal(props: TerminalProps) {
       return best;
     };
 
-    const onHostMove = (e: MouseEvent) => {
+    const hostMoveNow = (buttons: number, clientY: number) => {
       // Button held = selection drag in progress: a hover affordance is
       // pointless and this handler's layout reads would interleave with
       // xterm's per-frame selection redraws.
-      if (e.buttons & 1) {
+      if (buttons & 1) {
         hideCopyBtn();
         return;
       }
@@ -1461,7 +1616,7 @@ export default function Terminal(props: TerminalProps) {
       const { h: cellH } = cellSize();
       if (cellH <= 0) return;
       const viewTop = term.buffer.active.viewportY;
-      const absRow = viewTop + Math.floor((e.clientY - rect.top) / cellH);
+      const absRow = viewTop + Math.floor((clientY - rect.top) / cellH);
       const block = blockMarkerAtRow(absRow);
       // No block under the cursor, or the block has no command yet (bare prompt)
       // → no copy affordance.
@@ -1478,12 +1633,26 @@ export default function Terminal(props: TerminalProps) {
       copyBtnEl.style.display = "";
     };
 
+    // Coalesce to one pass per frame: each pass does a layout read plus a
+    // full scan of `markers` (one per prompt in scrollback), and mousemove
+    // fires well above frame rate.
+    let hostMoveRaf = 0;
+    const onHostMove = (e: MouseEvent) => {
+      if (hostMoveRaf) return;
+      const { buttons, clientY } = e;
+      hostMoveRaf = requestAnimationFrame(() => {
+        hostMoveRaf = 0;
+        hostMoveNow(buttons, clientY);
+      });
+    };
+
     containerRef.addEventListener("mousemove", onHostMove);
     containerRef.addEventListener("mouseleave", scheduleHideCopyBtn);
     const copyScrollSub = term.onScroll(() => hideCopyBtn());
     addCleanup(() => {
       containerRef?.removeEventListener("mousemove", onHostMove);
       containerRef?.removeEventListener("mouseleave", scheduleHideCopyBtn);
+      if (hostMoveRaf) cancelAnimationFrame(hostMoveRaf);
       copyScrollSub.dispose();
       clearCopyHide();
     });
@@ -1612,6 +1781,7 @@ export default function Terminal(props: TerminalProps) {
   });
 
   onCleanup(() => {
+    disposed = true;
     if (nativeGridPoll) clearInterval(nativeGridPoll);
     if (nativeGridReattachTimer) clearTimeout(nativeGridReattachTimer);
     if (nativeGridAttached && ptyId !== undefined) {
@@ -1622,6 +1792,12 @@ export default function Terminal(props: TerminalProps) {
     unlistenCwd?.();
     unlistenAliases?.();
     markers.clear();
+    // The ghost is a raw DOM child: term.dispose() doesn't own it, and the
+    // native grid must stop reserving its rect.
+    ghostEl?.remove();
+    ghostEl = undefined;
+    ghostSuffix = "";
+    window.dispatchEvent(new Event("lume-overlay-sync"));
     if (ptyId !== undefined) {
       invoke("pty_kill", { id: ptyId }).catch(() => {});
     }
@@ -1640,7 +1816,11 @@ export default function Terminal(props: TerminalProps) {
             items={acItems}
             index={acIndex}
             pos={acPos}
-            onHover={setAcIndex}
+            ghost={acGhost}
+            onHover={(i) => {
+              acUserPicked = true;
+              setAcIndex(i);
+            }}
             onPick={(i) => {
               setAcIndex(i);
               acceptAcRef?.();

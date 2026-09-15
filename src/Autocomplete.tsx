@@ -1,4 +1,4 @@
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import type { Suggestion } from "./suggestions";
 import { t } from "./i18n";
 
@@ -13,6 +13,8 @@ type Props = {
   items: () => Suggestion[];
   index: () => number;
   pos: () => AcPosition;
+  /** True while history ghost text is showing after the cursor. */
+  ghost: () => boolean;
   onPick: (i: number) => void;
   onHover: (i: number) => void;
 };
@@ -61,6 +63,11 @@ export default function Autocomplete(props: Props) {
       <div class="lume-ac-footer">
         <span innerHTML={t("ac.complete")} />
         <span innerHTML={t("ac.navigate")} />
+        {/* Only advertise → while a ghost is actually showing: without one
+            the key falls back to accepting the selection. */}
+        <Show when={props.ghost()}>
+          <span innerHTML={t("ac.ghost")} />
+        </Show>
         <span innerHTML={t("ac.close")} />
       </div>
     </div>

@@ -20,7 +20,7 @@ import {
 } from "./config";
 import Settings from "./Settings";
 import type { Block, PtyBlock } from "./blocks";
-import { b64ToString, stripAnsi } from "./blocks";
+import { b64ToString, b64ToStringAsync, isLargeB64, stripAnsi } from "./blocks";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   aiCancel,
@@ -411,6 +411,12 @@ export default function Tabs() {
     layoutsOpen();
     draggingTabId();
     draggingPaneLeafId();
+    // Context menus are overlay rects too: the native grid must learn their
+    // geometry the instant they open/close, not on the next mousemove — the
+    // grid is clipped out of reported rects, so a stale list means either a
+    // repainted strip over a fresh menu or an unpainted hole after it closes.
+    paneCtxMenu();
+    tabCtxMenu();
     window.dispatchEvent(new Event("lume-overlay-sync"));
     invoke("native_grid_set_dim", { alpha: backdropOpen ? 0.4 : 0 }).catch(
       () => {}
@@ -424,7 +430,7 @@ export default function Tabs() {
   // pane-covering affordance to the selector.
   if (navigator.userAgent.includes("Linux")) {
     const OVERLAY_SEL =
-      '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, [class*="context-menu"], [class*="ctx-menu"], ' +
+      '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, .lume-ghost, [class*="context-menu"], [class*="ctx-menu"], ' +
       // Full DOM overlays (modals, palettes, search bar, pane drop zones):
       // the grid paints around these rects instead of yielding to xterm.
       ".settings-panel, .palette, .layouts-popup, .remote-slideover, .term-search, .pane-drop-zone";
@@ -549,18 +555,28 @@ export default function Tabs() {
     return null;
   };
 
+  // Blocks and tabs can shift while an ai call is in flight (block removed,
+  // MAX_BLOCKS_PER_LEAF eviction, tab reorder): indices captured before an
+  // await go stale and would write the ai state onto a NEIGHBOUR block —
+  // always re-resolve by id right before touching the store.
+  const locateBlock = (tabId: number, leafId: number, blockId: number) => {
+    const tIdx = tabIndex(tabId);
+    if (tIdx === -1) return null;
+    const leaf = tabs[tIdx].leaves[leafId];
+    if (!leaf) return null;
+    const bIdx = leaf.blocks.findIndex((b) => b.id === blockId);
+    if (bIdx === -1) return null;
+    return { tIdx, bIdx, block: leaf.blocks[bIdx] };
+  };
+
   const explainBlock = async (
     tabId: number,
     leafId: number,
     blockId: number
   ) => {
-    const tIdx = tabIndex(tabId);
-    if (tIdx === -1) return;
-    const leaf = tabs[tIdx].leaves[leafId];
-    if (!leaf) return;
-    const bIdx = leaf.blocks.findIndex((b) => b.id === blockId);
-    if (bIdx === -1) return;
-    const block = leaf.blocks[bIdx];
+    const loc = locateBlock(tabId, leafId, blockId);
+    if (!loc) return;
+    const block = loc.block;
     if (!block.command) return;
 
     const existing = block.ai;
@@ -574,13 +590,17 @@ export default function Tabs() {
       } catch {}
     }
 
-    setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", {
-      status: "streaming",
-      response: "",
-      requestId: null,
-      error: null,
-      history: [],
-    });
+    {
+      const l = locateBlock(tabId, leafId, blockId);
+      if (!l) return;
+      setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", {
+        status: "streaming",
+        response: "",
+        requestId: null,
+        error: null,
+        history: [],
+      });
+    }
 
     try {
       const requestId = await aiExplainBlock({
@@ -588,9 +608,16 @@ export default function Tabs() {
         output: block.output,
         exitCode: block.exitCode ?? 0,
       });
-      setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", "requestId", requestId);
+      const l = locateBlock(tabId, leafId, blockId);
+      if (!l || !l.block.ai) {
+        aiCancel(requestId).catch(() => {});
+        return;
+      }
+      setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", "requestId", requestId);
     } catch (e) {
-      setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", {
+      const l = locateBlock(tabId, leafId, blockId);
+      if (!l || !l.block.ai) return;
+      setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", {
         status: "error",
         error: String(e),
       });
@@ -604,13 +631,9 @@ export default function Tabs() {
     question: string
   ) => {
     if (!question.trim()) return;
-    const tIdx = tabIndex(tabId);
-    if (tIdx === -1) return;
-    const leaf = tabs[tIdx].leaves[leafId];
-    if (!leaf) return;
-    const bIdx = leaf.blocks.findIndex((b) => b.id === blockId);
-    if (bIdx === -1) return;
-    const block = leaf.blocks[bIdx];
+    const loc = locateBlock(tabId, leafId, blockId);
+    if (!loc) return;
+    const block = loc.block;
     const existingAi = block.ai;
     if (!existingAi || existingAi.status === "streaming") return;
 
@@ -645,7 +668,7 @@ export default function Tabs() {
       { role: "user", content: question.trim() },
     ];
 
-    setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", {
+    setTabs(loc.tIdx, "leaves", leafId, "blocks", loc.bIdx, "ai", {
       status: "streaming",
       response: "",
       requestId: null,
@@ -655,9 +678,16 @@ export default function Tabs() {
 
     try {
       const requestId = await aiChat(messages);
-      setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", "requestId", requestId);
+      const l = locateBlock(tabId, leafId, blockId);
+      if (!l || !l.block.ai) {
+        aiCancel(requestId).catch(() => {});
+        return;
+      }
+      setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", "requestId", requestId);
     } catch (e) {
-      setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", {
+      const l = locateBlock(tabId, leafId, blockId);
+      if (!l || !l.block.ai) return;
+      setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", {
         status: "error",
         error: String(e),
       });
@@ -669,19 +699,17 @@ export default function Tabs() {
     leafId: number,
     blockId: number
   ) => {
-    const tIdx = tabIndex(tabId);
-    if (tIdx === -1) return;
-    const leaf = tabs[tIdx].leaves[leafId];
-    if (!leaf) return;
-    const bIdx = leaf.blocks.findIndex((b) => b.id === blockId);
-    if (bIdx === -1) return;
-    const ai = leaf.blocks[bIdx].ai;
+    const loc = locateBlock(tabId, leafId, blockId);
+    if (!loc) return;
+    const ai = loc.block.ai;
     if (ai?.requestId !== null && ai?.requestId !== undefined) {
       try {
         await aiCancel(ai.requestId);
       } catch {}
     }
-    setTabs(tIdx, "leaves", leafId, "blocks", bIdx, "ai", null);
+    const l = locateBlock(tabId, leafId, blockId);
+    if (!l) return;
+    setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", null);
   };
 
   // Per-leaf focus/scroll/refresh callbacks, registered by each Terminal on mount.
@@ -856,15 +884,6 @@ export default function Tabs() {
     refetchAi();
   });
 
-  // Publish the tab list to remote clients so the phone can switch terminals.
-  // The phone picks its own target (decoupled from the desktop's focus); the
-  // initial target is set when remote control starts.
-  createEffect(() => {
-    const list = tabs
-      .map((t) => ({ id: t.leaves[t.activeLeafId]?.ptyId, title: t.title }))
-      .filter((t): t is { id: number; title: string } => typeof t.id === "number");
-    void remoteSetTabs(list).catch(() => {});
-  });
   // When the phone taps "+", switch the remote to the new tab once its pty
   // spawns (a freshly-created leaf has ptyId === null for a moment).
   const [remoteFocusTabId, setRemoteFocusTabId] = createSignal<number | null>(
@@ -889,6 +908,20 @@ export default function Tabs() {
     if (remotePollTimer) clearInterval(remotePollTimer);
     remotePollTimer = undefined;
   };
+
+  // Publish the tab list to remote clients so the phone can switch terminals.
+  // The phone picks its own target (decoupled from the desktop's focus); the
+  // initial target is set when remote control starts. Gated on the server
+  // actually running: every cd/title change re-runs this effect, and most
+  // sessions never start the remote — don't cross the IPC for nothing. When
+  // `running` flips true the effect re-runs and pushes the current list.
+  createEffect(() => {
+    if (!remoteInfo()?.running) return;
+    const list = tabs
+      .map((t) => ({ id: t.leaves[t.activeLeafId]?.ptyId, title: t.title }))
+      .filter((t): t is { id: number; title: string } => typeof t.id === "number");
+    void remoteSetTabs(list).catch(() => {});
+  });
   // Live refresh of the connected-clients count + tunnel URL while running.
   const refreshRemote = async () => {
     try {
@@ -944,10 +977,15 @@ export default function Tabs() {
   };
   onCleanup(stopRemotePoll);
 
-  const insertIntoActiveTerminal = async (text: string) => {
+  const insertIntoActiveTerminal = async (text: string, execute = false) => {
     const leaf = activeLeaf();
     if (!leaf || leaf.ptyId === null) return;
-    const bytes = new TextEncoder().encode(text);
+    // Interior newlines act as Enter in the PTY: a multi-line AI answer or a
+    // hostile file name would execute on "insert". Flatten them — only the
+    // explicit `execute` path sends the single trailing newline.
+    const flat = text.replace(/[\r\n]+/g, " ");
+    const payload = execute ? flat.trimEnd() + "\n" : flat;
+    const bytes = new TextEncoder().encode(payload);
     const chunk = 0x8000;
     let bin = "";
     for (let i = 0; i < bytes.length; i += chunk) {
@@ -1318,14 +1356,21 @@ export default function Tabs() {
       const t = e.target as HTMLElement;
       if (!t.closest(".pane-context-menu")) setPaneCtxMenu(null);
     };
+    // Capture phase: the terminal's own key handler forwards Escape to the
+    // PTY and stops propagation, so a bubble-phase listener never sees it and
+    // the menu stayed open.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPaneCtxMenu(null);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.preventDefault();
+        setPaneCtxMenu(null);
+      }
     };
     window.addEventListener("mousedown", onAnyClick);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     onCleanup(() => {
       window.removeEventListener("mousedown", onAnyClick);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     });
   });
 
@@ -1559,14 +1604,19 @@ export default function Tabs() {
       const t = e.target as HTMLElement;
       if (!t.closest(".tab-context-menu")) setTabCtxMenu(null);
     };
+    // Capture phase — see the pane menu above: the terminal swallows Escape.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTabCtxMenu(null);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.preventDefault();
+        setTabCtxMenu(null);
+      }
     };
     window.addEventListener("mousedown", onAnyClick);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     onCleanup(() => {
       window.removeEventListener("mousedown", onAnyClick);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
     });
   });
 
@@ -1626,7 +1676,13 @@ export default function Tabs() {
         const blocks = leaf.blocks;
         if (blocks.length === 0) return;
         const lastIdx = blocks.length - 1;
-        setTabs(tIdx, "leaves", leafId, "blocks", lastIdx, "status", "running");
+        // Re-stamp startedAt at execution: the block is created when the
+        // PROMPT is shown, and the duration badge must not count the time the
+        // user spent typing/thinking at it.
+        setTabs(tIdx, "leaves", leafId, "blocks", lastIdx, {
+          status: "running" as const,
+          startedAt: Date.now(),
+        });
         commandRunStart.set(leafId, Date.now());
         break;
       }
@@ -1634,13 +1690,25 @@ export default function Tabs() {
         const blocks = leaf.blocks;
         if (blocks.length === 0) return;
         const lastIdx = blocks.length - 1;
-        const output = ev.outputB64 ? b64ToString(ev.outputB64) : null;
+        // Small captures (the common case) decode inline; large ones decode
+        // asynchronously so the prompt's return doesn't hitch the input.
+        const large = isLargeB64(ev.outputB64);
+        const output = !large && ev.outputB64 ? b64ToString(ev.outputB64) : null;
         setTabs(tIdx, "leaves", leafId, "blocks", lastIdx, {
           status: "done",
           finishedAt: Date.now(),
           exitCode: ev.exitCode,
           output,
         });
+        if (large) {
+          const blockId = blocks[lastIdx].id;
+          void b64ToStringAsync(ev.outputB64!).then((decoded) => {
+            const l = locateBlock(tabId, leafId, blockId);
+            if (l) {
+              setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "output", decoded);
+            }
+          });
+        }
         const runStart = commandRunStart.get(leafId);
         commandRunStart.delete(leafId);
         if (runStart) {
@@ -2082,12 +2150,15 @@ export default function Tabs() {
   // the relevant store fields, so the effect re-runs whenever they change.
   let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   createEffect(() => {
-    const json = JSON.stringify(serializeSession());
+    // The snapshot read is what tracks the deps; the JSON.stringify is
+    // deferred to the flush — during a divider drag this effect re-runs per
+    // mousemove, and stringifying the whole session each frame adds up.
+    serializeSession();
     if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
     sessionSaveTimer = setTimeout(() => {
       sessionSaveTimer = null;
       try {
-        localStorage.setItem(SESSION_KEY, json);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(serializeSession()));
       } catch {}
     }, 400);
   });
@@ -2256,7 +2327,7 @@ export default function Tabs() {
                   <Show when={leafIds(tab.tree).length > 1}>
                     <span
                       class="tab-panes-badge"
-                      title={`${leafIds(tab.tree).length} panes`}
+                      title={t("tab.panes", { n: leafIds(tab.tree).length })}
                     >
                       ⊞ {leafIds(tab.tree).length}
                     </span>
@@ -2520,8 +2591,9 @@ export default function Tabs() {
                   >
                     <IconX />
                     <span>
-                      {t("pane.close")}
-                      <Show when={paneCount === 1}>{t("pane.closeTab")}</Show>
+                      {paneCount === 1
+                        ? t("pane.closeTabOnly")
+                        : t("pane.close")}
                     </span>
                   </button>
                 </div>
@@ -2608,7 +2680,7 @@ export default function Tabs() {
               onResize={setFileTreeWidth}
               onToggle={() => setFileTreeVisible(false)}
               cwd={() => activeLeaf()?.cwd ?? null}
-              onRun={(command) => insertIntoActiveTerminal(command + "\n")}
+              onRun={(command) => insertIntoActiveTerminal(command, true)}
               onInsert={(text) => insertIntoActiveTerminal(text)}
               onCopy={(text) => copyText(text)}
               commands={() => config.fileTree}
@@ -2655,7 +2727,10 @@ export default function Tabs() {
                                 }
                                 onSpawned={(ptyId) => {
                                   const idx = tabIndex(tab.id);
-                                  if (idx === -1) return;
+                                  // The leaf may have been closed while
+                                  // pty_spawn was in flight.
+                                  if (idx === -1 || !tabs[idx].leaves[leafId])
+                                    return;
                                   setTabs(
                                     idx,
                                     "leaves",
@@ -2793,6 +2868,16 @@ export default function Tabs() {
               totalBlocks={() =>
                 activeLeaf()?.blocks.filter(hasCommand).length ?? 0
               }
+              paneInfo={() => {
+                const tab = activeTab();
+                if (!tab) return null;
+                const ids = leafIds(tab.tree);
+                if (ids.length < 2) return null;
+                return {
+                  idx: ids.indexOf(tab.activeLeafId) + 1,
+                  total: ids.length,
+                };
+              }}
               integrationActive={oscSeen}
               selectedBlockId={() => activeLeaf()?.selectedBlockId ?? null}
               navMode={blockNavMode}

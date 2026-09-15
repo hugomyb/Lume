@@ -163,6 +163,7 @@ export const ko: Dict = {
   "remote.installHint":
     "로컬 네트워크 외부에서 제어하려면 <code>cloudflared</code>를 설치하세요.",
   "remote.warn": "이 링크가 있는 사람은 누구나 이 터미널을 조작할 수 있습니다.",
+  "remote.lanClear": "LAN 링크는 암호화되지 않은 HTTP입니다. 신뢰할 수 없는 네트워크에서는 입력·표시 내용이 가로채질 수 있습니다. 인터넷 터널 사용을 권장합니다.",
   "remote.installBtn": "터널 설치 및 활성화",
   "remote.installing": "설치 중…",
   "remote.stop": "원격 제어 중지",
