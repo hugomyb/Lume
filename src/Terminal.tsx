@@ -98,6 +98,19 @@ const acLog = (...args: unknown[]) => {
   if (AC_DEBUG) console.debug("[lume-ac]", ...args);
 };
 
+// Optional dead-key / input-method tracing. Enable from the devtools console
+// with: localStorage.setItem("lume.debugIme", "1")  (then reload)
+const IME_DEBUG = (() => {
+  try {
+    return localStorage.getItem("lume.debugIme") === "1";
+  } catch {
+    return false;
+  }
+})();
+const imeLog = (...args: unknown[]) => {
+  if (IME_DEBUG) console.debug("[lume-ime]", ...args);
+};
+
 // Appended after the user's font so xterm — which has weak built-in glyph
 // fallback — can still find icons/symbols missing from the chosen font (e.g.
 // Powerline/Nerd glyphs, or the dashed arrows ⇡⇣ P10k uses). Only the fonts
@@ -1522,6 +1535,110 @@ export default function Terminal(props: TerminalProps) {
           return true;
       }
     });
+
+    // --- Dead keys (^ ¨ ` ~ on fr/de/es layouts) ---
+    // Broken in xterm 6 under WebKit2GTK. When the platform input method
+    // handles a key, WebKit reports the keydown as keyCode 229 ("the IM is
+    // processing this") and fires NO keypress; the composed character arrives
+    // later as an `input` event. All three of xterm's text consumers miss it:
+    //   - _keyPress never runs, so its String.fromCharCode path is dead;
+    //   - _inputEvent requires `!e.composed || !_keyDownSeen`, but `input` is
+    //     always composed:true and _keyDownSeen only clears on keyup — so the
+    //     character is dropped and left sitting in the hidden textarea;
+    //   - CompositionHelper.keydown() sees 229 and falls back to
+    //     _handleAnyTextareaChanges(), which diffs that textarea against a
+    //     snapshot inside a setTimeout(0) using `next.replace(prev, "")` —
+    //     a racy first-occurrence removal over a value nothing ever clears.
+    // Net effect: "^e" comes out duplicated, reordered or swallowed.
+    // So take the sequence over: hide the dead-key keydown and the key that
+    // completes it from xterm, then write exactly what the IM committed.
+    // A real preedit-based IME (CJK) still goes through CompositionHelper —
+    // we stand down as soon as a compositionstart proves one is involved.
+    if (term.textarea) {
+      const ta = term.textarea;
+      // containerRef is the capture root: xterm binds its own key and
+      // composition listeners on the textarea itself, and a capture listener
+      // on an ancestor always runs first — the only place from which an event
+      // can be stopped before xterm sees it.
+      let deadPending = false; // dead key seen, waiting for the next key
+      let commitPending = false; // that key hidden too, waiting for the commit
+      let imeComposing = false; // a real preedit is up: xterm owns the keys
+      const forget = () => {
+        deadPending = false;
+        commitPending = false;
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.target !== ta || imeComposing) return;
+        if (deadPending) {
+          deadPending = false;
+          // A printable key completes the sequence (^+e → ê, ^+space → ^).
+          // Anything else aborts it (Escape, Enter, arrows): hand the key back
+          // to xterm so it keeps its normal meaning.
+          if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            commitPending = true;
+            e.stopPropagation();
+            imeLog("hold completion", e.key);
+          }
+          return;
+        }
+        if (e.key === "Dead" || e.keyCode === 229) {
+          deadPending = true;
+          e.stopPropagation();
+          imeLog("dead", { key: e.key, keyCode: e.keyCode });
+        }
+      };
+      // Only reached if WebKit does emit a keypress for the composed char, in
+      // which case xterm's _keyPress would send it a second time.
+      const onKeyPress = (e: KeyboardEvent) => {
+        if (commitPending) e.stopPropagation();
+      };
+      const onInput = (e: Event) => {
+        if (!deadPending && !commitPending) return;
+        const data = (e as InputEvent).data;
+        imeLog("commit", data);
+        e.stopPropagation();
+        forget();
+        // The IM inserted the text into the hidden textarea, which xterm only
+        // clears on Enter / Ctrl-C / blur. Leaving it there is what its
+        // composition diffing chokes on, so drop it now.
+        ta.value = "";
+        if (data) term?.input(data, true);
+      };
+      // A preedit means a full IME, not a bare dead key: give the whole
+      // sequence back to CompositionHelper rather than double-sending it.
+      const onCompositionStart = () => {
+        imeComposing = true;
+        forget();
+        imeLog("compositionstart → standing down");
+      };
+      const onCompositionEnd = () => {
+        imeComposing = false;
+      };
+      containerRef.addEventListener("keydown", onKeyDown, true);
+      containerRef.addEventListener("keypress", onKeyPress, true);
+      containerRef.addEventListener("input", onInput, true);
+      containerRef.addEventListener(
+        "compositionstart",
+        onCompositionStart,
+        true
+      );
+      containerRef.addEventListener("compositionend", onCompositionEnd, true);
+      addCleanup(() => {
+        containerRef?.removeEventListener("keydown", onKeyDown, true);
+        containerRef?.removeEventListener("keypress", onKeyPress, true);
+        containerRef?.removeEventListener("input", onInput, true);
+        containerRef?.removeEventListener(
+          "compositionstart",
+          onCompositionStart,
+          true
+        );
+        containerRef?.removeEventListener(
+          "compositionend",
+          onCompositionEnd,
+          true
+        );
+      });
+    }
 
     // Expose the close fn so the top-level active() effect can drop the popup
     // when this pane is deactivated (createEffect can't be created here — we're

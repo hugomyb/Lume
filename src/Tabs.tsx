@@ -50,6 +50,10 @@ import {
   type RemoteInfo,
 } from "./remote";
 import FileTree from "./FileTree";
+import CloseConfirm, {
+  type CloseConfirmTarget,
+  type RunningCommand,
+} from "./CloseConfirm";
 import RemoteDialog from "./RemoteDialog";
 import UpdateBanner from "./UpdateBanner";
 import { setLocale, t } from "./i18n";
@@ -900,6 +904,10 @@ export default function Tabs() {
     }
   });
 
+  // Pending "a command is still running" confirmation, null when none is up.
+  const [closeConfirm, setCloseConfirm] =
+    createSignal<CloseConfirmTarget | null>(null);
+
   // Remote-control dialog (opened from the pane context menu, not Settings).
   const [remoteDialogOpen, setRemoteDialogOpen] = createSignal(false);
   const [remoteInfo, setRemoteInfo] = createSignal<RemoteInfo | null>(null);
@@ -1107,7 +1115,9 @@ export default function Tabs() {
 
   const cancelRename = () => setEditingTabId(null);
 
-  const closeTab = (id: number) => {
+  // Raw close, no questions asked. Everything user-facing goes through the
+  // guarded `closeTab` below.
+  const closeTabNow = (id: number) => {
     const tab = tabs.find((t) => t.id === id);
     if (tab) {
       // Clean up callback registries for all leaves in this tab.
@@ -1167,13 +1177,13 @@ export default function Tabs() {
     setTabs(tIdx, "activeLeafId", newLeaf.id);
   };
 
-  const closeLeaf = (tabId: number, toClose: number) => {
+  const closeLeafNow = (tabId: number, toClose: number) => {
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     const ids = leafIds(tab.tree);
     if (ids.length === 1) {
       // Only one pane → behave like closing the tab.
-      closeTab(tab.id);
+      closeTabNow(tab.id);
       return;
     }
     const tIdx = tabIndex(tab.id);
@@ -1198,6 +1208,69 @@ export default function Tabs() {
     leafPasteFns.delete(toClose);
     leafAltScreenFns.delete(toClose);
     leafSearchFns.delete(toClose);
+  };
+
+  // --- Close confirmation when a command is still running ---
+  // Killing a pane kills its PTY, and the shell's children with it: an
+  // interrupted build/deploy/ssh would vanish without a word. A pane counts as
+  // busy when its last block is still `running` — set by OSC 133;C, cleared by
+  // 133;D. Shells without shell integration never report it, so for them
+  // closing stays as silent as before (nothing to detect with).
+  const runningInLeaf = (
+    tab: TabState,
+    leafId: number
+  ): RunningCommand | null => {
+    const leaf = tab.leaves[leafId];
+    if (!leaf) return null;
+    const last = leaf.blocks[leaf.blocks.length - 1];
+    if (!last || last.status !== "running") return null;
+    return { leafId, command: last.command, startedAt: last.startedAt };
+  };
+
+  const closeTab = (id: number) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return;
+    const busy = leafIds(tab.tree)
+      .map((lid) => runningInLeaf(tab, lid))
+      .filter((c): c is RunningCommand => c !== null);
+    if (busy.length > 0) {
+      setCloseConfirm({
+        kind: "tab",
+        tabId: id,
+        leafId: null,
+        commands: busy,
+      });
+      return;
+    }
+    closeTabNow(id);
+  };
+
+  const closeLeaf = (tabId: number, toClose: number) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const busy = runningInLeaf(tab, toClose);
+    if (busy) {
+      setCloseConfirm({
+        // Last pane of the tab → this really closes the tab, say so.
+        kind: leafIds(tab.tree).length === 1 ? "tab" : "pane",
+        tabId,
+        leafId: toClose,
+        commands: [busy],
+      });
+      return;
+    }
+    closeLeafNow(tabId, toClose);
+  };
+
+  const confirmClose = () => {
+    const target = closeConfirm();
+    setCloseConfirm(null);
+    if (!target) return;
+    // The command may have finished — or the shell exited — while we asked.
+    const tab = tabs.find((t) => t.id === target.tabId);
+    if (!tab) return;
+    if (target.leafId === null) closeTabNow(target.tabId);
+    else if (tab.leaves[target.leafId]) closeLeafNow(target.tabId, target.leafId);
   };
 
   const closeActivePane = () => {
@@ -1881,6 +1954,17 @@ export default function Tabs() {
         e.preventDefault();
         setSettingsOpen(false);
       }
+      return;
+    }
+
+    // The "a command is still running" confirmation is modal: it owns the
+    // keyboard entirely, so no shortcut fires and nothing leaks to the shell
+    // behind the overlay while the question is on screen.
+    if (closeConfirm()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape") setCloseConfirm(null);
+      else if (e.key === "Enter") confirmClose();
       return;
     }
 
@@ -2757,7 +2841,10 @@ export default function Tabs() {
                                   // Close this pane wherever it lives — like a
                                   // classic terminal, a pane whose shell exits
                                   // goes away even if it isn't focused.
-                                  closeLeaf(tab.id, leafId);
+                                  // Unguarded: the shell is already gone, and a
+                                  // block left stuck on `running` (no 133;D on
+                                  // the way out) must not strand the pane.
+                                  closeLeafNow(tab.id, leafId);
                                 }}
                                 onBlock={(ev) =>
                                   handleBlock(tab.id, leafId, ev)
@@ -2936,6 +3023,11 @@ export default function Tabs() {
               onEnableTunnel={enableTunnel}
               onStop={stopRemoteControl}
               onClose={() => setRemoteDialogOpen(false)}
+            />
+            <CloseConfirm
+              target={closeConfirm}
+              onConfirm={confirmClose}
+              onCancel={() => setCloseConfirm(null)}
             />
           </div>
         </div>

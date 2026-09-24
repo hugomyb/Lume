@@ -194,6 +194,18 @@ const en: Dict = {
   "tab.close": "Close this tab",
   "tab.panes": " ({n} panes)",
 
+  // --- Close confirmation (a command is still running) ---
+  "closeConfirm.titleTab": "Close this tab?",
+  "closeConfirm.titlePane": "Close this pane?",
+  "closeConfirm.bodyOne": "A command is still running and will be killed:",
+  "closeConfirm.bodyMany":
+    "{n} commands are still running and will be killed:",
+  "closeConfirm.unnamed": "unnamed command",
+  "closeConfirm.elapsed": "running for {d}",
+  "closeConfirm.cancel": "Cancel",
+  "closeConfirm.confirm": "Close anyway",
+  "closeConfirm.hint": "<kbd>Esc</kbd> cancel · <kbd>Enter</kbd> close",
+
   // --- File tree ---
   "ft.hidden": "Hidden files",
   "ft.refresh": "Refresh",
@@ -577,6 +589,16 @@ const fr: Dict = {
   "tab.newTab": "Nouveau tab (Ctrl+Shift+T)",
   "tab.close": "Fermer ce tab",
   "tab.panes": " ({n} panes)",
+
+  "closeConfirm.titleTab": "Fermer cet onglet ?",
+  "closeConfirm.titlePane": "Fermer ce pane ?",
+  "closeConfirm.bodyOne": "Une commande tourne encore et sera tuée :",
+  "closeConfirm.bodyMany": "{n} commandes tournent encore et seront tuées :",
+  "closeConfirm.unnamed": "commande sans nom",
+  "closeConfirm.elapsed": "depuis {d}",
+  "closeConfirm.cancel": "Annuler",
+  "closeConfirm.confirm": "Fermer quand même",
+  "closeConfirm.hint": "<kbd>Esc</kbd> annuler · <kbd>Entrée</kbd> fermer",
 
   "ft.hidden": "Fichiers cachés",
   "ft.refresh": "Rafraîchir",

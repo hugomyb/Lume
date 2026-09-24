@@ -2269,6 +2269,89 @@ body,
   color: #0e1014;
 }
 
+/* --- Close confirmation (running command) --- */
+.confirm-dialog {
+  width: min(460px, 92vw);
+}
+
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.confirm-icon {
+  color: #ffb85c;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.confirm-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.confirm-body {
+  padding: 12px 14px 4px;
+}
+
+.confirm-text {
+  margin: 0 0 9px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+
+.confirm-cmds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.confirm-cmd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: rgba(var(--hover-rgb), 0.06);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.confirm-cmd code {
+  flex: 1;
+  font-family: ui-monospace, "DejaVu Sans Mono", monospace;
+  font-size: 12px;
+  color: var(--fg);
+  background: transparent;
+  padding: 0;
+  word-break: break-all;
+}
+
+.confirm-elapsed {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+
+.palette-btn.danger {
+  background: #e5484d;
+  border-color: #e5484d;
+  color: #fff;
+  font-weight: 600;
+}
+
+.palette-btn.danger:hover {
+  filter: brightness(1.1);
+  color: #fff;
+}
+
 /* --- Workflows palette --- */
 .workflows-palette {
   display: flex;
