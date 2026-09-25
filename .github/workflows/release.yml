@@ -2,7 +2,8 @@ name: release
 
 # Builds and publishes installers for all three desktop OSes on a vX.Y.Z tag:
 #   Linux   — .deb / .rpm / .AppImage   (+ in-app auto-update via latest.json)
-#   macOS   — .dmg  (universal: Intel + Apple Silicon)   [unsigned for now]
+#   macOS   — .dmg + .app (universal: Intel + Apple Silicon)
+#             (+ in-app auto-update via latest.json)      [unsigned for now]
 #   Windows — .exe  (NSIS)                                [unsigned for now]
 #
 # Flow: create a DRAFT release, build each OS into it (matrix, in parallel),
@@ -111,7 +112,11 @@ jobs:
             args: --bundles deb,rpm,appimage
           - platform: macos-latest
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --bundles dmg --target universal-apple-darwin
+            # `app` is what carries the updater: Tauri derives the macOS
+            # updater artifact (Lume.app.tar.gz + .sig) from the .app bundle,
+            # never from the .dmg. Building dmg alone left latest.json with no
+            # darwin entry, so in-app updates were dead on macOS.
+            args: --bundles app,dmg --target universal-apple-darwin
           - platform: windows-latest
             rust_targets: ""
             args: --bundles nsis
@@ -147,6 +152,46 @@ jobs:
 
       - name: Install JS dependencies
         run: npm ci
+
+      # macOS code signing + notarization, armed ONLY when the Apple secrets are
+      # configured. Absent them nothing is exported and the bundler produces the
+      # same unsigned .app/.dmg as before — so this never breaks the pipeline on
+      # a fork or before the certificate exists. Required secrets:
+      #   APPLE_CERTIFICATE           base64 of the Developer ID .p12
+      #   APPLE_CERTIFICATE_PASSWORD  its export password
+      #   APPLE_SIGNING_IDENTITY      "Developer ID Application: NAME (TEAMID)"
+      # and, to also notarize (removes the Gatekeeper prompt entirely):
+      #   APPLE_ID, APPLE_PASSWORD (an app-specific password), APPLE_TEAM_ID
+      - name: Arm macOS signing when the Apple secrets are configured
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # Heredoc form: a base64 certificate is long and may contain newlines,
+          # which the plain KEY=VALUE form of $GITHUB_ENV cannot carry.
+          forward() {
+            for v in "$@"; do
+              printf '%s<<__LUME_EOF__\n%s\n__LUME_EOF__\n' "$v" "${!v}" >> "$GITHUB_ENV"
+            done
+          }
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "::warning::No Apple signing secrets — shipping an UNSIGNED macOS build; Gatekeeper will warn on first launch."
+            exit 0
+          fi
+          forward APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY
+          echo "Code signing enabled."
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            forward APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            echo "Notarization enabled."
+          else
+            echo "::warning::Signed but NOT notarized — first launch still shows a Gatekeeper prompt."
+          fi
 
       - name: Build, sign and upload to the draft release
         uses: tauri-apps/tauri-action@v0
@@ -233,6 +278,7 @@ jobs:
           DEB_SIG="$(pick '*.deb.sig')"
           RPM_SIG="$(pick '*.rpm.sig')"
           EXE_SIG="$(pick '*-setup.exe.sig')"
+          APP_SIG="$(pick '*.app.tar.gz.sig')"
 
           jq -n \
             --arg version "$VERSION" \
@@ -245,6 +291,8 @@ jobs:
             --arg rpm_url "$DL/${RPM_SIG%.sig}" \
             --arg exe_sig "$(cat "$EXE_SIG")" \
             --arg exe_url "$DL/${EXE_SIG%.sig}" \
+            --arg app_sig "$(cat "$APP_SIG")" \
+            --arg app_url "$DL/${APP_SIG%.sig}" \
             '{
               version: $version,
               notes: "",
@@ -255,7 +303,14 @@ jobs:
                 "linux-x86_64-deb":      { signature: $deb_sig, url: $deb_url },
                 "linux-x86_64-rpm":      { signature: $rpm_sig, url: $rpm_url },
                 "windows-x86_64":        { signature: $exe_sig, url: $exe_url },
-                "windows-x86_64-nsis":   { signature: $exe_sig, url: $exe_url }
+                "windows-x86_64-nsis":   { signature: $exe_sig, url: $exe_url },
+                # One universal bundle serves both arches. The updater looks
+                # itself up as darwin-{arch}, so both concrete keys must be
+                # present; darwin-universal is there for the builds that ask
+                # for it by that name.
+                "darwin-x86_64":         { signature: $app_sig, url: $app_url },
+                "darwin-aarch64":        { signature: $app_sig, url: $app_url },
+                "darwin-universal":      { signature: $app_sig, url: $app_url }
               }
             }' > latest.json
           cat latest.json

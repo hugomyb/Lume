@@ -33,6 +33,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist"
+    },
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

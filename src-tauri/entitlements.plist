@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the signed macOS build.
+
+  Notarization requires the hardened runtime, and the hardened runtime blocks
+  by default several things a terminal emulator cannot live without. Each key
+  below is here for a reason; none of them is boilerplate.
+
+  Deliberately NOT sandboxed (no com.apple.security.app-sandbox): the whole
+  point of Lume is to run the user's own binaries anywhere on their disk. A
+  sandboxed terminal would be an empty shell — and it would rule out
+  distribution outside the App Store, which is how Lume ships.
+-->
+<plist version="1.0">
+<dict>
+    <!-- WKWebView JIT-compiles the JS that drives the whole UI. Without this
+         the window comes up blank or crawls. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Same reason, for the JIT's writable-executable pages. WebKit needs
+         both; allow-jit alone is not enough on all macOS versions. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- The terminal spawns the user's binaries — Homebrew, nvm, pyenv, their
+         own scripts — none of which are signed by us, and many not signed at
+         all. Library validation would refuse to let them load their dylibs. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Shells and dev tooling legitimately set DYLD_* (rbenv, asdf, sanitizer
+         builds). The hardened runtime strips them unless this is granted. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>
