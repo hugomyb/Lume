@@ -38,9 +38,21 @@ pub fn notify(
                 n.sound_name("complete");
             }
         }
-        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        // macOS takes the icon from the app bundle and has no desktop-entry
+        // notion, but the sound does carry over: notify-rust maps sound_name to
+        // NSUserNotification.soundName. It used to be dropped on the floor, so a
+        // caller asking for a sound was silently ignored. "Ping" is a stock
+        // system sound, so it needs no asset shipped by us.
+        #[cfg(target_os = "macos")]
         {
-            let _ = (&icon, &sound); // unused on macOS/Windows
+            let _ = &icon;
+            if sound.unwrap_or(false) {
+                n.sound_name("Ping");
+            }
+        }
+        #[cfg(windows)]
+        {
+            let _ = (&icon, &sound);
         }
 
         n.show().map(|_| ()).map_err(|e| e.to_string())
