@@ -16,6 +16,14 @@ if [[ -n "$__LUME_SHELL_INIT_LOADED" ]]; then
 fi
 __LUME_SHELL_INIT_LOADED=1
 
+# Matches a `history 1` line: leading blanks, the entry number, an optional `*`
+# marking a modified entry, then the command as typed. Held in a variable
+# because bash 3.2 — still what macOS ships as /bin/bash — cannot parse a `(`
+# inside an unquoted regex written directly in [[ ]]. That is a *parse* error,
+# so it took the whole script down with it and left macOS bash users with no
+# shell integration at all and an error on every prompt.
+__LUME_HIST_RE='^[[:space:]]*([0-9]+)\*?[[:space:]][[:space:]]?(.*)$'
+
 # Emit the alias list to Lume (OSC 7733: base64 of "name<TAB>value" rows) so the
 # autocomplete can suggest the user's aliases. We parse `alias` output
 # (`alias name='value'`).
@@ -50,7 +58,7 @@ __lume_pre_prompt() {
   # command being run was actually appended to history (HISTCONTROL may skip
   # it, e.g. ignorespace) before trusting `history 1` for the command line.
   __LUME_HIST_AT_PROMPT=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null)
-  if [[ $__LUME_HIST_AT_PROMPT =~ ^[[:space:]]*([0-9]+) ]]; then
+  if [[ $__LUME_HIST_AT_PROMPT =~ $__LUME_HIST_RE ]]; then
     __LUME_HIST_AT_PROMPT=${BASH_REMATCH[1]}
   else
     __LUME_HIST_AT_PROMPT=
@@ -101,7 +109,7 @@ __lume_pre_exec() {
   # its first segment under Ubuntu's default HISTCONTROL=ignoreboth (issue #25).
   local cmd hist num text
   hist=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null)
-  if [[ $hist =~ ^[[:space:]]*([0-9]+)\*?[[:space:]][[:space:]]?(.*)$ ]]; then
+  if [[ $hist =~ $__LUME_HIST_RE ]]; then
     num=${BASH_REMATCH[1]}
     text=${BASH_REMATCH[2]}
   fi
