@@ -45,6 +45,14 @@ pub fn run() {
     // Make sure the shell-integration scripts exist on disk from the first
     // launch, so the rc/$PROFILE snippet always dot-sources a real file.
     shell::ensure_integration_scripts();
+    // Warm the resolved-PATH cache off the main thread. On macOS the first PTY
+    // spawn needs it (see pty.rs), and resolving means running a login shell —
+    // doing that lazily would stall the opening of the very first tab.
+    if cfg!(target_os = "macos") {
+        std::thread::spawn(|| {
+            let _ = env_fix::user_path();
+        });
+    }
     let pty_manager = Arc::new(pty::PtyManager::new());
     let ai_manager = Arc::new(ai::AiManager::new());
     let remote_state = Arc::new(remote::RemoteState::new());

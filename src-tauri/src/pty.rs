@@ -200,6 +200,17 @@ fn spawn_impl(
     // Strip AppImage env pollution (PYTHONHOME/PYTHONPATH, mount paths) so tools
     // and hooks run inside the terminal aren't broken by the bundle.
     crate::env_fix::sanitize_pty(&mut cmd);
+    // macOS: a GUI-launched app inherits launchd's minimal PATH
+    // (/usr/bin:/bin:/usr/sbin:/sbin), and everything that builds the real one
+    // — /etc/zprofile's path_helper, the `brew shellenv` line Homebrew puts in
+    // ~/.zprofile — is read by LOGIN shells only. We spawn an interactive,
+    // non-login shell, so without this there is no brew/node/pyenv in the
+    // terminal. user_path() resolves it once from a login+interactive shell.
+    // Not applied elsewhere: Linux desktop sessions already export a usable
+    // PATH, and paying for a shell round-trip there would be pure latency.
+    if cfg!(target_os = "macos") {
+        cmd.env("PATH", crate::env_fix::user_path());
+    }
 
     let mut child = pair.slave.spawn_command(cmd).context("spawn shell")?;
     let killer = child.clone_killer();
