@@ -50,9 +50,16 @@ pub fn notify(
                 n.sound_name("Ping");
             }
         }
+        // Windows drops the icon for the same reason, but notify-rust does feed
+        // sound_name into the toast's audio source. "Default" is the stock
+        // notification sound; an unknown name parses to None and plays nothing,
+        // so this has to stay one of Default/IM/Mail/Reminder/SMS.
         #[cfg(windows)]
         {
-            let _ = (&icon, &sound);
+            let _ = &icon;
+            if sound.unwrap_or(false) {
+                n.sound_name("Default");
+            }
         }
 
         n.show().map(|_| ()).map_err(|e| e.to_string())
