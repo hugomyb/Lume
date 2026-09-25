@@ -61,30 +61,60 @@ __lume_pre_prompt() {
   fi
 }
 
+# True when the history line $1 is the line bash is about to run, $2 being the
+# value of $BASH_COMMAND. Lets __lume_pre_exec tell apart the two reasons the
+# history entry number can fail to advance.
+#
+# $BASH_COMMAND holds the first simple command of the line, so the line being
+# run must START with it. Bash re-renders $BASH_COMMAND from the parse tree
+# though, and its spacing differs from the line as typed ("echo  a" → "echo a",
+# "2>/dev/null" → "2> /dev/null"); comparing both sides stripped of whitespace
+# sidesteps every such difference, and keeps operators inside quotes from
+# throwing the comparison off.
+__lume_hist_is_current() {
+  local typed=${1//[[:space:]]/} running=${2//[[:space:]]/}
+  [[ -n $running && $typed == "$running"* ]]
+}
+
 __lume_pre_exec() {
   # Suppress the trap for commands fired by PROMPT_COMMAND and for repeated
   # DEBUG firings on the same input line (compound commands fire multiple times).
   if [[ -n "$__LUME_IN_PROMPT" || -n "$__LUME_PREEXEC_FIRED" ]]; then
     return
   fi
+  # Grab $BASH_COMMAND before running anything else in the trap.
+  local running=$BASH_COMMAND
   __LUME_PREEXEC_FIRED=1
   printf '\e]133;C\a'
   # $BASH_COMMAND only holds the FIRST simple command of a compound line
   # ("sleep 3 && echo ok" → "sleep 3"). The freshly-appended history entry has
-  # the line as typed — use it when it exists (same approach as bash-preexec),
-  # and fall back to $BASH_COMMAND when history didn't record the command
-  # (history off, HISTCONTROL=ignorespace…), detected via the entry number
-  # saved at prompt time.
-  local cmd hist num
+  # the line as typed — use it when it exists (same approach as bash-preexec).
+  #
+  # History doesn't always record the line, and then `history 1` still names the
+  # PREVIOUS command; the entry number saved at prompt time detects that. But an
+  # unchanged number has two opposite causes:
+  #   • ignoredups — the line was skipped for being identical to the last entry,
+  #     so `history 1` IS the line being run: use it.
+  #   • ignorespace / HISTIGNORE / history off — `history 1` is an older,
+  #     unrelated line: fall back to $BASH_COMMAND.
+  # Treating both as the second case truncated every re-run compound command to
+  # its first segment under Ubuntu's default HISTCONTROL=ignoreboth (issue #25).
+  local cmd hist num text
   hist=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null)
   if [[ $hist =~ ^[[:space:]]*([0-9]+)\*?[[:space:]][[:space:]]?(.*)$ ]]; then
     num=${BASH_REMATCH[1]}
-    cmd=${BASH_REMATCH[2]}
+    text=${BASH_REMATCH[2]}
   fi
-  if [[ -z "$cmd" || "$num" == "$__LUME_HIST_AT_PROMPT" ]]; then
-    cmd=$BASH_COMMAND
+  if [[ -n "$text" ]] && { [[ "$num" != "$__LUME_HIST_AT_PROMPT" ]] ||
+    __lume_hist_is_current "$text" "$running"; }; then
+    cmd=$text
+  else
+    cmd=$running
   fi
-  printf '\e]133;E;%s\a' "$cmd"
+  # The OSC payload ends at the first BEL / ESC, so a control character inside
+  # the command would cut the marker short and spill the rest onto the screen
+  # as text. They have no place in a displayed command line anyway.
+  printf '\e]133;E;%s\a' "${cmd//[[:cntrl:]]/ }"
 }
 
 # Set the prompt guard before our hook so DEBUG can detect it. The $? capture

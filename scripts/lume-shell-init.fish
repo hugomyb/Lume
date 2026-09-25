@@ -48,7 +48,12 @@ end
 
 function __lume_preexec --on-event fish_preexec
     printf '\e]133;C\a'
-    printf '\e]133;E;%s\a' "$argv"
+    # The OSC payload ends at the first BEL / ESC, so a control character inside
+    # the command would cut the marker short and spill the rest onto the screen
+    # as text. They have no place in a displayed command line anyway. Newlines
+    # count as control characters, so this also keeps a multi-line command from
+    # being split into several arguments by the substitution below.
+    printf '\e]133;E;%s\a' (string replace -ra '[[:cntrl:]]' ' ' -- "$argv")
 end
 
 # OSC 133;B marks the end of the prompt / start of the command line. Lume reads

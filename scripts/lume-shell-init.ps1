@@ -93,7 +93,10 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
         $esc = [char]27; $bel = [char]7
         [Console]::Write("$esc]133;C$bel")
-        if ($line) { [Console]::Write("$esc]133;E;$line$bel") }
+        # The OSC payload ends at the first BEL / ESC, so a control character
+        # inside the command would cut the marker short and spill the rest onto
+        # the screen as text. They have no place in a displayed command line.
+        if ($line) { [Console]::Write("$esc]133;E;$($line -replace '\p{Cc}', ' ')$bel") }
         [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     }
 }

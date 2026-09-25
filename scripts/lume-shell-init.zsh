@@ -51,7 +51,10 @@ __lume_precmd() {
 __lume_preexec() {
   # $1 is the full command line as typed (preserved by zsh, including history expansion)
   print -nP "\e]133;C\a"
-  print -nr -- $'\e]133;E;'"$1"$'\a'
+  # The OSC payload ends at the first BEL / ESC, so a control character inside
+  # the command would cut the marker short and spill the rest onto the screen
+  # as text. They have no place in a displayed command line anyway.
+  print -nr -- $'\e]133;E;'"${1//[[:cntrl:]]/ }"$'\a'
 }
 
 add-zsh-hook precmd __lume_precmd
