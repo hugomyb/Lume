@@ -82,6 +82,7 @@ import {
   ACTIONS,
   comboToAction,
   eventToCombo,
+  modKey,
   resolveBindings,
   type ActionId,
 } from "./keybindings";
@@ -1986,11 +1987,11 @@ export default function Tabs() {
         !e.ctrlKey &&
         !e.shiftKey &&
         e.key.startsWith("Arrow")) ||
-      (e.ctrlKey &&
+      (modKey(e) &&
         !e.shiftKey &&
         /^(?:Digit|Numpad)[0-9]$/.test(e.code)) ||
-      (e.ctrlKey && (e.key === "+" || e.key === "=" || e.key === "-")) ||
-      (e.ctrlKey &&
+      (modKey(e) && (e.key === "+" || e.key === "=" || e.key === "-")) ||
+      (modKey(e) &&
         !e.shiftKey &&
         (e.key === "ArrowUp" || e.key === "ArrowDown"));
     const isOurShortcut = isBound || isSpecial;
@@ -2057,7 +2058,9 @@ export default function Tabs() {
       }
     }
 
-    if (!e.ctrlKey) return;
+    // Cmd on macOS, Ctrl elsewhere — the tab/zoom shortcuts below follow the
+    // platform convention just like the remappable ones above.
+    if (!modKey(e)) return;
 
     // Go to tab N — matched on the PHYSICAL key (e.code) so it works on AZERTY
     // and other layouts where the number row needs Shift for digits.

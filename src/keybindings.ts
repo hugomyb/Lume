@@ -2,6 +2,25 @@
 // so letter bindings follow the keyboard layout's labels (Ctrl+Shift+W is the
 // key labelled W on AZERTY too). Layout-special keys (number row, zoom +/-,
 // arrows) are handled separately and aren't remappable.
+//
+// The "Ctrl" token in a stored combo means *the platform's app modifier*: Cmd
+// on macOS, Ctrl everywhere else. Spelling it the same on both keeps stored
+// user bindings portable and needs no config migration — only the matching and
+// the rendering differ. A real Ctrl press on macOS yields "Control", which no
+// binding uses, so it falls through to the terminal where it belongs (Ctrl+C
+// must stay SIGINT, not "close tab").
+
+/** True when running on macOS, where the app modifier is Cmd, not Ctrl. */
+export const isMac =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+
+/** Is the platform's app modifier held? Cmd on macOS, Ctrl elsewhere. */
+export function modKey(e: {
+  ctrlKey: boolean;
+  metaKey: boolean;
+}): boolean {
+  return isMac ? e.metaKey : e.ctrlKey;
+}
 
 export type ActionId =
   | "newTab"
@@ -48,10 +67,12 @@ const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta"]);
 export function eventToCombo(e: KeyboardEvent): string | null {
   if (MODIFIER_KEYS.has(e.key)) return null;
   const parts: string[] = [];
-  if (e.ctrlKey) parts.push("Ctrl");
+  if (modKey(e)) parts.push("Ctrl");
   if (e.altKey) parts.push("Alt");
   if (e.shiftKey) parts.push("Shift");
-  if (e.metaKey) parts.push("Meta");
+  // The non-app modifier, kept distinct so it never collides with a binding:
+  // "Control" on macOS (Cmd already claimed "Ctrl"), "Meta" elsewhere.
+  if (isMac ? e.ctrlKey : e.metaKey) parts.push(isMac ? "Control" : "Meta");
   let key = e.key;
   if (key === " ") key = "Space";
   else if (key.length === 1) key = key.toLowerCase();
@@ -59,13 +80,26 @@ export function eventToCombo(e: KeyboardEvent): string | null {
   return parts.join("+");
 }
 
-/** Pretty label for a combo, e.g. "Ctrl+Shift+t" → "Ctrl + Shift + T". */
+// macOS writes shortcuts as bare glyphs with no separator (⌘⇧T), and in the
+// canonical order ⌃⌥⇧⌘ — not the spelled-out "Ctrl + Shift + T" of the others.
+const MAC_GLYPHS: Record<string, string> = {
+  Control: "⌃",
+  Alt: "⌥",
+  Shift: "⇧",
+  Ctrl: "⌘",
+};
+const MAC_ORDER = ["Control", "Alt", "Shift", "Ctrl"];
+
+/** Pretty label for a combo: "Ctrl+Shift+t" → "Ctrl + Shift + T", or "⌘⇧T". */
 export function comboToLabel(combo: string): string {
   if (!combo) return "—";
-  return combo
+  const parts = combo
     .split("+")
-    .map((p) => (p.length === 1 ? p.toUpperCase() : p))
-    .join(" + ");
+    .map((p) => (p.length === 1 ? p.toUpperCase() : p));
+  if (!isMac) return parts.join(" + ");
+  const mods = MAC_ORDER.filter((m) => parts.includes(m));
+  const rest = parts.filter((p) => !MAC_ORDER.includes(p));
+  return [...mods.map((m) => MAC_GLYPHS[m]), ...rest].join("");
 }
 
 export function defaultBindings(): Record<ActionId, string> {
