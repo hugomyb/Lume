@@ -99,13 +99,111 @@ pub fn sanitize(cmd: &mut Command) {
     }
 }
 
-// NOTE: do NOT set WEBKIT_DISABLE_DMABUF_RENDERER here. v1.0.2 shipped it as a
-// supposed NVIDIA stutter workaround, and it turned out to be a ~3× rendering
-// regression: without DMABUF, WebKitGTK loses zero-copy sharing of xterm's
-// WebGL canvas and falls back to a far more expensive compositing path
+// NOTE: do NOT set WEBKIT_DISABLE_DMABUF_RENDERER unconditionally. v1.0.2
+// shipped it as a supposed NVIDIA stutter workaround, and it turned out to be a
+// ~3× rendering regression: without DMABUF, WebKitGTK loses zero-copy sharing of
+// xterm's WebGL canvas and falls back to a far more expensive compositing path
 // (measured 78% vs 29% WebProcess CPU during a selection drag, on both NVIDIA
-// and Intel). Users on genuinely broken driver combos can still export the
-// variable themselves — the WebView inherits the process environment.
+// and Intel). So it is only disabled on the graphics stacks where the DMABUF
+// path is known to render nothing at all — see below.
+
+/// DRM drivers for virtual/emulated GPUs whose buffer formats WebKitGTK's
+/// accelerated renderer can't share, leaving the window blank (issue #27:
+/// VMware SVGA3D via `vmwgfx` on a Rocky Linux 10 VM). Real GPU drivers
+/// (i915, amdgpu, nouveau, nvidia-drm, …) are deliberately absent: on those
+/// DMABUF works and is 3× cheaper.
+///
+/// `virtio_gpu` is NOT listed — virgl/venus setups do render correctly, and
+/// blanket-disabling DMABUF there would penalise every QEMU/GNOME Boxes user.
+#[cfg(target_os = "linux")]
+const BLANK_RENDER_DRM_DRIVERS: &[&str] = &[
+    "vmwgfx",    // VMware SVGA3D
+    "vboxvideo", // VirtualBox
+    "qxl",       // SPICE
+    "cirrus",    // legacy QEMU
+    "bochs-drm", // QEMU stdvga
+    "bochs",     // same, renamed in newer kernels
+    "simpledrm", // firmware framebuffer, no acceleration at all
+    "vkms",      // virtual/headless
+];
+
+/// The DRM drivers bound on this machine, one entry per `/sys/class/drm/cardN`.
+/// Empty when the directory is unreadable or holds no card (container, no GPU).
+#[cfg(target_os = "linux")]
+fn drm_drivers() -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+        return vec![];
+    };
+    let mut drivers = vec![];
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // `card0` yes, `card0-DVI-I-1` (a connector) no.
+        if !name.starts_with("card") || name.contains('-') {
+            continue;
+        }
+        // …/cardN/device/driver is a symlink into the driver's bus directory.
+        if let Ok(target) = std::fs::read_link(entry.path().join("device/driver")) {
+            if let Some(driver) = target.file_name() {
+                drivers.push(driver.to_string_lossy().into_owned());
+            }
+        }
+    }
+    drivers
+}
+
+/// Whether WebKitGTK's DMABUF renderer is expected to paint nothing here.
+/// True only when *every* GPU on the box is a known-blank virtual one (a VM
+/// with a passed-through card keeps the fast path), or when there is no
+/// render node at all and Mesa therefore falls back to llvmpipe.
+#[cfg(target_os = "linux")]
+fn dmabuf_renders_blank() -> Option<&'static str> {
+    if std::env::var("LIBGL_ALWAYS_SOFTWARE").is_ok_and(|v| v == "1" || v == "true") {
+        return Some("LIBGL_ALWAYS_SOFTWARE is set");
+    }
+    let drivers = drm_drivers();
+    if drivers.is_empty() {
+        // No DRM card exposed at all: without a render node Mesa falls back to
+        // the llvmpipe rasteriser, which has no DMABUF to share.
+        let has_render_node = std::fs::read_dir("/dev/dri").is_ok_and(|nodes| {
+            nodes
+                .flatten()
+                .any(|n| n.file_name().to_string_lossy().starts_with("renderD"))
+        });
+        return (!has_render_node).then_some("no DRM render node");
+    }
+    drivers_all_blank(&drivers).then_some("virtual GPU driver")
+}
+
+/// True when every bound driver is a known-blank one. A VM with a real card
+/// passed through has at least one good driver and keeps the DMABUF fast path.
+#[cfg(target_os = "linux")]
+fn drivers_all_blank(drivers: &[String]) -> bool {
+    !drivers.is_empty()
+        && drivers
+            .iter()
+            .all(|d| BLANK_RENDER_DRM_DRIVERS.contains(&d.as_str()))
+}
+
+/// Disable WebKitGTK's DMABUF renderer when — and only when — this machine's
+/// graphics stack is one that renders a blank window with it (issue #27).
+/// Must run before the WebView is created. Skipped if the variable is already
+/// set, or if `LUME_KEEP_DMABUF=1` forces the fast path back on: an explicit
+/// user choice always wins over the heuristic.
+#[cfg(target_os = "linux")]
+pub fn disable_dmabuf_if_blank_renderer() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some()
+        || std::env::var_os("LUME_KEEP_DMABUF").is_some()
+    {
+        return;
+    }
+    if let Some(reason) = dmabuf_renders_blank() {
+        eprintln!(
+            "lume: {reason} — disabling WebKitGTK's DMABUF renderer so the \
+             window isn't blank (export LUME_KEEP_DMABUF=1 to keep it on)"
+        );
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
 
 /// On Windows, stop a spawned console program (the AI CLI, cloudflared, …) from
 /// flashing up its own console window. No-op on other platforms.
@@ -158,8 +256,7 @@ fn resolve_user_path() -> String {
         "-lc"
     };
     let mut c = Command::new(&shell);
-    c.arg(flags)
-        .arg("printf '__LUME_P_<%s>_END__' \"$PATH\"");
+    c.arg(flags).arg("printf '__LUME_P_<%s>_END__' \"$PATH\"");
     sanitize(&mut c); // don't let the AppImage mount taint the starting PATH
     let Some(out) = capture_with_timeout(c, 6) else {
         return fallback;
@@ -196,6 +293,25 @@ mod tests {
         let root = "/tmp/.mount_Lume.X";
         let path = "/home/u/.local/bin:/usr/bin";
         assert_eq!(strip_appimage_path(path, root), path);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dmabuf_kill_switch_only_targets_virtual_gpus() {
+        let d = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Issue #27: a VMware VM, SVGA3D only → blank window, disable DMABUF.
+        assert!(drivers_all_blank(&d(&["vmwgfx"])));
+        assert!(drivers_all_blank(&d(&["qxl", "bochs-drm"])));
+        // Real hardware — never touch it, DMABUF is the fast path.
+        assert!(!drivers_all_blank(&d(&["i915"])));
+        assert!(!drivers_all_blank(&d(&["amdgpu", "nvidia-drm"])));
+        assert!(!drivers_all_blank(&d(&["virtio_gpu"])));
+        // A virtual display next to a real GPU (evdi + i915, DisplayLink) and
+        // a passed-through card in a VM both keep DMABUF.
+        assert!(!drivers_all_blank(&d(&["evdi", "i915"])));
+        assert!(!drivers_all_blank(&d(&["vmwgfx", "nvidia-drm"])));
+        // Unknown/unreadable → no opinion, leave the default alone.
+        assert!(!drivers_all_blank(&[]));
     }
 }
 

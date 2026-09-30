@@ -41,6 +41,13 @@ pub fn run() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
 
+    // Virtual GPUs (VMware SVGA3D, VirtualBox, QXL…) and pure software
+    // rendering silently paint nothing through WebKitGTK's DMABUF renderer —
+    // the window opens blank. Turn it off on those stacks only; everywhere
+    // else DMABUF is kept, it's ~3× cheaper (see env_fix.rs).
+    #[cfg(target_os = "linux")]
+    env_fix::disable_dmabuf_if_blank_renderer();
+
     let cfg = Arc::new(Mutex::new(config::load()));
     // Make sure the shell-integration scripts exist on disk from the first
     // launch, so the rc/$PROFILE snippet always dot-sources a real file.
