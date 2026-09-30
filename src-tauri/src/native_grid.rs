@@ -546,6 +546,7 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
                 cursor_on,
                 cr,
                 (clip.0, clip.1, clip.2 - clip.0, clip.3 - clip.1),
+                (w as f64, h as f64),
             );
             let dim = *DIM_ALPHA.lock();
             if dim > 0.0 {
@@ -590,7 +591,15 @@ fn ensure_draw_hook(window: &tauri::WebviewWindow, blink: bool) -> bool {
 // Drawing
 // ---------------------------------------------------------------------------
 
-fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip: (f64, f64, f64, f64)) {
+fn draw_grid(
+    model: &GridModel,
+    cursor_on: bool,
+    cr: &gtk::cairo::Context,
+    clip: (f64, f64, f64, f64),
+    // Pane size in px — the scrollbar hugs its right edge, and the clip rect
+    // can't stand in for it (overlay holes shrink it).
+    pane: (f64, f64),
+) {
     let style = model.style.lock();
     let term = model.term.lock();
     let content = term.renderable_content();
@@ -844,6 +853,63 @@ fn draw_grid(model: &GridModel, cursor_on: bool, cr: &gtk::cairo::Context, clip:
         cr.rectangle(cx, cy + cell_h - 1.5, cw, 1.0);
         let _ = cr.fill();
     }
+
+    draw_scrollbar(cr, &term, &style, pane);
+}
+
+fn rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let r = r.min(w / 2.0).min(h / 2.0);
+    cr.new_sub_path();
+    cr.arc(x + w - r, y + r, r, -FRAC_PI_2, 0.0);
+    cr.arc(x + w - r, y + h - r, r, 0.0, FRAC_PI_2);
+    cr.arc(x + r, y + h - r, r, FRAC_PI_2, PI);
+    cr.arc(x + r, y + r, r, PI, PI + FRAC_PI_2);
+    cr.close_path();
+}
+
+/// Thin overlay scrollbar on the pane's right edge.
+///
+/// xterm renders its own (Monaco-style) slider in the DOM and App.css forces
+/// it visible and grabbable — but this pass paints AFTER the webview, so that
+/// slider is covered on every frame and the user sees no scrollbar at all.
+/// Punching an overlay hole for it would stop the grid painting text in that
+/// strip, which flickers as the bar fades in and out. So: the DOM keeps the
+/// hit-testing (dragging already works), and we paint the visual here at the
+/// same geometry — width and inset mirror the CSS.
+///
+/// No fade logic on purpose: fading needs a timer and per-pane state, and an
+/// always-present bar is what makes the scrollback discoverable in the first
+/// place. It's drawn from the foreground colour so it follows any theme.
+fn draw_scrollbar(
+    cr: &gtk::cairo::Context,
+    term: &Term<NoopListener>,
+    style: &GridStyle,
+    pane: (f64, f64),
+) {
+    const W: f64 = 7.0;
+    const INSET: f64 = 1.0;
+    const MIN_H: f64 = 20.0;
+
+    let history = term.grid().history_size() as f64;
+    // Nothing scrolled off yet: no bar, like every overlay scrollbar.
+    if history < 1.0 {
+        return;
+    }
+    let (pane_w, pane_h) = pane;
+    let screen = term.screen_lines() as f64;
+    if pane_h <= MIN_H || pane_w <= W + INSET || screen < 1.0 {
+        return;
+    }
+    let thumb_h = (pane_h * screen / (history + screen)).clamp(MIN_H, pane_h);
+    // display_offset counts lines scrolled back from the live bottom, so 0
+    // parks the thumb at the bottom and `history` at the very top.
+    let offset = (term.grid().display_offset() as f64).min(history);
+    let y = (pane_h - thumb_h) * (1.0 - offset / history);
+    rounded_rect(cr, pane_w - W - INSET, y, W, thumb_h, W / 2.0);
+    let fg = style.fg;
+    cr.set_source_rgba(fg.0, fg.1, fg.2, 0.22);
+    let _ = cr.fill();
 }
 
 // ---------------------------------------------------------------------------
