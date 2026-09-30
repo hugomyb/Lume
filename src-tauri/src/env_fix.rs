@@ -33,6 +33,12 @@ const PATH_LISTS: &[&str] = &[
     "GIO_EXTRA_MODULES",
     "GSETTINGS_SCHEMA_DIR",
     "GDK_PIXBUF_MODULE_FILE",
+    // Same family: left pointing at a dead /tmp/.mount_Lume.* they make GTK
+    // fail to load its input-method modules ("im-cedilla.so: cannot open
+    // shared object file") in every child — and in the next Lume run started
+    // from a shell that inherited them.
+    "GTK_PATH",
+    "GTK_IM_MODULE_FILE",
     "LD_PRELOAD",
     "PERLLIB",
     "PERL5LIB",
@@ -184,6 +190,34 @@ fn drivers_all_blank(drivers: &[String]) -> bool {
             .all(|d| BLANK_RENDER_DRM_DRIVERS.contains(&d.as_str()))
 }
 
+/// GTK module paths inherited from an AppImage that isn't the one running.
+///
+/// Launching the AppImage leaks `GTK_PATH` / `GTK_IM_MODULE_FILE` pointing at
+/// its `/tmp/.mount_Lume.*` into the shell; every later Lume started from that
+/// shell — a dev build, a distro package — inherits them and GTK then looks
+/// for its modules under a mount that is not its own, printing
+/// "im-cedilla.so: cannot open shared object file" and losing the input
+/// method. `sanitize()` fixes this for children; Lume's own process needs it
+/// too, before GTK initialises.
+///
+/// Only strips paths under a foreign mount: when Lume *is* that AppImage,
+/// `$APPDIR` names the same root and the variables are legitimate.
+#[cfg(target_os = "linux")]
+pub fn drop_foreign_appimage_gtk_paths() {
+    let own_root = std::env::var("APPDIR").unwrap_or_default();
+    for var in ["GTK_PATH", "GTK_IM_MODULE_FILE"] {
+        let Ok(val) = std::env::var(var) else { continue };
+        if !val.contains("/.mount_") {
+            continue;
+        }
+        if !own_root.is_empty() && val.starts_with(own_root.trim_end_matches('/')) {
+            continue;
+        }
+        eprintln!("lume: dropping stale {var} from a foreign AppImage mount");
+        std::env::remove_var(var);
+    }
+}
+
 /// Disable WebKitGTK's DMABUF renderer when — and only when — this machine's
 /// graphics stack is one that renders a blank window with it (issue #27).
 /// Must run before the WebView is created. Skipped if the variable is already
@@ -316,7 +350,7 @@ mod tests {
 }
 
 /// Run a command capturing stdout, killing it (returning None) after `secs`.
-fn capture_with_timeout(mut cmd: Command, secs: u64) -> Option<String> {
+pub fn capture_with_timeout(mut cmd: Command, secs: u64) -> Option<String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

@@ -48,6 +48,11 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     env_fix::disable_dmabuf_if_blank_renderer();
 
+    // A previously-run AppImage leaves GTK_PATH / GTK_IM_MODULE_FILE pointing
+    // at its own mount; inheriting them breaks GTK's input-method modules.
+    #[cfg(target_os = "linux")]
+    env_fix::drop_foreign_appimage_gtk_paths();
+
     let cfg = Arc::new(Mutex::new(config::load()));
     // Make sure the shell-integration scripts exist on disk from the first
     // launch, so the rc/$PROFILE snippet always dot-sources a real file.
@@ -128,6 +133,7 @@ pub fn run() {
             ai::ai_status,
             ai::ai_probe,
             ai::ai_default_model,
+            ai::ai_plan_usage,
             ai::ai_explain_block,
             ai::ai_generate_command,
             ai::ai_chat,
