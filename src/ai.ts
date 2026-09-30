@@ -69,6 +69,20 @@ export function aiProbe(command: string): Promise<boolean> {
   return invoke<boolean>("ai_probe", { command });
 }
 
+/** One subscription limit window as the Claude CLI reports it. */
+export type PlanWindow = {
+  label: string;
+  percentUsed: number;
+  resets: string;
+};
+
+/** Subscription limit windows. Empty for providers that don't report them —
+ *  and for the Claude CLI when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+ *  blocks the lookup it needs. Free to call: no model request. */
+export function aiPlanUsage(): Promise<PlanWindow[]> {
+  return invoke<PlanWindow[]>("ai_plan_usage");
+}
+
 /** The model a provider would use by default (for the Settings placeholder). */
 export function aiDefaultModel(provider: string): Promise<string | null> {
   return invoke<string | null>("ai_default_model", { provider });

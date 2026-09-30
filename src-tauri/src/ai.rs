@@ -67,6 +67,94 @@ pub fn ai_status(config: State<'_, Arc<Mutex<Config>>>) -> AiStatus {
     }
 }
 
+/// One limit window as the Claude CLI reports it: a label, how much of it is
+/// used, and when it rolls over.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanWindow {
+    /// The CLI's own wording ("Current session", "Current week (all models)").
+    /// Passed through rather than mapped to our own keys: Anthropic adds
+    /// windows (per-model weeklies) and we'd silently drop the ones we
+    /// didn't know about.
+    label: String,
+    percent_used: u8,
+    /// Reset moment, verbatim ("Oct 5, 3:59pm (Europe/Paris)").
+    resets: String,
+}
+
+/// Subscription limit windows, read from `claude -p "/usage"`.
+///
+/// There is no structured surface for these: the CLI renders them as prose,
+/// and the `rate_limit_event` on the streaming path carries only a status and
+/// a reset time — no percentage. So we parse the prose, and skip any line
+/// that doesn't match rather than guessing.
+///
+/// Free to call — the slash command is handled locally, no model request.
+/// Returns an empty list when the provider isn't the Claude CLI, when it
+/// isn't installed, or when the fetch fails (notably with
+/// `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, which blocks the lookup the
+/// CLI needs to fill these in).
+#[tauri::command]
+pub async fn ai_plan_usage(
+    config: State<'_, Arc<Mutex<Config>>>,
+) -> Result<Vec<PlanWindow>, String> {
+    let provider = config.lock().ai.provider.clone();
+    if is_api_provider(&provider) || provider == "codex" || provider == "custom" {
+        return Ok(vec![]);
+    }
+    let Some(bin) = which_command("claude") else {
+        return Ok(vec![]);
+    };
+    let text = tauri::async_runtime::spawn_blocking(move || {
+        let mut c = Command::new(bin);
+        c.args(["-p", "/usage", "--output-format", "json"]);
+        crate::env_fix::sanitize(&mut c);
+        crate::env_fix::no_window(&mut c);
+        c.env("PATH", crate::env_fix::user_path());
+        crate::env_fix::capture_with_timeout(c, 30)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(text) = text else {
+        return Ok(vec![]);
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(vec![]);
+    };
+    Ok(parse_plan_windows(v["result"].as_str().unwrap_or("")))
+}
+
+/// Pull the limit lines out of `/usage`'s prose. Shape, verbatim:
+/// `Current session: 6% used · resets Sep 30, 2:49pm (Europe/Paris)`
+fn parse_plan_windows(text: &str) -> Vec<PlanWindow> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some((label, rest)) = line.split_once(": ") else {
+            continue;
+        };
+        let Some((pct, after)) = rest.split_once("% used") else {
+            continue;
+        };
+        let Ok(percent_used) = pct.trim().parse::<u8>() else {
+            continue;
+        };
+        // "· resets <when>" — the separator is a middle dot, but don't depend
+        // on it: find the keyword instead.
+        let resets = after
+            .split_once("resets ")
+            .map(|(_, when)| when.trim().to_string())
+            .unwrap_or_default();
+        out.push(PlanWindow {
+            label: label.trim().to_string(),
+            percent_used,
+            resets,
+        });
+    }
+    out
+}
+
 /// Probe whether a given CLI command is resolvable in PATH. Lets the Settings
 /// UI show a live "detected / not found" badge for the selected provider
 /// without waiting for the config to be saved.
@@ -169,6 +257,9 @@ struct ResolvedProvider {
     /// Env var to receive the API key, if the provider uses one.
     key_env: Option<String>,
     api_key: String,
+    /// stdout is newline-delimited JSON events rather than plain text. Only
+    /// the Claude CLI speaks it, and only that mode reports consumption.
+    stream_json: bool,
 }
 
 fn resolve_provider(cfg: &AiConfig) -> ResolvedProvider {
@@ -188,6 +279,7 @@ fn resolve_provider(cfg: &AiConfig) -> ResolvedProvider {
                 args,
                 key_env: Some("OPENAI_API_KEY".to_string()),
                 api_key: cfg.codex_api_key.clone(),
+                stream_json: false,
             }
         }
         "custom" => ResolvedProvider {
@@ -203,6 +295,7 @@ fn resolve_provider(cfg: &AiConfig) -> ResolvedProvider {
                 Some(cfg.custom_key_env.clone())
             },
             api_key: cfg.custom_api_key.clone(),
+            stream_json: false,
         },
         // "claude" and anything unrecognized fall back to the Claude CLI.
         _ => {
@@ -211,6 +304,13 @@ fn resolve_provider(cfg: &AiConfig) -> ResolvedProvider {
                 args.push("--model".to_string());
                 args.push(cfg.claude_model.trim().to_string());
             }
+            // stream-json (with partial messages) keeps the token-by-token
+            // streaming of plain text mode AND carries what the plain mode
+            // throws away: the cost of the call and the subscription window.
+            args.push("--output-format".to_string());
+            args.push("stream-json".to_string());
+            args.push("--verbose".to_string());
+            args.push("--include-partial-messages".to_string());
             args.push("-p".to_string());
             args.push("{prompt}".to_string());
             ResolvedProvider {
@@ -218,6 +318,7 @@ fn resolve_provider(cfg: &AiConfig) -> ResolvedProvider {
                 args,
                 key_env: None,
                 api_key: String::new(),
+                stream_json: true,
             }
         }
     }
@@ -315,6 +416,29 @@ fn language_name(code: &str) -> &'static str {
         "ko" => "Korean",
         _ => "English",
     }
+}
+
+/// What a provider reports about consumption. Every field is optional: each
+/// provider exposes a different slice, and the frontend merges partial updates
+/// rather than waiting for one complete picture.
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct AiUsageEvent {
+    request_id: u64,
+    /// Cost of THIS request, in USD — CLI providers that price the call.
+    cost_usd: Option<f64>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    model: Option<String>,
+    /// Subscription window: which one ("five_hour"), whether it still allows
+    /// requests, and the unix second it resets at.
+    plan_window: Option<String>,
+    plan_status: Option<String>,
+    plan_resets_at: Option<i64>,
+    /// Per-minute quota left, read from an HTTP provider's rate-limit headers.
+    remaining_requests: Option<String>,
+    remaining_tokens: Option<String>,
 }
 
 fn build_prompt(command: &str, output: &str, exit_code: i32, language: &str) -> String {
@@ -591,6 +715,7 @@ fn spawn_request(
         }
     }
 
+    let stream_json = provider.stream_json;
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", provider.command))?;
@@ -607,7 +732,7 @@ fn spawn_request(
         let app = app.clone();
         let manager = state.inner().clone();
         thread::spawn(move || {
-            stream_stdout(app.clone(), request_id, stdout);
+            stream_stdout(app.clone(), request_id, stdout, stream_json);
             // Wait for the child to fully exit, then signal completion or error.
             let mut child_opt = manager.children.lock().remove(&request_id);
             let (success, stderr_text) = match child_opt.as_mut() {
@@ -730,6 +855,31 @@ fn stream_api(
         Err(e) => return Err(err_arg("requestFailed", &e.to_string())),
     };
 
+    // Quota left, straight off the response we just made — no extra request.
+    // Two naming schemes in the wild: OpenAI-compatible `x-ratelimit-*` and
+    // Anthropic's `anthropic-ratelimit-*`. Absent on local endpoints (Ollama),
+    // which is correct: nothing is being metered there.
+    let remaining_requests = resp
+        .header("x-ratelimit-remaining-requests")
+        .or_else(|| resp.header("anthropic-ratelimit-requests-remaining"))
+        .map(str::to_string);
+    let remaining_tokens = resp
+        .header("x-ratelimit-remaining-tokens")
+        .or_else(|| resp.header("anthropic-ratelimit-tokens-remaining"))
+        .map(str::to_string);
+    if remaining_requests.is_some() || remaining_tokens.is_some() {
+        let _ = app.emit(
+            "ai:usage",
+            AiUsageEvent {
+                request_id,
+                model: Some(api.model.clone()),
+                remaining_requests,
+                remaining_tokens,
+                ..Default::default()
+            },
+        );
+    }
+
     // SSE: lines like `data: {json}`, terminated by `data: [DONE]`.
     let mut reader = std::io::BufReader::new(resp.into_reader());
     let mut line = String::new();
@@ -766,7 +916,96 @@ fn stream_api(
     Ok(())
 }
 
-fn stream_stdout(app: AppHandle, request_id: u64, mut stdout: std::process::ChildStdout) {
+/// Read a CLI's stdout and turn it into ai:chunk events. Two shapes: plain
+/// text (byte stream, split anywhere — including mid-codepoint) and the Claude
+/// CLI's newline-delimited JSON, which also carries the usage numbers.
+fn stream_stdout(
+    app: AppHandle,
+    request_id: u64,
+    stdout: std::process::ChildStdout,
+    stream_json: bool,
+) {
+    if stream_json {
+        return stream_stdout_json(app, request_id, stdout);
+    }
+    stream_stdout_text(app, request_id, stdout)
+}
+
+/// Newline-delimited JSON events (`--output-format stream-json`). Text arrives
+/// as `stream_event` deltas; consumption as `rate_limit_event` (the plan
+/// window) and a final `result` (cost and tokens). Unknown event types are
+/// skipped, so a CLI update that adds one can't break the stream.
+fn stream_stdout_json(app: AppHandle, request_id: u64, stdout: std::process::ChildStdout) {
+    let reader = std::io::BufReader::new(stdout);
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        match parse_cli_event(&v) {
+            Some(CliEvent::Text(t)) => {
+                let _ = app.emit("ai:chunk", AiChunkEvent { request_id, delta: t });
+            }
+            Some(CliEvent::Usage(mut u)) => {
+                u.request_id = request_id;
+                let _ = app.emit("ai:usage", u);
+            }
+            None => {}
+        }
+    }
+}
+
+enum CliEvent {
+    Text(String),
+    Usage(AiUsageEvent),
+}
+
+/// Map one `stream-json` line to what the UI needs. Kept pure so the shapes
+/// can be pinned by tests — a CLI update that renames a field would otherwise
+/// degrade silently into "no text, no numbers" with nothing to catch it.
+fn parse_cli_event(v: &serde_json::Value) -> Option<CliEvent> {
+    match v["type"].as_str()? {
+        "stream_event" => {
+            let ev = &v["event"];
+            if ev["type"] != "content_block_delta" || ev["delta"]["type"] != "text_delta" {
+                return None;
+            }
+            let t = ev["delta"]["text"].as_str()?;
+            (!t.is_empty()).then(|| CliEvent::Text(t.to_string()))
+        }
+        "rate_limit_event" => {
+            let info = &v["rate_limit_info"];
+            Some(CliEvent::Usage(AiUsageEvent {
+                plan_window: info["rateLimitType"].as_str().map(str::to_string),
+                plan_status: info["status"].as_str().map(str::to_string),
+                plan_resets_at: info["resetsAt"].as_i64(),
+                ..Default::default()
+            }))
+        }
+        "result" => {
+            let usage = &v["usage"];
+            Some(CliEvent::Usage(AiUsageEvent {
+                cost_usd: v["total_cost_usd"].as_f64(),
+                input_tokens: usage["input_tokens"].as_u64(),
+                output_tokens: usage["output_tokens"].as_u64(),
+                cache_read_tokens: usage["cache_read_input_tokens"].as_u64(),
+                // modelUsage is keyed by model name — the first key is the
+                // model that actually served the request.
+                model: v["modelUsage"]
+                    .as_object()
+                    .and_then(|m| m.keys().next().cloned()),
+                ..Default::default()
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn stream_stdout_text(app: AppHandle, request_id: u64, mut stdout: std::process::ChildStdout) {
     let mut leftover: Vec<u8> = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
@@ -875,6 +1114,97 @@ mod tests {
             "de",
         );
         assert!(chat.contains("in German"));
+    }
+
+    /// Captured verbatim from `claude -p "/usage"`. The percentages only
+    /// appear when non-essential traffic is allowed — the same output without
+    /// them must yield an empty list, not garbage.
+    #[test]
+    fn parses_plan_usage_windows() {
+        let text = "You are currently using your subscription to power your Claude Code usage\n\
+            \n\
+            Current session: 6% used · resets Sep 30, 2:49pm (Europe/Paris)\n\
+            Current week (all models): 3% used · resets Oct 5, 3:59pm (Europe/Paris)\n\
+            Current week (Fable): 0% used · resets Oct 5, 4pm (Europe/Paris)\n\
+            \n\
+            What's contributing to your limits usage?\n\
+            Last 24h · 142 requests · 9 sessions\n\
+              92% of your usage was at >150k context\n\
+              Top skills: /claude-api 5%\n";
+        let w = parse_plan_windows(text);
+        assert_eq!(w.len(), 3, "only the three limit lines, not the prose");
+        assert_eq!(w[0].label, "Current session");
+        assert_eq!(w[0].percent_used, 6);
+        assert_eq!(w[0].resets, "Sep 30, 2:49pm (Europe/Paris)");
+        assert_eq!(w[1].label, "Current week (all models)");
+        assert_eq!(w[2].percent_used, 0);
+
+        // The blocked variant: same command, no limit lines at all.
+        let blocked = "You are currently using your subscription to power your Claude Code usage\n\
+            \n\
+            What's contributing to your limits usage?\n\
+            Last 24h · 96 requests · 8 sessions\n\
+              87% of your usage was at >150k context\n";
+        assert!(parse_plan_windows(blocked).is_empty());
+    }
+
+    /// Lines captured verbatim from `claude -p … --output-format stream-json
+    /// --verbose --include-partial-messages`. If the CLI renames a field these
+    /// break here rather than silently emptying the pill.
+    #[test]
+    fn parses_claude_stream_json_events() {
+        let line = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+
+        let text = line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,
+               "delta":{"type":"text_delta","text":"1"}},"session_id":"x"}"#,
+        );
+        match parse_cli_event(&text) {
+            Some(CliEvent::Text(t)) => assert_eq!(t, "1"),
+            _ => panic!("expected a text delta"),
+        }
+
+        let plan = line(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",
+               "resetsAt":1790772600,"rateLimitType":"five_hour",
+               "isUsingOverage":false}}"#,
+        );
+        match parse_cli_event(&plan) {
+            Some(CliEvent::Usage(u)) => {
+                assert_eq!(u.plan_status.as_deref(), Some("allowed"));
+                assert_eq!(u.plan_window.as_deref(), Some("five_hour"));
+                assert_eq!(u.plan_resets_at, Some(1790772600));
+                assert_eq!(u.cost_usd, None);
+            }
+            _ => panic!("expected plan usage"),
+        }
+
+        let result = line(
+            r#"{"type":"result","total_cost_usd":0.0988765,
+               "usage":{"input_tokens":2,"output_tokens":14,
+                        "cache_read_input_tokens":13793,
+                        "cache_creation_input_tokens":9162},
+               "modelUsage":{"claude-opus-5[1m]":{"costUSD":0.0988765}}}"#,
+        );
+        match parse_cli_event(&result) {
+            Some(CliEvent::Usage(u)) => {
+                assert_eq!(u.cost_usd, Some(0.0988765));
+                assert_eq!(u.input_tokens, Some(2));
+                assert_eq!(u.output_tokens, Some(14));
+                assert_eq!(u.cache_read_tokens, Some(13793));
+                assert_eq!(u.model.as_deref(), Some("claude-opus-5[1m]"));
+            }
+            _ => panic!("expected result usage"),
+        }
+
+        // Event kinds we don't consume must be skipped, not mishandled: the
+        // CLI emits several per call and adds more over time.
+        assert!(parse_cli_event(&line(r#"{"type":"system","subtype":"init"}"#)).is_none());
+        assert!(parse_cli_event(&line(r#"{"type":"assistant","message":{}}"#)).is_none());
+        assert!(parse_cli_event(&line(
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#
+        ))
+        .is_none());
     }
 
     /// The frontend parses these; `aiErrorText` in `src/ai.ts` must keep up.

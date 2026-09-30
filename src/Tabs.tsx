@@ -41,6 +41,8 @@ import SshPalette from "./SshPalette";
 import { sshCommand } from "./ssh";
 import { loadCustomFonts } from "./fonts";
 import { copyText, pasteText } from "./clipboard";
+import UsagePill, { UsageCard } from "./UsagePill";
+import { listenUsage, refreshPlanUsage, resetPlanUsage, startPlanPolling } from "./usage";
 import {
   remoteInstallCloudflared,
   remoteSetTabs,
@@ -439,7 +441,7 @@ export default function Tabs() {
       '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, .lume-ghost, [class*="context-menu"], [class*="ctx-menu"], ' +
       // Full DOM overlays (modals, palettes, search bar, pane drop zones):
       // the grid paints around these rects instead of yielding to xterm.
-      ".settings-panel, .palette, .layouts-popup, .remote-slideover, .term-search, .pane-drop-zone";
+      ".settings-panel, .palette, .layouts-popup, .remote-slideover, .term-search, .pane-drop-zone, .usage-card";
     let lastRects = "";
     let overlayRaf = 0;
     const syncOverlayRects = () => {
@@ -888,6 +890,10 @@ export default function Tabs() {
     config.ai?.provider;
     config.ai?.customCommand;
     refetchAi();
+    // The usage pill follows the provider too: clear the old numbers before
+    // asking the new one, so no stale ring survives the switch.
+    resetPlanUsage();
+    void refreshPlanUsage(0);
   });
 
   // When the phone taps "+", switch the remote to the new tab once its pty
@@ -2111,6 +2117,7 @@ export default function Tabs() {
   let unlistenAiChunk: UnlistenFn | undefined;
   let unlistenAiDone: UnlistenFn | undefined;
   let unlistenAiError: UnlistenFn | undefined;
+  let unlistenUsage: UnlistenFn | undefined;
   let unlistenRemoteNewTab: UnlistenFn | undefined;
 
   onMount(async () => {
@@ -2123,6 +2130,7 @@ export default function Tabs() {
       unlistenAiChunk?.();
       unlistenAiDone?.();
       unlistenAiError?.();
+      unlistenUsage?.();
       unlistenRemoteNewTab?.();
     });
 
@@ -2182,6 +2190,10 @@ export default function Tabs() {
         "done"
       );
     });
+
+    unlistenUsage = await listenUsage();
+    // The plan ring must be filled from launch, not from the first hover.
+    onCleanup(startPlanPolling());
 
     unlistenAiError = await listen<AiErrorEvent>("ai:error", (e) => {
       const loc = findBlockByRequest(e.payload.requestId);
@@ -2452,6 +2464,7 @@ export default function Tabs() {
               </Show>
             </div>
             <div class="tab-actions">
+              <UsagePill provider={() => ai()?.provider ?? ""} />
               <Show when={remoteInfo()?.running}>
                 <button
                   class="remote-indicator"
@@ -2512,6 +2525,7 @@ export default function Tabs() {
                 <IconSettings />
               </button>
             </div>
+            <UsageCard provider={() => ai()?.provider ?? ""} />
             <Show when={layoutsOpen()}>
               <div class="layouts-popup" onClick={(e) => e.stopPropagation()}>
                 <div class="layouts-popup-title">{t("layouts.title")}</div>

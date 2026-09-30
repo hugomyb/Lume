@@ -3461,3 +3461,156 @@ select.settings-input optgroup {
 .terminal-host.native-grid .xterm-screen {
   opacity: 0;
 }
+
+/* --- AI usage pill (tab bar) --- */
+/* Mirrors .remote-indicator's metrics so the two sit level in .tab-actions. */
+.usage-pill-wrap {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.usage-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  opacity: 0.75;
+  transition: opacity 120ms linear;
+}
+.usage-pill-wrap:hover .usage-pill {
+  opacity: 1;
+}
+
+/* The one state worth a colour: the plan window stopped allowing requests. */
+.usage-pill.throttled {
+  border-color: var(--warn, #d08770);
+  color: var(--warn, #d08770);
+}
+
+.usage-card {
+  /* Same placement as .layouts-popup — the popup pattern that renders
+     correctly over the panes here. Anchored to the app root, not to the
+     pill, so no ancestor of .tab-actions can clip or cover it. */
+  position: absolute;
+  top: var(--tab-bar-h);
+  /* Same inset as .layouts-popup, so the two panels line up on the same
+     edge instead of each picking their own. */
+  right: 48px;
+  z-index: 50;
+  min-width: 240px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.usage-card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+
+.usage-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 0;
+}
+
+.usage-key {
+  opacity: 0.7;
+}
+
+.usage-val {
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.usage-val.warn {
+  color: var(--warn, #d08770);
+}
+
+.usage-sep {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--border);
+}
+
+.usage-note {
+  margin-top: 8px;
+  font-size: 11px;
+  opacity: 0.5;
+  line-height: 1.4;
+}
+
+/* Subscription limit gauges inside the usage card. */
+.usage-gauge {
+  padding: 5px 0;
+}
+.usage-gauge-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.usage-bar {
+  height: 4px;
+  margin: 5px 0 3px;
+  border-radius: 2px;
+  background: rgba(var(--hover-rgb), 0.25);
+  overflow: hidden;
+}
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+/* Near the ceiling is the moment the bar has to be noticed. */
+.usage-bar-fill.high {
+  background: var(--warn, #d08770);
+}
+.usage-gauge-reset {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+/* Plan ring in the pill: filled proportionally to the tightest limit window. */
+.usage-pill {
+  gap: 5px;
+}
+.usage-ring {
+  /* Start the arc at 12 o'clock instead of 3. */
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+.usage-ring-track,
+.usage-ring-fill {
+  fill: none;
+  stroke-width: 3.5;
+}
+.usage-ring-track {
+  stroke: rgba(var(--hover-rgb), 0.3);
+}
+.usage-ring-fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dasharray 250ms ease;
+}
+.usage-ring-fill.high {
+  stroke: var(--warn, #d08770);
+}
