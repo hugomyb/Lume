@@ -1,4 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "./i18n";
+
+/** Marker the backend puts on errors it wants translated — see `err()` in
+ *  `src-tauri/src/ai.rs`. Payload is `<key>` or `<key>|<arg>`. */
+const ERR_PREFIX = "lume.err:";
+
+/** Render a backend AI error in the UI language. Messages Lume raises itself
+ *  arrive as i18n keys (the backend has no idea what language the UI is in);
+ *  everything else — a provider's own stderr, an HTTP status — is its own text
+ *  already and is shown as-is. */
+export function aiErrorText(message: string): string {
+  // `String(e)` on a rejected invoke() gives "Error: <message>".
+  const raw = message.replace(/^Error:\s*/, "");
+  if (!raw.startsWith(ERR_PREFIX)) return message;
+  const body = raw.slice(ERR_PREFIX.length);
+  const sep = body.indexOf("|");
+  const key = sep === -1 ? body : body.slice(0, sep);
+  const arg = sep === -1 ? null : body.slice(sep + 1);
+  return t(`aiErr.${key}`, arg === null ? undefined : { arg });
+}
 
 export type AiStatus = {
   available: boolean;

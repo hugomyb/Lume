@@ -353,4 +353,11 @@ export const it: Dict = {
   "ai.openaiNote": "Usa l'API di OpenAI. Crea una chiave su <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Usa l'API di DeepSeek (compatibile con OpenAI). Chiave su <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Qualsiasi endpoint compatibile con OpenAI (Ollama, Groq, OpenRouter…). Imposta URL di base, chiave e modello.",
+  "aiErr.noProvider": "Nessun provider IA configurato (Impostazioni › IA).",
+  "aiErr.notInPath": "«{arg}» non trovato nel PATH (Impostazioni › IA).",
+  "aiErr.providerFailed": "Il provider IA non ha risposto (verifica di aver effettuato l'accesso).",
+  "aiErr.missingUrl": "URL dell'API mancante (Impostazioni › IA).",
+  "aiErr.missingKey": "Chiave API mancante (Impostazioni › IA).",
+  "aiErr.missingModel": "Modello mancante (Impostazioni › IA).",
+  "aiErr.requestFailed": "Richiesta API fallita: {arg}",
 };

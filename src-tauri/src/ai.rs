@@ -290,48 +290,77 @@ struct AiErrorEvent {
     message: String,
 }
 
-fn build_prompt(command: &str, output: &str, exit_code: i32) -> String {
+/// UI language code → the English name of that language, as used in the prompts
+/// to tell the model which language to answer in. Mirrors `LANGUAGES` in
+/// `src/i18n.ts`; anything unknown falls back to English, like the UI does.
+fn language_name(code: &str) -> &'static str {
+    let base = code
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match base.as_str() {
+        "fr" => "French",
+        "es" => "Spanish",
+        "de" => "German",
+        "it" => "Italian",
+        "pt" => "Portuguese",
+        "nl" => "Dutch",
+        "tr" => "Turkish",
+        "ru" => "Russian",
+        "ar" => "Arabic",
+        "hi" => "Hindi",
+        "zh" => "Chinese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        _ => "English",
+    }
+}
+
+fn build_prompt(command: &str, output: &str, exit_code: i32, language: &str) -> String {
     let mut p = String::new();
-    p.push_str("Analyse ce bloc de terminal.\n\n");
-    p.push_str("Commande :\n```\n");
+    p.push_str("Analyze this terminal block.\n\n");
+    p.push_str("Command:\n```\n");
     p.push_str(command.trim());
     p.push_str("\n```\n\n");
     if !output.trim().is_empty() {
         let truncated: String = output.chars().take(MAX_OUTPUT_CHARS).collect();
         let was_truncated = output.chars().count() > MAX_OUTPUT_CHARS;
-        p.push_str("Sortie :\n```\n");
+        p.push_str("Output:\n```\n");
         p.push_str(&truncated);
         if was_truncated {
-            p.push_str("\n[…sortie tronquée]");
+            p.push_str("\n[…output truncated]");
         }
         p.push_str("\n```\n\n");
     }
-    p.push_str(&format!("Code retour : {}\n\n", exit_code));
+    p.push_str(&format!("Exit code: {}\n\n", exit_code));
     if exit_code != 0 {
         p.push_str(
-            "La commande a échoué. Explique l'erreur en 2-3 phrases et suggère une correction concrète. Réponds en français, sans introduction, va droit au but.",
+            "The command failed. Explain the error in 2-3 sentences and suggest a concrete fix.",
         );
     } else {
-        p.push_str(
-            "Explique en 2-3 phrases ce que la commande fait et l'essentiel de sa sortie. Réponds en français, sans introduction, va droit au but.",
-        );
+        p.push_str("Explain in 2-3 sentences what the command does and the gist of its output.");
     }
+    p.push_str(&format!(
+        " Answer in {}, with no preamble — get straight to the point.",
+        language_name(language)
+    ));
     p
 }
 
 fn build_generate_prompt(query: &str, cwd: Option<&str>, listing: Option<&str>) -> String {
     let mut p = String::new();
-    p.push_str("Génère UNE SEULE commande shell pour cette demande.\n\n");
-    p.push_str("Demande : ");
+    p.push_str("Generate a SINGLE shell command for this request.\n\n");
+    p.push_str("Request: ");
     p.push_str(query.trim());
     p.push_str("\n\n");
     if cwd.is_some() || listing.is_some() {
-        p.push_str("Contexte :\n");
+        p.push_str("Context:\n");
         if let Some(cwd) = cwd {
-            p.push_str(&format!("- Répertoire courant : {}\n", cwd));
+            p.push_str(&format!("- Current directory: {}\n", cwd));
         }
         if let Some(listing) = listing {
-            p.push_str("- Contenu du répertoire :\n");
+            p.push_str("- Directory contents:\n");
             for line in listing.lines() {
                 p.push_str("  ");
                 p.push_str(line);
@@ -340,15 +369,21 @@ fn build_generate_prompt(query: &str, cwd: Option<&str>, listing: Option<&str>) 
         }
         p.push('\n');
     }
-    p.push_str("Règles strictes :\n");
-    p.push_str("- Réponds avec UNIQUEMENT la commande, rien d'autre.\n");
-    p.push_str("- Pas d'explication, pas de phrase d'introduction.\n");
-    p.push_str("- Pas de backticks, pas de markdown.\n");
-    p.push_str("- Pas de bloc ```bash``` ni équivalent.\n");
-    p.push_str("- Cible : zsh/bash sur Linux.\n");
-    p.push_str("- Si la demande est ambiguë, choisis l'interprétation la plus probable et donne quand même une commande.\n");
-    p.push_str("- Une seule ligne de préférence (utilise && ou ; pour chaîner si nécessaire).\n");
-    p.push_str("- Quand tu fais référence à un chemin présent dans le contexte, utilise le nom EXACT donné ci-dessus.\n");
+    // No language instruction here on purpose: the answer is a command line,
+    // not prose.
+    p.push_str("Strict rules:\n");
+    p.push_str("- Answer with ONLY the command, nothing else.\n");
+    p.push_str("- No explanation, no introductory sentence.\n");
+    p.push_str("- No backticks, no markdown.\n");
+    p.push_str("- No ```bash``` block or equivalent.\n");
+    p.push_str("- Target: zsh/bash on Linux.\n");
+    p.push_str(
+        "- If the request is ambiguous, pick the most likely reading and still give a command.\n",
+    );
+    p.push_str("- Prefer a single line (use && or ; to chain when needed).\n");
+    p.push_str(
+        "- When referring to a path present in the context, use the EXACT name given above.\n",
+    );
     p
 }
 
@@ -407,8 +442,16 @@ pub fn ai_explain_block(
     output: Option<String>,
     exit_code: i32,
 ) -> Result<u64, String> {
-    let prompt = build_prompt(&command, output.as_deref().unwrap_or(""), exit_code);
-    let ai = config.lock().ai.clone();
+    let (ai, language) = {
+        let cfg = config.lock();
+        (cfg.ai.clone(), cfg.language.clone())
+    };
+    let prompt = build_prompt(
+        &command,
+        output.as_deref().unwrap_or(""),
+        exit_code,
+        &language,
+    );
     dispatch(app, state, ai, prompt)
 }
 
@@ -419,9 +462,9 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-fn build_chat_prompt(messages: &[ChatMessage]) -> String {
+fn build_chat_prompt(messages: &[ChatMessage], language: &str) -> String {
     let mut p = String::new();
-    p.push_str("Tu es un assistant IA intégré dans le terminal Lume. Tu réponds à la dernière question de l'utilisateur en t'appuyant sur la conversation ci-dessous.\n\n");
+    p.push_str("You are an AI assistant embedded in the Lume terminal. You answer the user's last question using the conversation below.\n\n");
     p.push_str("---\n");
     for msg in messages.iter() {
         let label = match msg.role.as_str() {
@@ -434,7 +477,10 @@ fn build_chat_prompt(messages: &[ChatMessage]) -> String {
         p.push('\n');
     }
     p.push_str("\n---\n\n");
-    p.push_str("Réponds à la dernière question USER ci-dessus, en français, de manière concise. Garde le contexte de toute la conversation. Pas d'introduction (\"Bien sûr, …\"), va droit au but.");
+    p.push_str(&format!(
+        "Answer the last USER question above concisely, in {}. Keep the context of the whole conversation. No preamble (\"Sure, …\") — get straight to the point.",
+        language_name(language)
+    ));
     p
 }
 
@@ -448,8 +494,11 @@ pub fn ai_chat(
     if messages.is_empty() {
         return Err("ai_chat: empty messages".to_string());
     }
-    let prompt = build_chat_prompt(&messages);
-    let ai = config.lock().ai.clone();
+    let (ai, language) = {
+        let cfg = config.lock();
+        (cfg.ai.clone(), cfg.language.clone())
+    };
+    let prompt = build_chat_prompt(&messages, &language);
     dispatch(app, state, ai, prompt)
 }
 
@@ -483,6 +532,19 @@ fn dispatch(
     }
 }
 
+/// Errors that reach the UI travel as i18n keys, never as sentences: only the
+/// frontend knows the UI language at render time, and hardcoding one language
+/// here is what made the assistant answer in French for everyone (issue #26).
+/// `lume.err:<key>[|<arg>]`; anything else — a provider's own stderr, say —
+/// is passed through untouched. Keys live under `aiErr.*` in `src/i18n.ts`.
+fn err(key: &str) -> String {
+    format!("lume.err:{key}")
+}
+
+fn err_arg(key: &str, arg: &str) -> String {
+    format!("lume.err:{key}|{arg}")
+}
+
 fn spawn_request(
     app: AppHandle,
     state: State<'_, Arc<AiManager>>,
@@ -490,14 +552,10 @@ fn spawn_request(
     prompt: String,
 ) -> Result<u64, String> {
     if provider.command.trim().is_empty() {
-        return Err("Aucun provider IA configuré (Réglages › IA).".to_string());
+        return Err(err("noProvider"));
     }
-    let bin_path = which_command(&provider.command).ok_or_else(|| {
-        format!(
-            "« {} » introuvable dans le PATH (Réglages › IA).",
-            provider.command
-        )
-    })?;
+    let bin_path =
+        which_command(&provider.command).ok_or_else(|| err_arg("notInPath", &provider.command))?;
 
     // Substitute the {prompt} token; if no arg carries it, append the prompt.
     let mut final_args: Vec<String> = Vec::new();
@@ -573,7 +631,7 @@ fn spawn_request(
                 let _ = app.emit("ai:done", AiDoneEvent { request_id });
             } else {
                 let msg = if stderr_text.is_empty() {
-                    "Le provider IA a échoué (vérifie qu'il est connecté).".to_string()
+                    err("providerFailed")
                 } else {
                     stderr_text
                 };
@@ -601,13 +659,13 @@ fn api_request(
     prompt: String,
 ) -> Result<u64, String> {
     if api.base_url.is_empty() {
-        return Err("URL de l'API manquante (Réglages › IA).".to_string());
+        return Err(err("missingUrl"));
     }
     if api.api_key.is_empty() {
-        return Err("Clé API manquante (Réglages › IA).".to_string());
+        return Err(err("missingKey"));
     }
     if api.model.is_empty() {
-        return Err("Modèle manquant (Réglages › IA).".to_string());
+        return Err(err("missingModel"));
     }
 
     let request_id = state.next_id.fetch_add(1, Ordering::Relaxed);
@@ -669,7 +727,7 @@ fn stream_api(
             let snippet: String = txt.chars().take(300).collect();
             return Err(format!("HTTP {code} — {snippet}"));
         }
-        Err(e) => return Err(format!("Requête API échouée : {e}")),
+        Err(e) => return Err(err_arg("requestFailed", &e.to_string())),
     };
 
     // SSE: lines like `data: {json}`, terminated by `data: [DONE]`.
@@ -779,65 +837,94 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_command_and_output() {
-        let p = build_prompt("ls -la", "total 12\ndrwx user", 0);
+        let p = build_prompt("ls -la", "total 12\ndrwx user", 0, "en");
         assert!(p.contains("ls -la"));
         assert!(p.contains("total 12"));
-        assert!(p.contains("Code retour : 0"));
-        assert!(p.contains("Explique"));
+        assert!(p.contains("Exit code: 0"));
+        assert!(p.contains("Explain"));
     }
 
     #[test]
     fn build_prompt_failure_path() {
-        let p = build_prompt("cd nonexistent", "no such file", 1);
-        assert!(p.contains("Code retour : 1"));
-        assert!(p.contains("échoué"));
+        let p = build_prompt("cd nonexistent", "no such file", 1, "en");
+        assert!(p.contains("Exit code: 1"));
+        assert!(p.contains("failed"));
     }
 
     #[test]
     fn build_prompt_truncates_long_output() {
         let big: String = "x".repeat(MAX_OUTPUT_CHARS + 5000);
-        let p = build_prompt("dump", &big, 0);
-        assert!(p.contains("[…sortie tronquée]"));
+        let p = build_prompt("dump", &big, 0, "en");
+        assert!(p.contains("[…output truncated]"));
+    }
+
+    /// The UI language — not the codebase's language — drives the answer.
+    #[test]
+    fn prompts_follow_the_ui_language() {
+        assert!(build_prompt("ls", "", 0, "en").contains("Answer in English"));
+        assert!(build_prompt("ls", "", 0, "fr").contains("Answer in French"));
+        assert!(build_prompt("ls", "", 1, "ja").contains("Answer in Japanese"));
+        // Regional tags and unknown codes still resolve.
+        assert!(build_prompt("ls", "", 0, "pt-BR").contains("Answer in Portuguese"));
+        assert!(build_prompt("ls", "", 0, "xx").contains("Answer in English"));
+        let chat = build_chat_prompt(
+            &[ChatMessage {
+                role: "user".into(),
+                content: "what is ls?".into(),
+            }],
+            "de",
+        );
+        assert!(chat.contains("in German"));
+    }
+
+    /// The frontend parses these; `aiErrorText` in `src/ai.ts` must keep up.
+    #[test]
+    fn errors_are_i18n_keys_not_sentences() {
+        assert_eq!(err("noProvider"), "lume.err:noProvider");
+        assert_eq!(err_arg("notInPath", "my-llm"), "lume.err:notInPath|my-llm");
     }
 
     #[test]
     fn generate_prompt_includes_cwd_and_listing() {
         let p = build_generate_prompt(
-            "compte les lignes Rust",
+            "count the Rust lines",
             Some("/home/user/project"),
-            Some("dossiers : src-tauri/ src/\nfichiers : package.json"),
+            Some("dirs: src-tauri/ src/\nfiles: package.json"),
         );
-        assert!(p.contains("Répertoire courant : /home/user/project"));
+        assert!(p.contains("Current directory: /home/user/project"));
         assert!(p.contains("src-tauri/"));
-        assert!(p.contains("Quand tu fais référence à un chemin"));
+        assert!(p.contains("When referring to a path"));
     }
 
     #[test]
     fn generate_prompt_omits_context_when_missing() {
         let p = build_generate_prompt("ls", None, None);
-        assert!(!p.contains("Contexte"));
-        assert!(!p.contains("Répertoire courant"));
+        assert!(!p.contains("Context:"));
+        assert!(!p.contains("Current directory"));
     }
 
     #[test]
     fn chat_prompt_formats_conversation() {
-        let p = build_chat_prompt(&[
-            ChatMessage {
-                role: "user".into(),
-                content: "Qu'est-ce que ls ?".into(),
-            },
-            ChatMessage {
-                role: "assistant".into(),
-                content: "ls liste les fichiers.".into(),
-            },
-            ChatMessage {
-                role: "user".into(),
-                content: "Et -la ?".into(),
-            },
-        ]);
+        let p = build_chat_prompt(
+            &[
+                ChatMessage {
+                    role: "user".into(),
+                    content: "what is ls?".into(),
+                },
+                ChatMessage {
+                    role: "assistant".into(),
+                    content: "ls lists files.".into(),
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: "and -la?".into(),
+                },
+            ],
+            "en",
+        );
         assert!(p.contains("[USER]"));
         assert!(p.contains("[ASSISTANT]"));
-        assert!(p.contains("Qu'est-ce que ls"));
-        assert!(p.contains("Et -la"));
+        assert!(p.contains("what is ls"));
+        assert!(p.contains("and -la"));
     }
 }

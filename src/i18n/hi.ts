@@ -353,4 +353,11 @@ export const hi: Dict = {
   "ai.openaiNote": "OpenAI API का उपयोग करता है। <code>platform.openai.com</code> पर एक कुंजी बनाएँ।",
   "ai.deepseekNote": "DeepSeek API का उपयोग करता है (OpenAI-संगत)। कुंजी <code>platform.deepseek.com</code> पर।",
   "ai.apiNote": "कोई भी OpenAI-संगत एंडपॉइंट (Ollama, Groq, OpenRouter…)। बेस URL, कुंजी और मॉडल सेट करें।",
+  "aiErr.noProvider": "कोई AI प्रदाता कॉन्फ़िगर नहीं है (सेटिंग्स › AI)।",
+  "aiErr.notInPath": "“{arg}” PATH में नहीं मिला (सेटिंग्स › AI)।",
+  "aiErr.providerFailed": "AI प्रदाता विफल रहा (जाँचें कि आप साइन इन हैं)।",
+  "aiErr.missingUrl": "API URL नहीं दिया गया (सेटिंग्स › AI)।",
+  "aiErr.missingKey": "API कुंजी नहीं दी गई (सेटिंग्स › AI)।",
+  "aiErr.missingModel": "मॉडल नहीं दिया गया (सेटिंग्स › AI)।",
+  "aiErr.requestFailed": "API अनुरोध विफल: {arg}",
 };

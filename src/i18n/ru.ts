@@ -353,4 +353,11 @@ export const ru: Dict = {
   "ai.openaiNote": "Использует API OpenAI. Создайте ключ на <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Использует API DeepSeek (совместимый с OpenAI). Ключ на <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Любая конечная точка, совместимая с OpenAI (Ollama, Groq, OpenRouter…). Укажите базовый URL, ключ и модель.",
+  "aiErr.noProvider": "ИИ-провайдер не настроен (Настройки › ИИ).",
+  "aiErr.notInPath": "«{arg}» не найден в PATH (Настройки › ИИ).",
+  "aiErr.providerFailed": "Ошибка ИИ-провайдера (проверьте, выполнен ли вход).",
+  "aiErr.missingUrl": "Не указан URL API (Настройки › ИИ).",
+  "aiErr.missingKey": "Не указан ключ API (Настройки › ИИ).",
+  "aiErr.missingModel": "Не указана модель (Настройки › ИИ).",
+  "aiErr.requestFailed": "Запрос к API не удался: {arg}",
 };

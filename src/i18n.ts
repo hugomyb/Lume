@@ -138,6 +138,15 @@ const en: Dict = {
   "ai.apiNote":
     "Any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter…). Set the base URL, key and model.",
 
+  // Errors raised by the backend, sent as keys so they follow the UI language.
+  "aiErr.noProvider": "No AI provider configured (Settings › AI).",
+  "aiErr.notInPath": "“{arg}” not found in PATH (Settings › AI).",
+  "aiErr.providerFailed": "The AI provider failed (check that it is signed in).",
+  "aiErr.missingUrl": "API URL missing (Settings › AI).",
+  "aiErr.missingKey": "API key missing (Settings › AI).",
+  "aiErr.missingModel": "Model missing (Settings › AI).",
+  "aiErr.requestFailed": "API request failed: {arg}",
+
   // --- About ---
   "about.version": "Version",
   "about.updates": "Updates",
@@ -538,6 +547,14 @@ const fr: Dict = {
     "Utilise l'API DeepSeek (compatible OpenAI). Clé sur <code>platform.deepseek.com</code>.",
   "ai.apiNote":
     "N'importe quel endpoint compatible OpenAI (Ollama, Groq, OpenRouter…). Renseigne l'URL de base, la clé et le modèle.",
+
+  "aiErr.noProvider": "Aucun provider IA configuré (Réglages › IA).",
+  "aiErr.notInPath": "« {arg} » introuvable dans le PATH (Réglages › IA).",
+  "aiErr.providerFailed": "Le provider IA a échoué (vérifie qu'il est connecté).",
+  "aiErr.missingUrl": "URL de l'API manquante (Réglages › IA).",
+  "aiErr.missingKey": "Clé API manquante (Réglages › IA).",
+  "aiErr.missingModel": "Modèle manquant (Réglages › IA).",
+  "aiErr.requestFailed": "Requête API échouée : {arg}",
 
   "about.version": "Version",
   "about.updates": "Mises à jour",

@@ -353,4 +353,11 @@ export const zh: Dict = {
   "ai.openaiNote": "使用 OpenAI API。在 <code>platform.openai.com</code> 上创建密钥。",
   "ai.deepseekNote": "使用 DeepSeek API（OpenAI 兼容）。密钥在 <code>platform.deepseek.com</code>。",
   "ai.apiNote": "任何 OpenAI 兼容的端点（Ollama、Groq、OpenRouter…）。设置基础 URL、密钥和模型。",
+  "aiErr.noProvider": "未配置 AI 提供方（设置 › AI）。",
+  "aiErr.notInPath": "在 PATH 中找不到“{arg}”（设置 › AI）。",
+  "aiErr.providerFailed": "AI 提供方调用失败（请确认已登录）。",
+  "aiErr.missingUrl": "缺少 API 地址（设置 › AI）。",
+  "aiErr.missingKey": "缺少 API 密钥（设置 › AI）。",
+  "aiErr.missingModel": "缺少模型（设置 › AI）。",
+  "aiErr.requestFailed": "API 请求失败：{arg}",
 };

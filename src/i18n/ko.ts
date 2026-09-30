@@ -353,4 +353,11 @@ export const ko: Dict = {
   "ai.openaiNote": "OpenAI API를 사용합니다. <code>platform.openai.com</code>에서 키를 생성하세요.",
   "ai.deepseekNote": "DeepSeek API를 사용합니다(OpenAI 호환). 키는 <code>platform.deepseek.com</code>에서 발급받으세요.",
   "ai.apiNote": "모든 OpenAI 호환 엔드포인트(Ollama, Groq, OpenRouter…). 기본 URL, 키, 모델을 설정하세요.",
+  "aiErr.noProvider": "구성된 AI 공급자가 없습니다(설정 › AI).",
+  "aiErr.notInPath": "PATH에서 “{arg}”을(를) 찾을 수 없습니다(설정 › AI).",
+  "aiErr.providerFailed": "AI 공급자 호출에 실패했습니다(로그인 상태를 확인하세요).",
+  "aiErr.missingUrl": "API URL이 없습니다(설정 › AI).",
+  "aiErr.missingKey": "API 키가 없습니다(설정 › AI).",
+  "aiErr.missingModel": "모델이 없습니다(설정 › AI).",
+  "aiErr.requestFailed": "API 요청 실패: {arg}",
 };

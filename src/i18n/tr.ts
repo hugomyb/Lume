@@ -353,4 +353,11 @@ export const tr: Dict = {
   "ai.openaiNote": "OpenAI API'sini kullanır. <code>platform.openai.com</code> adresinde bir anahtar oluşturun.",
   "ai.deepseekNote": "DeepSeek API'sini kullanır (OpenAI uyumlu). Anahtar için <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Herhangi bir OpenAI uyumlu uç nokta (Ollama, Groq, OpenRouter…). Temel URL'yi, anahtarı ve modeli ayarlayın.",
+  "aiErr.noProvider": "Yapılandırılmış YZ sağlayıcısı yok (Ayarlar › YZ).",
+  "aiErr.notInPath": "“{arg}” PATH içinde bulunamadı (Ayarlar › YZ).",
+  "aiErr.providerFailed": "YZ sağlayıcısı başarısız oldu (oturumunuzun açık olduğunu doğrulayın).",
+  "aiErr.missingUrl": "API URL'si eksik (Ayarlar › YZ).",
+  "aiErr.missingKey": "API anahtarı eksik (Ayarlar › YZ).",
+  "aiErr.missingModel": "Model eksik (Ayarlar › YZ).",
+  "aiErr.requestFailed": "API isteği başarısız: {arg}",
 };

@@ -353,4 +353,11 @@ export const ar: Dict = {
   "ai.openaiNote": "يستخدم واجهة OpenAI. أنشئ مفتاحًا على <code>platform.openai.com</code>.",
   "ai.deepseekNote": "يستخدم واجهة DeepSeek (متوافقة مع OpenAI). المفتاح على <code>platform.deepseek.com</code>.",
   "ai.apiNote": "أي نقطة نهاية متوافقة مع OpenAI (Ollama، Groq، OpenRouter…). حدِّد عنوان URL الأساسي والمفتاح والنموذج.",
+  "aiErr.noProvider": "لا يوجد مزوّد ذكاء اصطناعي مُعدّ (الإعدادات › الذكاء الاصطناعي).",
+  "aiErr.notInPath": "«{arg}» غير موجود في PATH (الإعدادات › الذكاء الاصطناعي).",
+  "aiErr.providerFailed": "فشل مزوّد الذكاء الاصطناعي (تأكّد من تسجيل الدخول).",
+  "aiErr.missingUrl": "عنوان URL لواجهة API مفقود (الإعدادات › الذكاء الاصطناعي).",
+  "aiErr.missingKey": "مفتاح API مفقود (الإعدادات › الذكاء الاصطناعي).",
+  "aiErr.missingModel": "النموذج مفقود (الإعدادات › الذكاء الاصطناعي).",
+  "aiErr.requestFailed": "فشل طلب API: {arg}",
 };

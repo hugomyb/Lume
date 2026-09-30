@@ -7,7 +7,13 @@ import {
 } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { aiCancel, type AiChunkEvent, type AiDoneEvent, type AiErrorEvent } from "./ai";
+import {
+  aiCancel,
+  aiErrorText,
+  type AiChunkEvent,
+  type AiDoneEvent,
+  type AiErrorEvent,
+} from "./ai";
 import { IconSparkles } from "./icons";
 import { t, tHtml } from "./i18n";
 
@@ -63,7 +69,7 @@ export default function CommandPalette(props: Props) {
       setRequestId(id);
     } catch (e) {
       setStage("error");
-      setError(String(e));
+      setError(aiErrorText(String(e)));
     }
   };
 
@@ -140,7 +146,7 @@ export default function CommandPalette(props: Props) {
     unlistenError = await listen<AiErrorEvent>("ai:error", (e) => {
       if (e.payload.requestId !== untrack(requestId)) return;
       setStage("error");
-      setError(e.payload.message);
+      setError(aiErrorText(e.payload.message));
     });
   };
   setupListeners();

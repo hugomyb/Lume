@@ -353,4 +353,11 @@ export const ja: Dict = {
   "ai.openaiNote": "OpenAI API を使用します。<code>platform.openai.com</code> でキーを作成してください。",
   "ai.deepseekNote": "DeepSeek API を使用します（OpenAI 互換）。キーは <code>platform.deepseek.com</code> で取得できます。",
   "ai.apiNote": "OpenAI 互換のエンドポイントすべて（Ollama、Groq、OpenRouter…）。ベース URL、キー、モデルを設定してください。",
+  "aiErr.noProvider": "AI プロバイダーが設定されていません（設定 › AI）。",
+  "aiErr.notInPath": "「{arg}」が PATH に見つかりません（設定 › AI）。",
+  "aiErr.providerFailed": "AI プロバイダーが失敗しました（ログイン済みか確認してください）。",
+  "aiErr.missingUrl": "API の URL がありません（設定 › AI）。",
+  "aiErr.missingKey": "API キーがありません（設定 › AI）。",
+  "aiErr.missingModel": "モデルが指定されていません（設定 › AI）。",
+  "aiErr.requestFailed": "API リクエストに失敗しました: {arg}",
 };

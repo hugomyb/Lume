@@ -353,4 +353,11 @@ export const nl: Dict = {
   "ai.openaiNote": "Gebruikt de OpenAI-API. Maak een sleutel aan op <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Gebruikt de DeepSeek-API (OpenAI-compatibel). Sleutel op <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Elk OpenAI-compatibel eindpunt (Ollama, Groq, OpenRouter…). Stel de basis-URL, sleutel en het model in.",
+  "aiErr.noProvider": "Geen AI-provider geconfigureerd (Instellingen › AI).",
+  "aiErr.notInPath": "‘{arg}’ niet gevonden in PATH (Instellingen › AI).",
+  "aiErr.providerFailed": "De AI-provider gaf een fout (controleer of je bent ingelogd).",
+  "aiErr.missingUrl": "API-URL ontbreekt (Instellingen › AI).",
+  "aiErr.missingKey": "API-sleutel ontbreekt (Instellingen › AI).",
+  "aiErr.missingModel": "Model ontbreekt (Instellingen › AI).",
+  "aiErr.requestFailed": "API-verzoek mislukt: {arg}",
 };

@@ -25,6 +25,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   aiCancel,
   aiChat,
+  aiErrorText,
   aiExplainBlock,
   aiStatus,
   type AiChunkEvent,
@@ -624,7 +625,7 @@ export default function Tabs() {
       if (!l || !l.block.ai) return;
       setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", {
         status: "error",
-        error: String(e),
+        error: aiErrorText(String(e)),
       });
     }
   };
@@ -694,7 +695,7 @@ export default function Tabs() {
       if (!l || !l.block.ai) return;
       setTabs(l.tIdx, "leaves", leafId, "blocks", l.bIdx, "ai", {
         status: "error",
-        error: String(e),
+        error: aiErrorText(String(e)),
       });
     }
   };
@@ -2187,7 +2188,7 @@ export default function Tabs() {
       if (!loc) return;
       setTabs(loc.tabIdx, "leaves", loc.leafId, "blocks", loc.blockIdx, "ai", {
         status: "error",
-        error: e.payload.message,
+        error: aiErrorText(e.payload.message),
       });
     });
   });

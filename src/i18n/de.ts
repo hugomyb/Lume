@@ -354,4 +354,11 @@ export const de: Dict = {
   "ai.openaiNote": "Verwendet die OpenAI-API. Erstelle einen Schlüssel unter <code>platform.openai.com</code>.",
   "ai.deepseekNote": "Verwendet die DeepSeek-API (OpenAI-kompatibel). Schlüssel unter <code>platform.deepseek.com</code>.",
   "ai.apiNote": "Jeder OpenAI-kompatible Endpunkt (Ollama, Groq, OpenRouter…). Lege Basis-URL, Schlüssel und Modell fest.",
+  "aiErr.noProvider": "Kein KI-Anbieter konfiguriert (Einstellungen › KI).",
+  "aiErr.notInPath": "„{arg}“ wurde im PATH nicht gefunden (Einstellungen › KI).",
+  "aiErr.providerFailed": "Der KI-Anbieter ist fehlgeschlagen (prüfe, ob du angemeldet bist).",
+  "aiErr.missingUrl": "API-URL fehlt (Einstellungen › KI).",
+  "aiErr.missingKey": "API-Schlüssel fehlt (Einstellungen › KI).",
+  "aiErr.missingModel": "Modell fehlt (Einstellungen › KI).",
+  "aiErr.requestFailed": "API-Anfrage fehlgeschlagen: {arg}",
 };
