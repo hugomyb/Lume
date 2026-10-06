@@ -38,6 +38,33 @@ export type Appearance = {
 export type BehaviorConfig = {
   /** Focus the hovered pane without clicking (focus follows mouse). */
   focusFollowsMouse: boolean;
+  /** Show the active pane's git branch on its tab. */
+  showGitBranch: boolean;
+  /** Keep each pane's recent command blocks across restarts. */
+  persistBlocks: boolean;
+};
+
+export type RemoteSettings = {
+  /** Preferred listening port (a free one is used if it's taken). */
+  port: number;
+  /** Open the cloudflared Internet tunnel automatically when installed. */
+  autoTunnel: boolean;
+};
+
+export type HistorySettings = {
+  enabled: boolean;
+  /** `*`/`?` patterns (case-insensitive) never recorded. */
+  ignore: string[];
+};
+
+export type WorkspaceSettings = {
+  /** Startup commands when opening a workspace. */
+  runCommands: "always" | "ask" | "never";
+};
+
+export type SshSettings = {
+  tmuxSession: string;
+  tmuxByDefault: boolean;
 };
 
 export type ShellConfig = {
@@ -95,6 +122,10 @@ export type Config = {
   notifications: NotificationsConfig;
   ai: AiConfig;
   fileTree: FileTreeConfig;
+  remote: RemoteSettings;
+  history: HistorySettings;
+  workspaces: WorkspaceSettings;
+  ssh: SshSettings;
   /** UI language code ("en", "fr", …). */
   language: string;
   /** Action id → key combo overrides for remappable shortcuts. */
@@ -143,7 +174,7 @@ export const DEFAULT_CONFIG: Config = {
     scrollback: 5000,
     theme: DEFAULT_THEME,
   },
-  behavior: { focusFollowsMouse: false },
+  behavior: { focusFollowsMouse: false, showGitBranch: true, persistBlocks: true },
   shell: { program: null, args: [] },
   notifications: { enabled: true, minDurationSec: 10, sound: true },
   ai: {
@@ -170,6 +201,13 @@ export const DEFAULT_CONFIG: Config = {
     fileEdit: "nano {path}",
     fileOpen: "${EDITOR:-nano} {path}",
   },
+  remote: { port: 4530, autoTunnel: true },
+  history: {
+    enabled: true,
+    ignore: ["*password*", "*passwd*", "*secret*", "*token*", "*api_key*", "*apikey*"],
+  },
+  workspaces: { runCommands: "always" },
+  ssh: { tmuxSession: "lume", tmuxByDefault: false },
   language: "en",
   keybindings: {},
 };

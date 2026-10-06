@@ -21,11 +21,7 @@ pub struct PtySession {
     /// foreground process stops reading stdin, and must not freeze every
     /// other session — or the UI — behind the global map lock.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Box<dyn portable_pty::MasterPty + Send>,
-    /// Signals the child on pty_kill: closing the master fd only delivers the
-    /// kernel's SIGHUP, which processes are free to ignore — those would
-    /// otherwise outlive their tab (and pin their reaper thread) forever.
-    killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    backend: Backend,
     cwd: Arc<Mutex<Option<String>>>,
     /// Raw terminal output, fanned out to remote-control subscribers.
     output_tx: broadcast::Sender<Vec<u8>>,
@@ -37,6 +33,115 @@ pub struct PtySession {
     /// native grid rebuilding from xterm's serialized buffer) line the two
     /// streams up byte-exactly. Updated under the `replay` lock.
     total_out: Arc<Mutex<u64>>,
+}
+
+/// What a session's bytes are written to / resized through.
+enum Backend {
+    /// A local shell on a pseudo-terminal.
+    Local {
+        master: Box<dyn portable_pty::MasterPty + Send>,
+        /// Signals the child on pty_kill: closing the master fd only delivers
+        /// the kernel's SIGHUP, which processes are free to ignore — those
+        /// would otherwise outlive their tab (and pin their reaper thread).
+        killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    },
+    /// A terminal of another Lume, reached over its remote-control channel
+    /// (see remote_client.rs). Input and resizes go through `ctl`.
+    Remote {
+        ctl: tokio::sync::mpsc::UnboundedSender<RemoteCtl>,
+    },
+}
+
+/// Commands for a remote session's connection task.
+pub enum RemoteCtl {
+    Input(Vec<u8>),
+    Resize(u16, u16),
+    Close,
+}
+
+impl Backend {
+    fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
+        match self {
+            Backend::Local { master, .. } => master
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| e.to_string()),
+            Backend::Remote { ctl } => {
+                let _ = ctl.send(RemoteCtl::Resize(rows, cols));
+                Ok(())
+            }
+        }
+    }
+
+    fn kill(&mut self) {
+        match self {
+            Backend::Local { killer, .. } => {
+                let _ = killer.kill();
+            }
+            Backend::Remote { ctl } => {
+                let _ = ctl.send(RemoteCtl::Close);
+            }
+        }
+    }
+}
+
+/// `Write` end of a remote session: bytes become `RemoteCtl::Input` messages.
+struct RemoteWriter(tokio::sync::mpsc::UnboundedSender<RemoteCtl>);
+
+impl Write for RemoteWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .send(RemoteCtl::Input(buf.to_vec()))
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Where a session's terminal output goes: the replay ring + remote-control
+/// fan-out (and the native grid, which subscribes to it), then the pane's
+/// point-to-point channel to xterm.
+#[derive(Clone)]
+pub struct OutputSink {
+    replay: Arc<Mutex<Vec<u8>>>,
+    total_out: Arc<Mutex<u64>>,
+    output_tx: broadcast::Sender<Vec<u8>>,
+    on_output: Channel<InvokeResponseBody>,
+}
+
+impl OutputSink {
+    /// Returns false once the pane's channel is gone (pane closed).
+    pub fn push(&self, bytes: Vec<u8>) -> bool {
+        if bytes.is_empty() {
+            return true;
+        }
+        // Record into the capped replay buffer and fan out to remote clients
+        // under the same lock, so a remote attach gets a clean snapshot/live
+        // boundary.
+        {
+            let mut rb = self.replay.lock();
+            rb.extend_from_slice(&bytes);
+            let len = rb.len();
+            if len > MAX_REPLAY {
+                rb.drain(..len - MAX_REPLAY);
+            }
+            *self.total_out.lock() += bytes.len() as u64;
+            if self.output_tx.receiver_count() > 0 {
+                let _ = self.output_tx.send(bytes.clone());
+            }
+        }
+        // Point-to-point channel with a raw (non-base64, non-JSON) payload:
+        // small chunks — the interactive case — are eval'd directly into the
+        // pane's callback, without the event system's per-webview broadcast
+        // that every other pane would have to filter out in JS.
+        self.on_output.send(InvokeResponseBody::Raw(bytes)).is_ok()
+    }
 }
 
 /// Cap on the per-session replay buffer (enough to rebuild the screen + recent
@@ -75,13 +180,43 @@ impl PtyManager {
     /// Resize a session's PTY (used when a remote client drives the size).
     pub fn resize_pty(&self, id: u64, rows: u16, cols: u16) {
         if let Some(s) = self.sessions.lock().get(&id) {
-            let _ = s.master.resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
+            let _ = s.backend.resize(rows, cols);
         }
+    }
+
+    /// Register a remote (Lume ↔ Lume) session: input/resize/kill go through
+    /// `ctl`, output is pushed by the caller into the returned sink. Returns
+    /// the new session id.
+    pub fn register_remote(
+        &self,
+        ctl: tokio::sync::mpsc::UnboundedSender<RemoteCtl>,
+        on_output: Channel<InvokeResponseBody>,
+    ) -> (u64, OutputSink) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(128);
+        let sink = OutputSink {
+            replay: Arc::new(Mutex::new(Vec::new())),
+            total_out: Arc::new(Mutex::new(0)),
+            output_tx: output_tx.clone(),
+            on_output,
+        };
+        self.sessions.lock().insert(
+            id,
+            PtySession {
+                writer: Arc::new(Mutex::new(Box::new(RemoteWriter(ctl.clone())))),
+                backend: Backend::Remote { ctl },
+                cwd: Arc::new(Mutex::new(None)),
+                output_tx,
+                replay: sink.replay.clone(),
+                total_out: sink.total_out.clone(),
+            },
+        );
+        (id, sink)
+    }
+
+    /// Drop a session from the table (its backend has ended).
+    pub fn remove(&self, id: u64) -> bool {
+        self.sessions.lock().remove(&id).is_some()
     }
 }
 
@@ -231,22 +366,25 @@ fn spawn_impl(
     // 128 absorbs consumer latency, and the 256 KiB replay buffer already
     // covers reconnect/resync.
     let (output_tx, _) = broadcast::channel::<Vec<u8>>(128);
-    let output_tx_reader = output_tx.clone();
-    let replay = Arc::new(Mutex::new(Vec::<u8>::new()));
-    let replay_for_reader = replay.clone();
-    let total_out = Arc::new(Mutex::new(0u64));
-    let total_for_reader = total_out.clone();
+    let sink = OutputSink {
+        replay: Arc::new(Mutex::new(Vec::<u8>::new())),
+        total_out: Arc::new(Mutex::new(0u64)),
+        output_tx: output_tx.clone(),
+        on_output,
+    };
 
     pty_state.sessions.lock().insert(
         id,
         PtySession {
             writer,
-            master: pair.master,
-            killer,
+            backend: Backend::Local {
+                master: pair.master,
+                killer,
+            },
             cwd,
             output_tx,
-            replay,
-            total_out,
+            replay: sink.replay.clone(),
+            total_out: sink.total_out.clone(),
         },
     );
 
@@ -338,35 +476,9 @@ fn spawn_impl(
                         }
 
                         // Reads that were pure OSC metadata (e.g. prompt markers)
-                        // leave no passthrough — skip the work entirely.
-                        if !result.passthrough.is_empty() {
-                            // Record into the capped replay buffer and fan out to
-                            // remote clients under the same lock, so a remote
-                            // attach gets a clean snapshot/live boundary.
-                            {
-                                let mut rb = replay_for_reader.lock();
-                                rb.extend_from_slice(&result.passthrough);
-                                let len = rb.len();
-                                if len > MAX_REPLAY {
-                                    rb.drain(..len - MAX_REPLAY);
-                                }
-                                *total_for_reader.lock() += result.passthrough.len() as u64;
-                                if output_tx_reader.receiver_count() > 0 {
-                                    let _ = output_tx_reader.send(result.passthrough.clone());
-                                }
-                            }
-                            // Point-to-point channel with a raw (non-base64,
-                            // non-JSON) payload: small chunks — the interactive
-                            // case — are eval'd directly into the pane's
-                            // callback, without the event system's per-webview
-                            // broadcast that every other pane would have to
-                            // filter out in JS.
-                            if on_output
-                                .send(InvokeResponseBody::Raw(result.passthrough))
-                                .is_err()
-                            {
-                                break;
-                            }
+                        // leave no passthrough — push() skips them.
+                        if !sink.push(result.passthrough) {
+                            break;
                         }
                     }
                     Err(_) => break,
@@ -425,15 +537,7 @@ pub fn pty_resize(
     let session = sessions
         .get(&id)
         .ok_or_else(|| format!("unknown pty {id}"))?;
-    session
-        .master
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())
+    session.backend.resize(rows, cols)
 }
 
 #[tauri::command]
@@ -445,7 +549,8 @@ pub fn pty_kill(state: State<'_, Arc<PtyManager>>, id: u64) -> Result<(), String
         .ok_or_else(|| format!("unknown pty {id}"))?;
     // Signal the child explicitly — SIGHUP-ignoring processes must not
     // survive their tab. This also lets the reaper thread's wait() return.
-    let _ = session.killer.kill();
+    // (A remote session closes its connection instead.)
+    session.backend.kill();
     Ok(())
 }
 

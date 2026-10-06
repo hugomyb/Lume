@@ -88,12 +88,20 @@ export function aiDefaultModel(provider: string): Promise<string | null> {
   return invoke<string | null>("ai_default_model", { provider });
 }
 
+/** Opt-in extra context for "explain this block". */
+export type BlockContext = {
+  cwd?: string | null;
+  branch?: string | null;
+  previous?: { command: string; output: string | null; exitCode: number | null } | null;
+};
+
 export function aiExplainBlock(args: {
   command: string;
   output: string | null;
   exitCode: number;
+  context?: BlockContext | null;
 }): Promise<number> {
-  return invoke<number>("ai_explain_block", args);
+  return invoke<number>("ai_explain_block", { ...args, context: args.context ?? null });
 }
 
 export function aiChat(messages: ChatMessage[]): Promise<number> {

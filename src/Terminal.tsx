@@ -41,11 +41,25 @@ import {
 
 type PtyExit = { id: number };
 
+export type RemoteConnectInfo = { id: number; serverName: string; url: string };
+
+/** "remoteClient.err.connect: detail" → translated message (+ detail). */
+function remoteErrorText(raw: string): string {
+  const m = /^(remoteClient\.err\.[a-zA-Z]+)(?::\s*(.*))?$/s.exec(raw.trim());
+  if (!m) return raw;
+  return m[2] ? `${t(m[1])} (${m[2]})` : t(m[1]);
+}
+
 type TerminalProps = {
   active: () => boolean;
   appearance: Appearance;
   /** Directory to spawn the shell in (session restore). Falls back to $HOME. */
   initialCwd?: string | null;
+  /** When set, this pane shows a terminal of ANOTHER Lume (Lume ↔ Lume)
+   *  reached at this address, instead of spawning a local shell. */
+  remoteUrl?: string | null;
+  /** The remote connection is up (server name + address without secret). */
+  onRemoteConnected?: (info: RemoteConnectInfo) => void;
   onExit?: () => void;
   onBlock?: (event: PtyBlock) => void;
   onSpawned?: (ptyId: number) => void;
@@ -881,12 +895,43 @@ export default function Terminal(props: TerminalProps) {
     }
 
     const { cols, rows } = term;
-    ptyId = await invoke<number>("pty_spawn", {
-      rows,
-      cols,
-      cwd: props.initialCwd ?? null,
-      onOutput: outputChannel,
-    });
+    if (props.remoteUrl) {
+      term.write(`\x1b[2m${t("remoteClient.connecting")}\x1b[0m\r\n`);
+      try {
+        const info = await invoke<RemoteConnectInfo>("remote_client_connect", {
+          url: props.remoteUrl,
+          rows,
+          cols,
+          onOutput: outputChannel,
+        });
+        ptyId = info.id;
+        props.onRemoteConnected?.(info);
+        // Connection drops / reconnects / revocation, as status lines.
+        const un = await listen<{ id: number; status: string }>(
+          "remote-client:status",
+          (e) => {
+            if (e.payload.id !== ptyId) return;
+            const st = e.payload.status;
+            const color = st === "revoked" ? "31" : "2";
+            term?.write(
+              `\r\n\x1b[${color}m[${t(`remoteClient.status.${st}`)}]\x1b[0m\r\n`
+            );
+          }
+        );
+        addCleanup(un);
+      } catch (e) {
+        // Keep the pane: the message says what to do (pair, check address…).
+        term?.write(`\r\n\x1b[31m${remoteErrorText(String(e))}\x1b[0m\r\n`);
+        return;
+      }
+    } else {
+      ptyId = await invoke<number>("pty_spawn", {
+        rows,
+        cols,
+        cwd: props.initialCwd ?? null,
+        onOutput: outputChannel,
+      });
+    }
     // Closed while spawning: nobody owns this shell anymore — kill it now.
     if (disposed) {
       invoke("pty_kill", { id: ptyId }).catch(() => {});
@@ -1819,7 +1864,25 @@ export default function Terminal(props: TerminalProps) {
       if (rafPending) cancelAnimationFrame(rafPending);
     });
 
-    if (props.active()) term.focus();
+    // A brand-new tab (opened from a menu, the palette, a workspace…) is
+    // mounted while its portal wrapper is still display:none, and focusing a
+    // hidden textarea is a silent no-op — the pane would show no cursor and
+    // swallow no keys. The focus effect below can't help: it ran before
+    // `term` existed. Retry across frames until the pane is laid out.
+    if (props.active()) {
+      let attempts = 30;
+      const kick = () =>
+        requestAnimationFrame(() => {
+          if (!term || !containerRef || !props.active()) return;
+          const r = containerRef.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) {
+            if (attempts-- > 0) kick();
+            return;
+          }
+          term.focus();
+        });
+      kick();
+    }
   });
 
   // Live-apply appearance changes from Settings. Reading every field (incl. all

@@ -1,19 +1,27 @@
 //! Remote control: a small HTTP + WebSocket server that mirrors and lets you
-//! drive the *active* pane from another device (phone, laptop) on the LAN.
+//! drive this Lume's terminals from another device (phone, browser, or
+//! another Lume — see remote_client.rs), on the LAN or through a cloudflared
+//! quick tunnel.
 //!
-//! Security model: opt-in (off by default), bound to the LAN, gated by a random
-//! token that's part of the URL. The token is regenerated on each start.
+//! Security model: opt-in (off by default). Devices are *paired* once by
+//! scanning a QR code whose URL fragment carries a one-time secret (10 min,
+//! single use); each paired device then holds its own key, can be revoked
+//! from the desktop, and every byte after the handshake is end-to-end
+//! encrypted (remote_proto.rs) — plain-HTTP LAN sniffers and the tunnel
+//! provider only ever see ciphertext. The HTML page itself is public: it's
+//! static code, and holds no secret until a device pairs.
 
+use std::collections::HashMap;
 use std::net::TcpListener as StdTcpListener;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State as AxState,
+        State as AxState,
     },
-    http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::get,
     Router,
@@ -25,28 +33,53 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::pty::{pty_cwd, PtyManager};
+use crate::remote_proto as proto;
+use crate::remote_store as store;
 
-/// One controllable terminal exposed to remote clients (a tab's active pane).
+/// How long a pairing QR code stays valid.
+const PAIRING_TTL: Duration = Duration::from_secs(10 * 60);
+/// A client must finish the handshake within this delay.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// One controllable terminal exposed to remote clients (a pane).
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TabInfo {
     pub id: u64,
     pub title: String,
 }
 
+struct Pairing {
+    secret: [u8; proto::KEY_LEN],
+    expires: Instant,
+}
+
+/// A live, authenticated remote connection.
+struct Conn {
+    device_id: String,
+    /// The pty this connection is bridged to — chosen per connection, so two
+    /// devices can watch two different terminals.
+    target: watch::Sender<Option<u64>>,
+    kill: broadcast::Sender<()>,
+}
+
+/// Sends an event to the desktop frontend (abstracted for tests).
+type EmitFn = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+
 pub struct RemoteState {
     inner: Mutex<RemoteInner>,
-    /// The pty id the remote clients are bridged to (the app's active pane).
-    target_tx: watch::Sender<Option<u64>>,
-    /// The list of tabs (terminals) the phone can switch between.
+    /// Target for NEW connections (the desktop's active pane at share time).
+    default_target: watch::Sender<Option<u64>>,
+    /// The panes remote clients can switch between.
     tabs_tx: watch::Sender<Vec<TabInfo>>,
     /// Number of currently-connected remote clients.
     clients: Arc<AtomicUsize>,
+    pairing: Arc<Mutex<Option<Pairing>>>,
+    conns: Arc<Mutex<HashMap<u64, Conn>>>,
 }
 
 struct RemoteInner {
     running: bool,
     port: u16,
-    token: String,
     shutdown: Option<oneshot::Sender<()>>,
     /// Aborts live WebSocket bridges on stop: axum's graceful shutdown only
     /// stops accepting NEW connections — upgraded sockets outlive it, so
@@ -54,44 +87,63 @@ struct RemoteInner {
     kill: Option<broadcast::Sender<()>>,
     /// cloudflared quick-tunnel child (cross-network public URL).
     tunnel_child: Option<std::process::Child>,
-    /// Public https URL (with token) once the tunnel is up; None until then.
-    public_url: Arc<Mutex<Option<String>>>,
+    /// Public https base URL once the tunnel is up; None until then.
+    public_base: Arc<Mutex<Option<String>>>,
     tunnel_requested: bool,
 }
 
 impl RemoteState {
     pub fn new() -> Self {
-        let (target_tx, _rx) = watch::channel(None);
+        let (default_target, _rx) = watch::channel(None);
         let (tabs_tx, _trx) = watch::channel(Vec::new());
         Self {
             tabs_tx,
             inner: Mutex::new(RemoteInner {
                 running: false,
                 port: 0,
-                token: String::new(),
                 shutdown: None,
                 kill: None,
                 tunnel_child: None,
-                public_url: Arc::new(Mutex::new(None)),
+                public_base: Arc::new(Mutex::new(None)),
                 tunnel_requested: false,
             }),
-            target_tx,
+            default_target,
             clients: Arc::new(AtomicUsize::new(0)),
+            pairing: Arc::new(Mutex::new(None)),
+            conns: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+impl RemoteState {
+    /// Stop the tunnel child and cut live clients (app exit).
+    pub fn shutdown(&self) {
+        let mut inner = self.inner.lock();
+        if let Some(kill) = inner.kill.take() {
+            let _ = kill.send(());
+        }
+        if let Some(mut child) = inner.tunnel_child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
 
 #[derive(Clone)]
 struct AppState {
-    token: String,
     pty: Arc<PtyManager>,
-    target_tx: watch::Sender<Option<u64>>,
+    default_target: watch::Sender<Option<u64>>,
     tabs_tx: watch::Sender<Vec<TabInfo>>,
     clients: Arc<AtomicUsize>,
     /// Subscribed by each bridge; fired by `remote_stop` to force-close it.
     kill_tx: broadcast::Sender<()>,
+    pairing: Arc<Mutex<Option<Pairing>>>,
+    conns: Arc<Mutex<HashMap<u64, Conn>>>,
+    next_conn: Arc<AtomicU64>,
+    server_id: String,
+    server_name: String,
     /// To signal the desktop frontend (e.g. "create a new tab" from the phone).
-    app: AppHandle,
+    emit: EmitFn,
 }
 
 /// Increments the live-client count for the lifetime of a connection.
@@ -110,40 +162,108 @@ impl Drop for ClientGuard {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub id: String,
+    pub name: String,
+    pub created: i64,
+    pub last_seen: Option<i64>,
+    /// Live connections of this device right now.
+    pub connections: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteInfo {
     pub running: bool,
     pub port: u16,
-    pub token: String,
     pub ip: String,
-    /// LAN URL (same network).
+    /// LAN URL (same network), without pairing secret.
     pub url: String,
+    /// LAN URL carrying the current pairing secret (for the QR code), while a
+    /// pairing is open.
+    pub pair_url: Option<String>,
     /// Public cross-network URL via cloudflared, once it's up.
     pub public_url: Option<String>,
+    pub public_pair_url: Option<String>,
+    /// Seconds left on the current pairing code.
+    pub pairing_expires_in: Option<u64>,
     /// Whether a tunnel was requested for this session.
     pub tunnel_requested: bool,
     /// Whether `cloudflared` is installed (so the UI can offer cross-network).
     pub tunnel_available: bool,
     /// Number of remote clients currently connected.
     pub clients: usize,
+    pub devices: Vec<DeviceInfo>,
+    /// This Lume's name, as shown to clients.
+    pub server_name: String,
 }
 
-fn info(inner: &RemoteInner, clients: usize) -> RemoteInfo {
+fn pairing_fragment(remote: &RemoteState) -> Option<(String, u64)> {
+    let mut p = remote.pairing.lock();
+    match p.as_ref() {
+        Some(pa) if pa.expires > Instant::now() => Some((
+            format!("#p={}", proto::b64url(&pa.secret)),
+            pa.expires
+                .saturating_duration_since(Instant::now())
+                .as_secs(),
+        )),
+        Some(_) => {
+            *p = None;
+            None
+        }
+        None => None,
+    }
+}
+
+fn info(remote: &RemoteState, inner: &RemoteInner) -> RemoteInfo {
     let ip = local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let url = if inner.running {
-        format!("http://{}:{}/?t={}", ip, inner.port, inner.token)
+        format!("http://{}:{}/", ip, inner.port)
     } else {
         String::new()
     };
+    let public_url = inner.public_base.lock().clone().map(|b| format!("{b}/"));
+    let frag = if inner.running {
+        pairing_fragment(remote)
+    } else {
+        None
+    };
+    let mut per_device: HashMap<String, usize> = HashMap::new();
+    for c in remote.conns.lock().values() {
+        *per_device.entry(c.device_id.clone()).or_default() += 1;
+    }
+    let mut devices: Vec<DeviceInfo> = store::devices()
+        .into_iter()
+        .map(|d| DeviceInfo {
+            connections: per_device.get(&d.id).copied().unwrap_or(0),
+            id: d.id,
+            name: d.name,
+            created: d.created,
+            last_seen: d.last_seen,
+        })
+        .collect();
+    devices.sort_by(|a, b| {
+        b.last_seen
+            .unwrap_or(b.created)
+            .cmp(&a.last_seen.unwrap_or(a.created))
+    });
     RemoteInfo {
         running: inner.running,
         port: inner.port,
-        token: inner.token.clone(),
         ip,
+        pair_url: frag.as_ref().map(|(f, _)| format!("{url}{f}")),
+        public_pair_url: match (&public_url, &frag) {
+            (Some(u), Some((f, _))) => Some(format!("{u}{f}")),
+            _ => None,
+        },
+        pairing_expires_in: frag.map(|(_, s)| s),
         url,
-        public_url: inner.public_url.lock().clone(),
+        public_url,
         tunnel_requested: inner.tunnel_requested,
         tunnel_available: cloudflared_available(),
-        clients,
+        clients: remote.clients.load(Ordering::Relaxed),
+        devices,
+        server_name: store::host_name(),
     }
 }
 
@@ -208,15 +328,32 @@ fn cloudflared_available() -> bool {
     cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
+/// Extract a `https://*.trycloudflare.com` base URL from a cloudflared log line.
+fn extract_trycloudflare(line: &str) -> Option<String> {
+    let pos = line.find("https://")?;
+    let rest = &line[pos..];
+    let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+    let base = &rest[..end];
+    if base.contains(".trycloudflare.com") {
+        Some(base.to_string())
+    } else {
+        None
+    }
+}
+
+/// Best-effort LAN IP: open a UDP socket "to" a public address (no packets are
+/// actually sent) and read which local interface the OS picked.
+fn local_ip() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("8.8.8.8:80").ok()?;
+    sock.local_addr().ok().map(|a| a.ip().to_string())
+}
+
 /// Spawn a cloudflared quick tunnel pointing at the local server. A reader
-/// thread scans its output for the public trycloudflare URL and stores it
-/// (with the token appended). Returns the child for later kill, or None if
-/// cloudflared isn't available / failed to start.
-fn start_tunnel(
-    port: u16,
-    token: String,
-    public_url: Arc<Mutex<Option<String>>>,
-) -> Option<std::process::Child> {
+/// thread scans its output for the public trycloudflare URL and stores its
+/// base. Returns the child for later kill, or None if cloudflared isn't
+/// available / failed to start.
+fn start_tunnel(port: u16, public_base: Arc<Mutex<Option<String>>>) -> Option<std::process::Child> {
     use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
 
@@ -247,9 +384,8 @@ fn start_tunnel(
     // connection" log line appears (with an 8s fallback for log wording drift).
     let pending: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     for r in readers {
-        let public_url = public_url.clone();
+        let public_base = public_base.clone();
         let pending = pending.clone();
-        let token = token.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(r);
             // Keep reading to the end — if we stop draining cloudflared's pipe
@@ -257,7 +393,7 @@ fn start_tunnel(
             for line in reader.lines().map_while(Result::ok) {
                 if pending.lock().is_none() {
                     if let Some(base) = extract_trycloudflare(&line) {
-                        *pending.lock() = Some(format!("{base}/?t={token}"));
+                        *pending.lock() = Some(base);
                     }
                 }
                 let low = line.to_lowercase();
@@ -266,7 +402,7 @@ fn start_tunnel(
                     || low.contains("registered tunnel")
                 {
                     if let Some(u) = pending.lock().clone() {
-                        let mut pu = public_url.lock();
+                        let mut pu = public_base.lock();
                         if pu.is_none() {
                             *pu = Some(u);
                         }
@@ -277,12 +413,12 @@ fn start_tunnel(
     }
     // Fallback: publish after a delay in case the "registered" wording changes.
     {
-        let public_url = public_url.clone();
+        let public_base = public_base.clone();
         let pending = pending.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(8));
             if let Some(u) = pending.lock().clone() {
-                let mut pu = public_url.lock();
+                let mut pu = public_base.lock();
                 if pu.is_none() {
                     *pu = Some(u);
                 }
@@ -292,42 +428,495 @@ fn start_tunnel(
     Some(child)
 }
 
-/// Extract a `https://*.trycloudflare.com` base URL from a cloudflared log line.
-fn extract_trycloudflare(line: &str) -> Option<String> {
-    let pos = line.find("https://")?;
-    let rest = &line[pos..];
-    let end = rest
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(rest.len());
-    let base = &rest[..end];
-    if base.contains(".trycloudflare.com") {
-        Some(base.to_string())
-    } else {
-        None
+#[tauri::command]
+pub fn remote_status(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
+    let inner = remote.inner.lock();
+    info(&remote, &inner)
+}
+
+/// Open a fresh pairing code (QR) — e.g. to add another device. Replaces any
+/// pending one.
+#[tauri::command]
+pub fn remote_new_pairing(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
+    *remote.pairing.lock() = Some(Pairing {
+        secret: proto::random(),
+        expires: Instant::now() + PAIRING_TTL,
+    });
+    let inner = remote.inner.lock();
+    info(&remote, &inner)
+}
+
+/// Forget a paired device and cut its live connections.
+#[tauri::command]
+pub fn remote_revoke_device(
+    remote: State<'_, Arc<RemoteState>>,
+    id: String,
+) -> Result<RemoteInfo, String> {
+    store::remove_device(&id)?;
+    for c in remote.conns.lock().values() {
+        if c.device_id == id {
+            let _ = c.kill.send(());
+        }
+    }
+    let inner = remote.inner.lock();
+    Ok(info(&remote, &inner))
+}
+
+/// Point remote clients at a pty. With `conn`, only that connection (the one
+/// that asked for a new tab); without, the default for future connections —
+/// and for live ones that have no target yet.
+#[tauri::command]
+pub fn remote_set_target(
+    remote: State<'_, Arc<RemoteState>>,
+    pty_id: Option<u64>,
+    conn: Option<u64>,
+) {
+    match conn {
+        Some(c) => {
+            if let Some(conn) = remote.conns.lock().get(&c) {
+                let _ = conn.target.send_replace(pty_id);
+            }
+        }
+        None => {
+            let _ = remote.default_target.send_replace(pty_id);
+            for c in remote.conns.lock().values() {
+                if c.target.borrow().is_none() {
+                    let _ = c.target.send_replace(pty_id);
+                }
+            }
+        }
     }
 }
 
-fn gen_token() -> String {
-    const CHARS: &[u8] =
-        b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let mut buf = [0u8; 24];
-    getrandom::fill(&mut buf).expect("getrandom");
-    buf.iter()
-        .map(|b| CHARS[(*b as usize) % CHARS.len()] as char)
-        .collect()
-}
-
-/// Best-effort LAN IP: open a UDP socket "to" a public address (no packets are
-/// actually sent) and read which local interface the OS picked.
-fn local_ip() -> Option<String> {
-    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.connect("8.8.8.8:80").ok()?;
-    sock.local_addr().ok().map(|a| a.ip().to_string())
+/// Publish the list of panes remote clients can switch between. Called by the
+/// desktop whenever tabs/titles/panes change. A connection whose target no
+/// longer exists falls back to the first pane so it isn't stuck.
+#[tauri::command]
+pub fn remote_set_tabs(remote: State<'_, Arc<RemoteState>>, tabs: Vec<TabInfo>) {
+    let first = tabs.first().map(|t| t.id);
+    let valid = |id: Option<u64>| id.is_some_and(|id| tabs.iter().any(|t| t.id == id));
+    if !valid(*remote.default_target.borrow()) {
+        let _ = remote.default_target.send_replace(first);
+    }
+    for c in remote.conns.lock().values() {
+        if !valid(*c.target.borrow()) {
+            let _ = c.target.send_replace(first);
+        }
+    }
+    let _ = remote.tabs_tx.send_replace(tabs);
 }
 
 #[tauri::command]
-pub fn remote_status(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
-    info(&remote.inner.lock(), remote.clients.load(Ordering::Relaxed))
+pub fn remote_stop(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
+    let mut inner = remote.inner.lock();
+    if let Some(tx) = inner.shutdown.take() {
+        let _ = tx.send(());
+    }
+    // Disconnect every live client — stopping the share must revoke access.
+    if let Some(kill) = inner.kill.take() {
+        let _ = kill.send(());
+    }
+    if let Some(mut child) = inner.tunnel_child.take() {
+        let _ = child.kill();
+        // Reap it, or it lingers as a zombie until Lume exits.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+    *inner.public_base.lock() = None;
+    *remote.pairing.lock() = None;
+    inner.running = false;
+    inner.tunnel_requested = false;
+    info(&remote, &inner)
+}
+
+#[tauri::command]
+pub fn remote_start(
+    app: AppHandle,
+    remote: State<'_, Arc<RemoteState>>,
+    pty: State<'_, Arc<PtyManager>>,
+    port: u16,
+    tunnel: bool,
+) -> Result<RemoteInfo, String> {
+    let mut inner = remote.inner.lock();
+    if inner.running {
+        return Ok(info(&remote, &inner));
+    }
+    // NOTE: the client counter is NOT reset here — clients from a previous
+    // session decrement it on disconnect, and zeroing it would underflow.
+
+    // If the preferred port is taken (e.g. a leftover Lume instance still owns
+    // it), fall back to any free port instead of failing — the actual port is
+    // reported back and used to build the share URL.
+    let std_listener = StdTcpListener::bind(("0.0.0.0", port))
+        .or_else(|_| StdTcpListener::bind(("0.0.0.0", 0)))
+        .map_err(|e| format!("bind: {e}"))?;
+    let actual_port = std_listener.local_addr().map_err(|e| e.to_string())?.port();
+
+    let (kill_tx, _) = broadcast::channel::<()>(1);
+    let emit: EmitFn = {
+        let app = app.clone();
+        Arc::new(move |event: &str, payload: serde_json::Value| {
+            let _ = app.emit(event, payload);
+        })
+    };
+    let state = AppState {
+        pty: pty.inner().clone(),
+        default_target: remote.default_target.clone(),
+        tabs_tx: remote.tabs_tx.clone(),
+        clients: remote.clients.clone(),
+        kill_tx: kill_tx.clone(),
+        pairing: remote.pairing.clone(),
+        conns: remote.conns.clone(),
+        next_conn: Arc::new(AtomicU64::new(1)),
+        server_id: store::server_id(),
+        server_name: store::host_name(),
+        emit,
+    };
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    serve(std_listener, state, shutdown_rx)?;
+
+    inner.running = true;
+    inner.port = actual_port;
+    inner.shutdown = Some(shutdown_tx);
+    inner.kill = Some(kill_tx);
+    inner.tunnel_requested = tunnel;
+    *inner.public_base.lock() = None;
+    inner.tunnel_child = None;
+    // A share always opens with a fresh QR code.
+    *remote.pairing.lock() = Some(Pairing {
+        secret: proto::random(),
+        expires: Instant::now() + PAIRING_TTL,
+    });
+    if tunnel {
+        let public_base = inner.public_base.clone();
+        inner.tunnel_child = start_tunnel(actual_port, public_base);
+    }
+    Ok(info(&remote, &inner))
+}
+
+fn serve(
+    std_listener: StdTcpListener,
+    state: AppState,
+    shutdown_rx: oneshot::Receiver<()>,
+) -> Result<(), String> {
+    std_listener
+        .set_nonblocking(true)
+        .map_err(|e| e.to_string())?;
+    let app = Router::new()
+        .route("/", get(index))
+        .route("/ws", get(ws_handler))
+        .route(
+            "/favicon.ico",
+            get(|| async { axum::http::StatusCode::NO_CONTENT }),
+        )
+        .with_state(state);
+    tauri::async_runtime::spawn(async move {
+        let listener = match tokio::net::TcpListener::from_std(std_listener) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
+    });
+    Ok(())
+}
+
+async fn index() -> Response {
+    Html(INDEX_HTML).into_response()
+}
+
+async fn ws_handler(ws: WebSocketUpgrade, AxState(st): AxState<AppState>) -> Response {
+    ws.on_upgrade(move |socket| bridge(socket, st))
+}
+
+type WsSink = futures_util::stream::SplitSink<WebSocket, Message>;
+type WsStream = futures_util::stream::SplitStream<WebSocket>;
+
+async fn send_json(sender: &mut WsSink, v: serde_json::Value) -> Option<()> {
+    sender.send(Message::Text(v.to_string().into())).await.ok()
+}
+
+/// Next JSON text frame of the handshake (None on close / binary / garbage).
+async fn next_json(receiver: &mut WsStream) -> Option<serde_json::Value> {
+    loop {
+        match receiver.next().await? {
+            Ok(Message::Text(t)) => return serde_json::from_str(t.as_str()).ok(),
+            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => continue,
+            _ => return None,
+        }
+    }
+}
+
+async fn next_binary(receiver: &mut WsStream) -> Option<Vec<u8>> {
+    loop {
+        match receiver.next().await? {
+            Ok(Message::Binary(b)) => return Some(b.to_vec()),
+            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => continue,
+            _ => return None,
+        }
+    }
+}
+
+/// Run the pairing / authentication handshake. On success, returns the
+/// device id and the two sealed-channel halves.
+async fn handshake(
+    sender: &mut WsSink,
+    receiver: &mut WsStream,
+    st: &AppState,
+) -> Option<(String, proto::Half, proto::Half)> {
+    send_json(
+        sender,
+        serde_json::json!({ "t": "server", "v": 2, "id": st.server_id, "name": st.server_name }),
+    )
+    .await?;
+    loop {
+        let msg = next_json(receiver).await?;
+        match msg.get("t")?.as_str()? {
+            "pair" => {
+                // Single use: a pairing code that worked is consumed.
+                let payload = {
+                    let mut p = st.pairing.lock();
+                    match p.as_ref() {
+                        Some(pa) if pa.expires > Instant::now() => {
+                            let r = proto::open_pair_request(&pa.secret, &msg);
+                            if r.is_some() {
+                                *p = None;
+                            }
+                            r
+                        }
+                        _ => None,
+                    }
+                };
+                let Some(pp) = payload else {
+                    let _ = send_json(
+                        sender,
+                        serde_json::json!({ "t": "denied", "reason": "pairing" }),
+                    )
+                    .await;
+                    return None;
+                };
+                let name = if pp.name.trim().is_empty() {
+                    "?".to_string()
+                } else {
+                    pp.name
+                };
+                let device = store::Device {
+                    id: pp.id,
+                    name: name.clone(),
+                    key: proto::b64(&pp.key),
+                    created: store::now_ms(),
+                    last_seen: None,
+                };
+                if store::add_device(device).is_err() {
+                    let _ = send_json(
+                        sender,
+                        serde_json::json!({ "t": "denied", "reason": "storage" }),
+                    )
+                    .await;
+                    return None;
+                }
+                (st.emit)("remote:paired", serde_json::json!({ "name": name }));
+                send_json(sender, serde_json::json!({ "t": "paired" })).await?;
+            }
+            "hello" => {
+                let id = msg.get("id")?.as_str()?.to_string();
+                let nc = proto::unb64(msg.get("nc")?.as_str()?)?;
+                if nc.len() != proto::NONCE_LEN {
+                    return None;
+                }
+                let Some(device) = store::find_device(&id) else {
+                    let _ = send_json(
+                        sender,
+                        serde_json::json!({ "t": "denied", "reason": "unknown" }),
+                    )
+                    .await;
+                    return None;
+                };
+                let key = proto::to_array::<{ proto::KEY_LEN }>(&proto::unb64(&device.key)?)?;
+                let ns = proto::random::<{ proto::NONCE_LEN }>();
+                send_json(
+                    sender,
+                    serde_json::json!({ "t": "challenge", "ns": proto::b64(&ns) }),
+                )
+                .await?;
+                let session = proto::session_key(&key, &nc, &ns);
+                let tx = proto::Half::new(session, proto::SERVER_TO_CLIENT);
+                let mut rx = proto::Half::new(session, proto::CLIENT_TO_SERVER);
+                // The first sealed frame proves the client holds the key.
+                let first = next_binary(receiver).await?;
+                if rx.open(&first)? != proto::READY {
+                    return None;
+                }
+                return Some((device.id, tx, rx));
+            }
+            _ => return None,
+        }
+    }
+}
+
+async fn bridge(socket: WebSocket, st: AppState) {
+    let mut kill_all = st.kill_tx.subscribe();
+    let (mut sender, mut receiver) = socket.split();
+    let hs = tokio::select! {
+        r = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut sender, &mut receiver, &st)) => r.ok().flatten(),
+        _ = kill_all.recv() => None,
+    };
+    let Some((device_id, tx, rx)) = hs else {
+        return;
+    };
+    {
+        let id = device_id.clone();
+        tokio::task::spawn_blocking(move || store::touch_device(&id));
+    }
+    let conn_id = st.next_conn.fetch_add(1, Ordering::Relaxed);
+    let (target, _) = watch::channel(*st.default_target.borrow());
+    let (conn_kill, mut conn_kill_rx) = broadcast::channel::<()>(1);
+    st.conns.lock().insert(
+        conn_id,
+        Conn {
+            device_id,
+            target: target.clone(),
+            kill: conn_kill,
+        },
+    );
+    let _guard = ClientGuard::new(st.clients.clone());
+    // Side channel for server→client control frames (completion listings),
+    // produced by the input task and forwarded by the output task — the only
+    // writer of the socket, which keeps the send-counter nonces in order.
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<String>(16);
+    let mut out = tokio::spawn(output_task(sender, st.clone(), target.clone(), tx, ctrl_rx));
+    let mut inp = tokio::spawn(input_task(
+        receiver,
+        st.clone(),
+        conn_id,
+        target,
+        rx,
+        ctrl_tx,
+    ));
+    // When either direction ends (client disconnects, pty closed) — or the
+    // share is stopped / the device revoked — stop both.
+    tokio::select! {
+        _ = &mut out => inp.abort(),
+        _ = &mut inp => out.abort(),
+        _ = kill_all.recv() => {
+            out.abort();
+            inp.abort();
+        }
+        _ = conn_kill_rx.recv() => {
+            out.abort();
+            inp.abort();
+        }
+    }
+    st.conns.lock().remove(&conn_id);
+}
+
+/// Seal and send one frame: `kind` b'T' (JSON control) or b'B' (output).
+async fn send_sealed(sender: &mut WsSink, tx: &mut proto::Half, kind: u8, payload: &[u8]) -> bool {
+    let mut msg = Vec::with_capacity(payload.len() + 1);
+    msg.push(kind);
+    msg.extend_from_slice(payload);
+    sender
+        .send(Message::Binary(tx.seal(&msg).into()))
+        .await
+        .is_ok()
+}
+
+/// pty output → websocket. Re-subscribes when this connection's target changes.
+async fn output_task(
+    mut sender: WsSink,
+    st: AppState,
+    target: watch::Sender<Option<u64>>,
+    mut tx: proto::Half,
+    mut ctrl_rx: mpsc::Receiver<String>,
+) {
+    let mut trx = target.subscribe();
+    let mut tabs_rx = st.tabs_tx.subscribe();
+    loop {
+        let current = *trx.borrow_and_update();
+        // Send the current tab list + active selection so the client can switch.
+        let json = {
+            let t = tabs_rx.borrow_and_update();
+            tabs_json(&t, current)
+        };
+        if !send_sealed(&mut sender, &mut tx, b'T', json.as_bytes()).await {
+            return;
+        }
+        match current.and_then(|id| st.pty.attach(id)) {
+            Some((snapshot, _offset, mut rx)) => {
+                // Replay the current screen + recent scrollback so a (re)connecting
+                // client doesn't see a blank terminal.
+                if !snapshot.is_empty() && !send_sealed(&mut sender, &mut tx, b'B', &snapshot).await
+                {
+                    return;
+                }
+                loop {
+                    tokio::select! {
+                        msg = rx.recv() => match msg {
+                            Ok(bytes) => {
+                                if !send_sealed(&mut sender, &mut tx, b'B', &bytes).await {
+                                    return;
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        },
+                        ctl = ctrl_rx.recv() => {
+                            if let Some(txt) = ctl {
+                                if !send_sealed(&mut sender, &mut tx, b'T', txt.as_bytes()).await {
+                                    return;
+                                }
+                            }
+                        },
+                        ch = tabs_rx.changed() => {
+                            if ch.is_err() {
+                                return;
+                            }
+                            let json = {
+                                let t = tabs_rx.borrow();
+                                tabs_json(&t, *trx.borrow())
+                            };
+                            if !send_sealed(&mut sender, &mut tx, b'T', json.as_bytes()).await {
+                                return;
+                            }
+                        },
+                        ch = trx.changed() => {
+                            if ch.is_err() {
+                                return;
+                            }
+                            break; // re-evaluate the target on the outer loop
+                        }
+                    }
+                }
+            }
+            None => {
+                // No target: the client still sees the tab list and can pick one.
+                tokio::select! {
+                    ch = trx.changed() => { if ch.is_err() { return; } }
+                    ch = tabs_rx.changed() => { if ch.is_err() { return; } }
+                    ctl = ctrl_rx.recv() => {
+                        if let Some(txt) = ctl {
+                            if !send_sealed(&mut sender, &mut tx, b'T', txt.as_bytes()).await {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// JSON control frame: `{"t":"tabs","items":[{"id","title"}],"active":<id|null>}`.
+fn tabs_json(tabs: &[TabInfo], active: Option<u64>) -> String {
+    let items: Vec<serde_json::Value> = tabs
+        .iter()
+        .map(|t| serde_json::json!({ "id": t.id, "title": t.title }))
+        .collect();
+    serde_json::json!({ "t": "tabs", "items": items, "active": active }).to_string()
 }
 
 /// Pinned cloudflared release. "latest" made installs unreproducible and
@@ -342,14 +931,30 @@ const CLOUDFLARED_VERSION: &str = "2026.9.1";
 /// install refused (fail closed).
 fn cloudflared_asset_sha256(asset: &str) -> Option<&'static str> {
     Some(match asset {
-        "cloudflared-linux-amd64" => "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc",
-        "cloudflared-linux-arm64" => "3d97437c71848bd8df68041e12436b484a661d95073ea1937f01a845ce88faa3",
-        "cloudflared-linux-arm" => "093ffa3638ab2b636de63c43a8c68f96a69cf71f9699dd8277a91b160b0f4fc0",
-        "cloudflared-linux-386" => "5d66134cf7646cb98f33aeee7bcc8b97d8feacd76db279f5903f9585226e0922",
-        "cloudflared-windows-amd64.exe" => "2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712",
-        "cloudflared-windows-386.exe" => "11b6e4b2d306950bd87e7caa4deee8e80a32d71ffee555a96237a76651eeae4c",
-        "cloudflared-darwin-amd64.tgz" => "ff0d3b51d5ff70eceef89d6b32145fee985018a2174596a5dbe405e2766e2ac4",
-        "cloudflared-darwin-arm64.tgz" => "c27ab8fd0aa489449e3d201eb02f957ef460a13b613662928b1b23394bf1bcfe",
+        "cloudflared-linux-amd64" => {
+            "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc"
+        }
+        "cloudflared-linux-arm64" => {
+            "3d97437c71848bd8df68041e12436b484a661d95073ea1937f01a845ce88faa3"
+        }
+        "cloudflared-linux-arm" => {
+            "093ffa3638ab2b636de63c43a8c68f96a69cf71f9699dd8277a91b160b0f4fc0"
+        }
+        "cloudflared-linux-386" => {
+            "5d66134cf7646cb98f33aeee7bcc8b97d8feacd76db279f5903f9585226e0922"
+        }
+        "cloudflared-windows-amd64.exe" => {
+            "2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712"
+        }
+        "cloudflared-windows-386.exe" => {
+            "11b6e4b2d306950bd87e7caa4deee8e80a32d71ffee555a96237a76651eeae4c"
+        }
+        "cloudflared-darwin-amd64.tgz" => {
+            "ff0d3b51d5ff70eceef89d6b32145fee985018a2174596a5dbe405e2766e2ac4"
+        }
+        "cloudflared-darwin-arm64.tgz" => {
+            "c27ab8fd0aa489449e3d201eb02f957ef460a13b613662928b1b23394bf1bcfe"
+        }
         _ => return None,
     })
 }
@@ -472,261 +1077,6 @@ fn download(url: &str, dest: &str) -> bool {
     false
 }
 
-/// Point the remote clients at a pty (the app's active pane). Cheap — just
-/// updates a watch value read by live WebSocket bridges.
-#[tauri::command]
-pub fn remote_set_target(remote: State<'_, Arc<RemoteState>>, pty_id: Option<u64>) {
-    let _ = remote.target_tx.send_replace(pty_id);
-}
-
-/// Publish the list of tabs (terminals) the phone can switch between. Called by
-/// the desktop whenever tabs/titles/active panes change. If the current remote
-/// target no longer exists, fall back to the first tab so the phone isn't stuck.
-#[tauri::command]
-pub fn remote_set_tabs(remote: State<'_, Arc<RemoteState>>, tabs: Vec<TabInfo>) {
-    let cur = *remote.target_tx.borrow();
-    let still_valid = cur.is_some_and(|id| tabs.iter().any(|t| t.id == id));
-    if !still_valid {
-        let _ = remote.target_tx.send_replace(tabs.first().map(|t| t.id));
-    }
-    let _ = remote.tabs_tx.send_replace(tabs);
-}
-
-#[tauri::command]
-pub fn remote_stop(remote: State<'_, Arc<RemoteState>>) -> RemoteInfo {
-    let mut inner = remote.inner.lock();
-    if let Some(tx) = inner.shutdown.take() {
-        let _ = tx.send(());
-    }
-    // Disconnect every live client — stopping the share must revoke access.
-    if let Some(kill) = inner.kill.take() {
-        let _ = kill.send(());
-    }
-    if let Some(mut child) = inner.tunnel_child.take() {
-        let _ = child.kill();
-    }
-    *inner.public_url.lock() = None;
-    inner.running = false;
-    inner.tunnel_requested = false;
-    info(&inner, remote.clients.load(Ordering::Relaxed))
-}
-
-#[tauri::command]
-pub fn remote_start(
-    app: AppHandle,
-    remote: State<'_, Arc<RemoteState>>,
-    pty: State<'_, Arc<PtyManager>>,
-    port: u16,
-    tunnel: bool,
-) -> Result<RemoteInfo, String> {
-    let mut inner = remote.inner.lock();
-    if inner.running {
-        return Ok(info(&inner, remote.clients.load(Ordering::Relaxed)));
-    }
-    // NOTE: the client counter is NOT reset here — clients from a previous
-    // session decrement it on disconnect, and zeroing it would underflow.
-
-    // If the preferred port is taken (e.g. a leftover Lume instance still owns
-    // it), fall back to any free port instead of failing — the actual port is
-    // reported back and used to build the share URL.
-    let std_listener = StdTcpListener::bind(("0.0.0.0", port))
-        .or_else(|_| StdTcpListener::bind(("0.0.0.0", 0)))
-        .map_err(|e| format!("bind: {e}"))?;
-    std_listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let actual_port = std_listener.local_addr().map_err(|e| e.to_string())?.port();
-
-    let token = gen_token();
-    let (kill_tx, _) = broadcast::channel::<()>(1);
-    let state = AppState {
-        token: token.clone(),
-        pty: pty.inner().clone(),
-        target_tx: remote.target_tx.clone(),
-        tabs_tx: remote.tabs_tx.clone(),
-        clients: remote.clients.clone(),
-        kill_tx: kill_tx.clone(),
-        app: app.clone(),
-    };
-    let app = Router::new()
-        .route("/", get(index))
-        .route("/ws", get(ws_handler))
-        .with_state(state);
-
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tauri::async_runtime::spawn(async move {
-        let listener = match tokio::net::TcpListener::from_std(std_listener) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
-        let _ = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await;
-    });
-
-    inner.running = true;
-    inner.port = actual_port;
-    inner.token = token.clone();
-    inner.shutdown = Some(shutdown_tx);
-    inner.kill = Some(kill_tx);
-    inner.tunnel_requested = tunnel;
-    *inner.public_url.lock() = None;
-    inner.tunnel_child = None;
-    if tunnel {
-        let public_url = inner.public_url.clone();
-        inner.tunnel_child = start_tunnel(actual_port, token, public_url);
-    }
-    Ok(info(&inner, remote.clients.load(Ordering::Relaxed)))
-}
-
-#[derive(Deserialize)]
-struct TokenQuery {
-    t: Option<String>,
-}
-
-fn token_ok(q: &TokenQuery, st: &AppState) -> bool {
-    match q.t.as_deref() {
-        Some(t) => ct_eq(t.as_bytes(), st.token.as_bytes()),
-        None => false,
-    }
-}
-
-/// Constant-time comparison: `==` short-circuits on the first differing byte,
-/// which lets a LAN attacker time-probe the token character by character (the
-/// server has no rate limiting to compensate). Length is not secret.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-async fn index(Query(q): Query<TokenQuery>, AxState(st): AxState<AppState>) -> Response {
-    if !token_ok(&q, &st) {
-        return (StatusCode::UNAUTHORIZED, "Jeton invalide").into_response();
-    }
-    Html(INDEX_HTML).into_response()
-}
-
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    Query(q): Query<TokenQuery>,
-    AxState(st): AxState<AppState>,
-) -> Response {
-    if !token_ok(&q, &st) {
-        return (StatusCode::UNAUTHORIZED, "bad token").into_response();
-    }
-    ws.on_upgrade(move |socket| bridge(socket, st))
-}
-
-async fn bridge(socket: WebSocket, st: AppState) {
-    let _guard = ClientGuard::new(st.clients.clone());
-    let mut kill = st.kill_tx.subscribe();
-    let (sender, receiver) = socket.split();
-    // Side channel for server→client control frames (completion listings),
-    // produced by the input task and forwarded as Text frames by the output task.
-    let (ctrl_tx, ctrl_rx) = mpsc::channel::<String>(16);
-    let mut out = tokio::spawn(output_task(sender, st.clone(), ctrl_rx));
-    let mut inp = tokio::spawn(input_task(receiver, st, ctrl_tx));
-    // When either direction ends (client disconnects, pty closed) — or the
-    // share is stopped (kill fires, or its sender is dropped) — stop both.
-    tokio::select! {
-        _ = &mut out => inp.abort(),
-        _ = &mut inp => out.abort(),
-        _ = kill.recv() => {
-            out.abort();
-            inp.abort();
-        }
-    }
-}
-
-/// pty output → websocket. Re-subscribes when the active pane (target) changes.
-async fn output_task(
-    mut sender: futures_util::stream::SplitSink<WebSocket, Message>,
-    st: AppState,
-    mut ctrl_rx: mpsc::Receiver<String>,
-) {
-    let mut trx = st.target_tx.subscribe();
-    let mut tabs_rx = st.tabs_tx.subscribe();
-    loop {
-        let target = *trx.borrow_and_update();
-        // Send the current tab list + active selection so the phone can switch.
-        let json = {
-            let t = tabs_rx.borrow_and_update();
-            tabs_json(&t, target)
-        };
-        if sender.send(Message::Text(json.into())).await.is_err() {
-            return;
-        }
-        match target.and_then(|id| st.pty.attach(id)) {
-            Some((snapshot, _offset, mut rx)) => {
-                // Replay the current screen + recent scrollback so a (re)connecting
-                // client doesn't see a blank terminal.
-                if !snapshot.is_empty()
-                    && sender.send(Message::Binary(snapshot.into())).await.is_err()
-                {
-                    return;
-                }
-                loop {
-                tokio::select! {
-                    msg = rx.recv() => match msg {
-                        Ok(bytes) => {
-                            if sender.send(Message::Binary(bytes.into())).await.is_err() {
-                                return;
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    },
-                    ctl = ctrl_rx.recv() => {
-                        if let Some(txt) = ctl {
-                            // Text frame = control (PTY output is always Binary).
-                            if sender.send(Message::Text(txt.into())).await.is_err() {
-                                return;
-                            }
-                        }
-                    },
-                    ch = tabs_rx.changed() => {
-                        if ch.is_err() {
-                            return;
-                        }
-                        let json = {
-                            let t = tabs_rx.borrow();
-                            tabs_json(&t, *trx.borrow())
-                        };
-                        if sender.send(Message::Text(json.into())).await.is_err() {
-                            return;
-                        }
-                    },
-                    ch = trx.changed() => {
-                        if ch.is_err() {
-                            return;
-                        }
-                        break; // re-evaluate the target on the outer loop
-                    }
-                }
-                }
-            },
-            None => {
-                // No target: the client still sees the tab list and can pick one.
-                tokio::select! {
-                    ch = trx.changed() => { if ch.is_err() { return; } }
-                    ch = tabs_rx.changed() => { if ch.is_err() { return; } }
-                }
-            }
-        }
-    }
-}
-
-/// JSON control frame: `{"t":"tabs","items":[{"id","title"}],"active":<id|null>}`.
-fn tabs_json(tabs: &[TabInfo], active: Option<u64>) -> String {
-    let items: Vec<serde_json::Value> = tabs
-        .iter()
-        .map(|t| serde_json::json!({ "id": t.id, "title": t.title }))
-        .collect();
-    serde_json::json!({ "t": "tabs", "items": items, "active": active }).to_string()
-}
-
 /// Handle one client→server message. A 2-byte sentinel (NUL, SOH) — which
 /// typed input can't produce as a chunk — marks a resize control "<cols>x<rows>";
 /// everything else is raw terminal input. Works for both Text and Binary frames.
@@ -734,9 +1084,7 @@ fn handle_input(st: &AppState, id: u64, data: &[u8]) {
     if let Some(rest) = data.strip_prefix(&[0x00u8, 0x01u8]) {
         if let Ok(s) = std::str::from_utf8(rest) {
             if let Some((c, r)) = s.split_once('x') {
-                if let (Ok(cols), Ok(rows)) =
-                    (c.parse::<u16>(), r.parse::<u16>())
-                {
+                if let (Ok(cols), Ok(rows)) = (c.parse::<u16>(), r.parse::<u16>()) {
                     st.pty.resize_pty(id, rows, cols);
                     return;
                 }
@@ -748,31 +1096,45 @@ fn handle_input(st: &AppState, id: u64, data: &[u8]) {
 
 /// websocket → pty input (resize + completion control messages + raw input).
 async fn input_task(
-    mut receiver: futures_util::stream::SplitStream<WebSocket>,
+    mut receiver: WsStream,
     st: AppState,
+    conn_id: u64,
+    target: watch::Sender<Option<u64>>,
+    mut rx: proto::Half,
     ctrl_tx: mpsc::Sender<String>,
 ) {
-    let trx = st.target_tx.subscribe();
     while let Some(Ok(msg)) = receiver.next().await {
-        let Some(id) = *trx.borrow() else { continue };
-        let bytes: Vec<u8> = match msg {
-            Message::Text(t) => t.as_str().as_bytes().to_vec(),
-            Message::Binary(b) => b.as_ref().to_vec(),
+        let boxed = match msg {
+            Message::Binary(b) => b,
             Message::Close(_) => break,
             _ => continue,
         };
-        // New tab: NUL,EOT → ask the desktop frontend to create one.
-        if bytes == [0x00u8, 0x04u8] {
-            let _ = st.app.emit("remote:new-tab", ());
+        // A frame that doesn't open was forged, replayed or reordered: drop
+        // the connection rather than guess.
+        let Some(bytes) = rx.open(&boxed) else {
+            break;
+        };
+        if bytes == proto::READY {
             continue;
         }
-        // Tab switch: NUL,ETX + the target pty id → repoint the bridge.
+        // New tab: NUL,EOT → ask the desktop frontend to create one, and to
+        // point THIS connection at it once its pty exists.
+        if bytes == [0x00u8, 0x04u8] {
+            (st.emit)("remote:new-tab", serde_json::json!({ "conn": conn_id }));
+            continue;
+        }
+        // Tab switch: NUL,ETX + the target pty id → repoint this bridge. Only
+        // to a pane the desktop actually shares (never e.g. a Lume ↔ Lume
+        // session this Lume itself is a client of).
         if let Some(rest) = bytes.strip_prefix(&[0x00u8, 0x03u8]) {
             if let Ok(id) = String::from_utf8_lossy(rest).parse::<u64>() {
-                let _ = st.target_tx.send_replace(Some(id));
+                if st.tabs_tx.borrow().iter().any(|t| t.id == id) {
+                    let _ = target.send_replace(Some(id));
+                }
             }
             continue;
         }
+        let Some(id) = *target.borrow() else { continue };
         // Completion request: NUL,STX + the word being typed → reply with a
         // directory listing for the target pane's cwd (off-thread, best-effort).
         if let Some(tok) = bytes.strip_prefix(&[0x00u8, 0x02u8]) {
@@ -911,10 +1273,33 @@ const INDEX_HTML: &str = r##"<!doctype html>
 <div id="overlay"><div class="box"><div id="ov-icon"></div><div id="ov-title">Connexion perdue</div><div id="ov-sub"></div><button id="reconnect">Reconnecter</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" integrity="sha384-J4qzUjBl1FxyLsl/kQPQIOeINsmp17OHYXDOMpMxlKX53ZfYsL+aWHpgArvOuof9" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" integrity="sha384-XGqKrV8Jrukp1NITJbOEHwg01tNkuXr6uB6YEj69ebpYU3v7FvoGgEg23C1Gcehk" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js" integrity="sha384-05+sicyRJQ56XpL4U9HJ8YbtSzFDvAg7apPKOGV6A0JsAJKFM68jp5oLnUjG5mEp" crossorigin="anonymous"></script>
 <script>
 (function(){
   var $=function(id){return document.getElementById(id);};
-  var token = new URLSearchParams(location.search).get('t') || '';
+  // --- end-to-end encryption (see remote_proto.rs for the protocol) ---
+  // The pairing secret travels in the URL fragment, which browsers never send
+  // to the server (nor to the tunnel). Once paired, this device's own key
+  // lives in localStorage, per server id.
+  var CREDS_KEY='lume.remote.v2';
+  var pairSecret=null;
+  (function(){ var m=/[#&]p=([A-Za-z0-9_-]+)/.exec(location.hash); if(m){ pairSecret=b64urld(m[1]); } })();
+  function b64e(u8){ var s=''; for(var i=0;i<u8.length;i++) s+=String.fromCharCode(u8[i]); return btoa(s); }
+  function b64d(str){ var s=atob(str), u=new Uint8Array(s.length); for(var i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u; }
+  function b64urld(str){ str=str.replace(/-/g,'+').replace(/_/g,'/'); while(str.length%4) str+='='; return b64d(str); }
+  function cat(){ var n=0,i; for(i=0;i<arguments.length;i++) n+=arguments[i].length; var o=new Uint8Array(n), k=0; for(i=0;i<arguments.length;i++){ o.set(arguments[i],k); k+=arguments[i].length; } return o; }
+  function loadCreds(){ try{ return JSON.parse(localStorage.getItem(CREDS_KEY)||'{}')||{}; }catch(e){ return {}; } }
+  function saveCreds(c){ try{ localStorage.setItem(CREDS_KEY, JSON.stringify(c)); }catch(e){} }
+  function hexId(){ var b=nacl.randomBytes(12), s=''; for(var i=0;i<b.length;i++) s+=('0'+b[i].toString(16)).slice(-2); return s; }
+  function deviceName(){ var u=navigator.userAgent; return /iPhone/.test(u)?'iPhone':/iPad/.test(u)?'iPad':/Android/.test(u)?'Android':/Mac/.test(u)?'Mac':/Windows/.test(u)?'Windows':/Linux/.test(u)?'Linux':'Navigateur'; }
+  function nonce(dir, ctr){ var n=new Uint8Array(24), hi=Math.floor(ctr/4294967296), lo=ctr>>>0; n[0]=dir; n[16]=hi>>>24&255; n[17]=hi>>>16&255; n[18]=hi>>>8&255; n[19]=hi&255; n[20]=lo>>>24&255; n[21]=lo>>>16&255; n[22]=lo>>>8&255; n[23]=lo&255; return n; }
+  function Half(key, dir){ this.key=key; this.dir=dir; this.ctr=0; }
+  Half.prototype.seal=function(m){ var b=nacl.secretbox(m, nonce(this.dir,this.ctr), this.key); this.ctr++; return b; };
+  Half.prototype.open=function(b){ var m=nacl.secretbox.open(b, nonce(this.dir,this.ctr), this.key); if(!m) return null; this.ctr++; return m; };
+  var enc=new TextEncoder(), dec=new TextDecoder();
+  var txh=null, rxh=null, ready=false;
+  // Every client→server frame after the handshake is sealed.
+  function wsSend(data){ if(!ws || ws.readyState!==1 || !ready) return; var bytes = typeof data==='string' ? enc.encode(data) : data; ws.send(txh.seal(bytes)); }
   var msg=$('msg'), dc=$('dc'), termEl=$('term'), app=$('app'), chipsEl=$('chips'), keysEl=$('keys'), tabsEl=$('tabs');
   var lastActive=null;
   var closedByUser=false;
@@ -940,11 +1325,11 @@ const INDEX_HTML: &str = r##"<!doctype html>
   function curToken(){ if(curLine.indexOf(' ')<0) return null; var p=curLine.split(/\s+/); return p[p.length-1]; }
 
   // --- send helper (used by keyboard + buttons) ---
-  function send(s){ if(ws.readyState===1) ws.send(s); track(s); scheduleComplete(); }
+  function send(s){ wsSend(s); track(s); scheduleComplete(); }
 
   // --- completion chips ---
   var ct; function scheduleComplete(){ clearTimeout(ct); ct=setTimeout(reqComplete,140); }
-  function reqComplete(){ var t=curToken(); if(t===null){ chipsEl.innerHTML=''; return; } if(ws.readyState===1) ws.send(String.fromCharCode(0,2)+t); }
+  function reqComplete(){ var t=curToken(); if(t===null){ chipsEl.innerHTML=''; return; } wsSend(String.fromCharCode(0,2)+t); }
   function renderChips(items){
     chipsEl.innerHTML='';
     var t=curToken(); var base = t===null?'':t.split('/').pop();
@@ -967,11 +1352,11 @@ const INDEX_HTML: &str = r##"<!doctype html>
     tabsEl.innerHTML='';
     (items||[]).forEach(function(it){
       var b=document.createElement('div'); b.className='tab'+(it.id===active?' on':''); b.textContent=it.title||('#'+it.id);
-      bindTap(b, function(){ if(it.id!==active && ws.readyState===1) ws.send(String.fromCharCode(0,3)+it.id); });
+      bindTap(b, function(){ if(it.id!==active) wsSend(String.fromCharCode(0,3)+it.id); });
       tabsEl.appendChild(b);
     });
     var add=document.createElement('div'); add.className='tab add'; add.textContent='+';
-    bindTap(add, function(){ if(ws.readyState===1) ws.send(String.fromCharCode(0,4)); });
+    bindTap(add, function(){ wsSend(String.fromCharCode(0,4)); });
     tabsEl.appendChild(add);
   }
 
@@ -1017,8 +1402,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
       if(mode===1){
         e.preventDefault();
         var d=t.clientX-lastX;
-        while(d>=STEP){ if(ws.readyState===1) ws.send('\x1b[C'); lastX+=STEP; d-=STEP; }
-        while(d<=-STEP){ if(ws.readyState===1) ws.send('\x1b[D'); lastX-=STEP; d+=STEP; }
+        while(d>=STEP){ wsSend('\x1b[C'); lastX+=STEP; d-=STEP; }
+        while(d<=-STEP){ wsSend('\x1b[D'); lastX-=STEP; d+=STEP; }
       }
     },{passive:false});
   })();
@@ -1026,35 +1411,78 @@ const INDEX_HTML: &str = r##"<!doctype html>
   var overlay=$('overlay'), ovTitle=$('ov-title'), ovSub=$('ov-sub'), ovIcon=$('ov-icon');
   var WARN_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
   var PLUG_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6z"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
-  function showOverlay(byUser){
-    ovIcon.innerHTML = byUser ? PLUG_SVG : WARN_SVG;
-    ovTitle.textContent = byUser ? 'Déconnecté' : 'Connexion perdue';
-    ovSub.textContent = byUser ? "Tu es déconnecté du terminal distant." : "Le tunnel ou le réseau s'est interrompu.";
+  // kind: 'user' (Déconnecter), 'lost' (network), or a {title, sub, retry} object.
+  function showOverlay(kind){
+    var o = kind==='user' ? {icon:PLUG_SVG, title:'Déconnecté', sub:"Tu es déconnecté du terminal distant.", retry:true}
+          : kind==='lost' ? {icon:WARN_SVG, title:'Connexion perdue', sub:"Le tunnel ou le réseau s'est interrompu.", retry:true}
+          : kind;
+    ovIcon.innerHTML = o.icon || WARN_SVG;
+    ovTitle.textContent = o.title; ovSub.textContent = o.sub;
+    $('reconnect').style.display = o.retry ? '' : 'none';
     overlay.style.display='flex';
   }
   function hideOverlay(){ overlay.style.display='none'; }
+  var fatal=null; // a handshake refusal: shown instead of "connection lost"
   function connect(){
-    closedByUser=false; hideOverlay(); msg.textContent='Connexion…';
+    closedByUser=false; fatal=null; ready=false; txh=rxh=null; hideOverlay(); msg.textContent='Connexion…';
     try{ term.reset(); }catch(e){}   // clear so the server's replay rebuilds cleanly
     curLine=''; lastActive=null;
-    ws = new WebSocket(proto + '://' + location.host + '/ws?t=' + encodeURIComponent(token));
+    var serverId=null, deviceKey=null, nc=null;
+    ws = new WebSocket(proto + '://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
+    function hello(){
+      var c=loadCreds()[serverId];
+      if(!c){ fatal={title:'Appareil non appairé', sub:'Scanne le QR code affiché par Lume (clic droit sur un terminal → Contrôle à distance) pour appairer cet appareil.', retry:false}; ws.close(); return; }
+      deviceKey=b64d(c.key); nc=nacl.randomBytes(24);
+      ws.send(JSON.stringify({t:'hello', id:c.id, nc:b64e(nc)}));
+    }
     ws.onmessage = function(e){
       if(typeof e.data === 'string'){
-        try{ var m=JSON.parse(e.data); if(m && m.t==='ls'){ renderChips(m.items||[]); return; } if(m && m.t==='tabs'){ onTabs(m.items, m.active); return; } }catch(_){}
-        term.write(e.data); return;
+        var m; try{ m=JSON.parse(e.data); }catch(_){ return; }
+        if(m.t==='server'){
+          serverId=m.id; document.title='Lume — '+(m.name||'Remote');
+          if(pairSecret){
+            var id=hexId(), key=nacl.randomBytes(32), n=nacl.randomBytes(24);
+            var payload=enc.encode(JSON.stringify({id:id, key:b64e(key), name:deviceName()}));
+            var all=loadCreds(); all[serverId]={id:id, key:b64e(key), pending:true}; saveCreds(all);
+            ws.send(JSON.stringify({t:'pair', n:b64e(n), box:b64e(nacl.secretbox(payload, n, pairSecret))}));
+            msg.textContent='Appairage…';
+          } else hello();
+        } else if(m.t==='paired'){
+          pairSecret=null;
+          var all=loadCreds(); if(all[serverId]) delete all[serverId].pending; saveCreds(all);
+          // Drop the one-time secret from the address bar (and from bookmarks).
+          try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){}
+          hello();
+        } else if(m.t==='challenge'){
+          var s=nacl.hash(cat(deviceKey, nc, b64d(m.ns))).subarray(0,32);
+          txh=new Half(s,0); rxh=new Half(s,1); ready=true;
+          wsSend(new Uint8Array([0,5]));
+          msg.innerHTML='<i class="dot"></i>Connecté (chiffré)'; dc.style.display=''; layout(); term.focus();
+        } else if(m.t==='denied'){
+          if(m.reason==='unknown'){ var a=loadCreds(); delete a[serverId]; saveCreds(a); fatal={title:'Appareil révoqué', sub:"Cet appareil n'est plus autorisé. Rescanne le QR code affiché par Lume pour l'appairer à nouveau.", retry:false}; }
+          else if(m.reason==='pairing'){ var b=loadCreds(); if(b[serverId] && b[serverId].pending) delete b[serverId]; saveCreds(b); pairSecret=null; fatal={title:'QR code expiré', sub:'Ce QR code a expiré ou a déjà servi. Affiche un nouveau QR code dans Lume.', retry:false}; }
+          else fatal={title:'Connexion refusée', sub:'Lume a refusé la connexion.', retry:true};
+        }
+        return;
       }
-      term.write(new Uint8Array(e.data));
+      if(!ready) return;
+      var plain=rxh.open(new Uint8Array(e.data));
+      if(!plain){ fatal={title:'Erreur de chiffrement', sub:'Trame invalide reçue — connexion fermée.', retry:true}; ws.close(); return; }
+      if(plain[0]===84){ // 'T'
+        try{ var c=JSON.parse(dec.decode(plain.subarray(1))); if(c.t==='ls'){ renderChips(c.items||[]); } else if(c.t==='tabs'){ onTabs(c.items, c.active); } }catch(_){}
+        return;
+      }
+      term.write(plain.subarray(1));
     };
-    ws.onopen = function(){ msg.innerHTML='<i class="dot"></i>Connecté'; dc.style.display=''; layout(); term.focus(); };
-    ws.onclose = function(){ msg.textContent = closedByUser ? 'Déconnecté' : 'Connexion perdue'; dc.style.display='none'; showOverlay(closedByUser); };
+    ws.onclose = function(){ ready=false; msg.textContent = closedByUser ? 'Déconnecté' : fatal ? fatal.title : 'Connexion perdue'; dc.style.display='none'; showOverlay(fatal || (closedByUser ? 'user' : 'lost')); };
     ws.onerror = function(){ msg.textContent='Erreur de connexion'; };
   }
   dc.onclick = function(){ closedByUser = true; if(ws) ws.close(); };
   $('reconnect').onclick = function(){ connect(); };
   connect();
 
-  function sendResize(){ if(ws.readyState===1) ws.send(String.fromCharCode(0,1)+term.cols+'x'+term.rows); }
+  function sendResize(){ wsSend(String.fromCharCode(0,1)+term.cols+'x'+term.rows); }
   function layout(){
     var vv=window.visualViewport;
     var h = vv?vv.height:window.innerHeight, top = vv?vv.offsetTop:0;
@@ -1072,19 +1500,73 @@ const INDEX_HTML: &str = r##"<!doctype html>
 </body>
 </html>"##;
 
+/// Test harness: a server on 127.0.0.1 with an open pairing, recording the
+/// events it would send to the desktop frontend.
+#[cfg(test)]
+pub(crate) struct TestServer {
+    pub port: u16,
+    pub secret: [u8; proto::KEY_LEN],
+    pub events: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+    pub tabs_tx: watch::Sender<Vec<TabInfo>>,
+    conns: Arc<Mutex<HashMap<u64, Conn>>>,
+    _shutdown: oneshot::Sender<()>,
+}
+
+#[cfg(test)]
+impl TestServer {
+    pub fn start() -> Self {
+        let std_listener = StdTcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = std_listener.local_addr().unwrap().port();
+        let secret = proto::random();
+        let events: Arc<Mutex<Vec<(String, serde_json::Value)>>> = Arc::new(Mutex::new(Vec::new()));
+        let ev = events.clone();
+        let (default_target, _) = watch::channel(None);
+        let (tabs_tx, _) = watch::channel(Vec::new());
+        let (kill_tx, _) = broadcast::channel(1);
+        let conns: Arc<Mutex<HashMap<u64, Conn>>> = Arc::new(Mutex::new(HashMap::new()));
+        let clients = Arc::new(AtomicUsize::new(0));
+        let state = AppState {
+            pty: Arc::new(PtyManager::new()),
+            default_target,
+            tabs_tx: tabs_tx.clone(),
+            clients,
+            kill_tx,
+            pairing: Arc::new(Mutex::new(Some(Pairing {
+                secret,
+                expires: Instant::now() + PAIRING_TTL,
+            }))),
+            conns: conns.clone(),
+            next_conn: Arc::new(AtomicU64::new(1)),
+            server_id: store::server_id(),
+            server_name: "test-host".into(),
+            emit: Arc::new(move |e: &str, v: serde_json::Value| ev.lock().push((e.to_string(), v))),
+        };
+        let (shutdown, rx) = oneshot::channel();
+        serve(std_listener, state, rx).unwrap();
+        Self {
+            port,
+            secret,
+            events,
+            tabs_tx,
+            conns,
+            _shutdown: shutdown,
+        }
+    }
+
+    /// Cut every live connection of a device (what revoke does).
+    pub fn kill_device(&self, id: &str) {
+        for c in self.conns.lock().values() {
+            if c.device_id == id {
+                let _ = c.kill.send(());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
-
-    #[test]
-    fn ct_eq_matches_equal_and_rejects_unequal() {
-        assert!(ct_eq(b"abc123", b"abc123"));
-        assert!(!ct_eq(b"abc123", b"abc124"));
-        assert!(!ct_eq(b"abc123", b"abc12"));
-        assert!(!ct_eq(b"", b"x"));
-        assert!(ct_eq(b"", b""));
-    }
 
     #[test]
     fn sha256_hex_known_vector() {
@@ -1136,16 +1618,24 @@ mod tests {
         // prefix "s" → src, scripts (dirs first), then setup.txt; not readme.md
         let items = list_entries(Some(&cwd), "s");
         let names: Vec<&str> = items.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(names.contains(&"src") && names.contains(&"scripts") && names.contains(&"setup.txt"));
+        assert!(
+            names.contains(&"src") && names.contains(&"scripts") && names.contains(&"setup.txt")
+        );
         assert!(!names.contains(&"readme.md"));
         assert!(items[0].1 && items[1].1, "directories should sort first");
 
         // hidden files only when the prefix starts with '.'
-        assert!(!list_entries(Some(&cwd), "").iter().any(|(n, _)| n == ".hidden"));
-        assert!(list_entries(Some(&cwd), ".").iter().any(|(n, _)| n == ".hidden"));
+        assert!(!list_entries(Some(&cwd), "")
+            .iter()
+            .any(|(n, _)| n == ".hidden"));
+        assert!(list_entries(Some(&cwd), ".")
+            .iter()
+            .any(|(n, _)| n == ".hidden"));
 
         // trailing slash descends into the sub-directory
-        assert!(list_entries(Some(&cwd), "src/").iter().any(|(n, _)| n == "main.rs"));
+        assert!(list_entries(Some(&cwd), "src/")
+            .iter()
+            .any(|(n, _)| n == "main.rs"));
 
         // no cwd → empty
         assert!(list_entries(None, "x").is_empty());

@@ -15,6 +15,10 @@ pub struct Config {
     pub notifications: NotificationsConfig,
     pub ai: AiConfig,
     pub file_tree: FileTreeConfig,
+    pub remote: RemoteSettings,
+    pub history: HistorySettings,
+    pub workspaces: WorkspaceSettings,
+    pub ssh: SshSettings,
     /// UI language code ("en", "fr", …). Defaults to English.
     #[serde(default = "default_language")]
     pub language: String,
@@ -100,11 +104,112 @@ impl AiConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BehaviorConfig {
     /// Focus the hovered pane without clicking (focus follows mouse).
     pub focus_follows_mouse: bool,
+    /// Show the active pane's git branch on its tab.
+    pub show_git_branch: bool,
+    /// Keep each pane's recent command blocks across restarts.
+    pub persist_blocks: bool,
+}
+
+impl Default for BehaviorConfig {
+    fn default() -> Self {
+        Self {
+            focus_follows_mouse: false,
+            show_git_branch: true,
+            persist_blocks: true,
+        }
+    }
+}
+
+/// Remote control (this Lume as a server).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RemoteSettings {
+    /// Preferred listening port (falls back to a free one if taken).
+    pub port: u16,
+    /// Open the cloudflared Internet tunnel automatically when installed.
+    /// Off = LAN only, unless the tunnel is enabled from the remote panel.
+    pub auto_tunnel: bool,
+}
+
+impl Default for RemoteSettings {
+    fn default() -> Self {
+        Self {
+            port: 4530,
+            auto_tunnel: true,
+        }
+    }
+}
+
+/// Rich command history (history.jsonl).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HistorySettings {
+    pub enabled: bool,
+    /// Commands matching one of these `*`/`?` patterns (case-insensitive,
+    /// whole command line) are never recorded.
+    pub ignore: Vec<String>,
+}
+
+impl Default for HistorySettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ignore: default_history_ignore(),
+        }
+    }
+}
+
+pub fn default_history_ignore() -> Vec<String> {
+    [
+        "*password*",
+        "*passwd*",
+        "*secret*",
+        "*token*",
+        "*api_key*",
+        "*apikey*",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WorkspaceSettings {
+    /// What opening a workspace does with its startup commands:
+    /// "always" (run them), "ask" (confirm first), "never".
+    pub run_commands: String,
+}
+
+impl Default for WorkspaceSettings {
+    fn default() -> Self {
+        Self {
+            run_commands: "always".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SshSettings {
+    /// tmux session name used by the "attach tmux" option.
+    pub tmux_session: String,
+    /// New hosts start with the tmux option on.
+    pub tmux_by_default: bool,
+}
+
+impl Default for SshSettings {
+    fn default() -> Self {
+        Self {
+            tmux_session: "lume".to_string(),
+            tmux_by_default: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,9 +364,13 @@ pub fn config_path() -> Option<PathBuf> {
 /// Write via a same-directory temp file + rename: a crash/power-cut mid-write
 /// can't leave a truncated config (fs::write truncates first). Perms are
 /// forced to 0600 — the file holds API keys and must not be world-readable.
-fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
     use std::io::Write as _;
-    let tmp = path.with_extension("toml.tmp");
+    let tmp = {
+        let mut t = path.as_os_str().to_owned();
+        t.push(".tmp");
+        std::path::PathBuf::from(t)
+    };
     {
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create(true).truncate(true);

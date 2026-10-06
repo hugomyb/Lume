@@ -32,25 +32,58 @@ import {
   type AiDoneEvent,
   type AiErrorEvent,
   type AiStatus,
+  type BlockContext,
   type ChatMessage,
 } from "./ai";
 import { invoke } from "@tauri-apps/api/core";
-import CommandPalette from "./CommandPalette";
+import Palette, { type PaletteItem, type PromptRequest } from "./Palette";
 import WorkflowsPalette from "./WorkflowsPalette";
 import SshPalette from "./SshPalette";
-import { sshCommand } from "./ssh";
+import {
+  isRemoteSessionCommand,
+  listSshHosts,
+  sshCommand,
+  sshPrefs,
+  sshFavorites,
+  sshRecents,
+  pushSshRecent,
+  type SshHost,
+  type SshPrefs,
+} from "./ssh";
+import { historyAppend, historyClear, gitInfo, homeRelative } from "./history";
+import {
+  deleteWorkspace,
+  expandPath,
+  isSplit,
+  listWorkspaces,
+  saveWorkspace,
+  workspaceFilePath,
+  wsCommands,
+  type Workspace,
+  type WsNode,
+} from "./workspaces";
+import { listWorkflows, type Workflow } from "./workflows";
+import { THEME_PRESETS } from "./themes";
 import { loadCustomFonts } from "./fonts";
 import { copyText, pasteText } from "./clipboard";
 import UsagePill, { UsageCard } from "./UsagePill";
 import { listenUsage, refreshPlanUsage, resetPlanUsage, startPlanPolling } from "./usage";
 import {
+  remoteClientForget,
+  remoteClientNewTab,
+  remoteClientPeers,
+  remoteClientSwitch,
   remoteInstallCloudflared,
+  remoteNewPairing,
+  remoteRevokeDevice,
   remoteSetTabs,
   remoteSetTarget,
   remoteStart,
   remoteStatus,
   remoteStop,
+  type RemoteClientTabs,
   type RemoteInfo,
+  type RemotePeer,
 } from "./remote";
 import FileTree from "./FileTree";
 import CloseConfirm, {
@@ -58,10 +91,19 @@ import CloseConfirm, {
   type RunningCommand,
 } from "./CloseConfirm";
 import RemoteDialog from "./RemoteDialog";
+import WorkspaceMenu from "./WorkspaceMenu";
 import UpdateBanner from "./UpdateBanner";
 import { setLocale, t } from "./i18n";
 import {
   IconBlocks,
+  IconBranch,
+  IconHistory,
+  IconRefresh,
+  IconSearch,
+  IconSparkles,
+  IconTheme,
+  IconWorkspace,
+  IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconClipboard,
@@ -84,6 +126,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import {
   ACTIONS,
   comboToAction,
+  comboToLabel,
   eventToCombo,
   modKey,
   resolveBindings,
@@ -164,7 +207,11 @@ function applyCssVars(cfg: Config) {
   );
 }
 
-type PersistedLeaf = { id: number; cwd: string | null };
+type PersistedLeaf = {
+  id: number;
+  cwd: string | null;
+  remote?: { url: string; serverName?: string } | null;
+};
 type PersistedTab = {
   id: number;
   title: string;
@@ -184,6 +231,47 @@ type PersistedSession = {
 
 const SESSION_KEY = "lume.session.v2";
 
+/** Recent command blocks per pane, kept across restarts (BlocksPanel history,
+ *  "explain" on yesterday's failure). Output is tail-truncated. */
+const BLOCKS_KEY = "lume.blocks.v1";
+const PERSIST_BLOCKS_PER_LEAF = 30;
+const PERSIST_OUTPUT_CHARS = 4000;
+type PersistedBlock = {
+  c: string;
+  o: string | null;
+  s: number;
+  f: number | null;
+  x: number | null;
+};
+
+function loadPersistedBlocks(): Record<string, PersistedBlock[]> {
+  try {
+    const raw = localStorage.getItem(BLOCKS_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function restoreBlocks(list: PersistedBlock[] | undefined): Block[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((b) => b && typeof b.c === "string")
+    .map((b, i) => ({
+      id: i,
+      command: b.c,
+      output: b.o ?? null,
+      startedAt: b.s,
+      finishedAt: b.f ?? null,
+      exitCode: b.x ?? null,
+      status: "done" as const,
+      ai: null,
+      // No scrollback row in this new terminal to point at.
+      markerId: -1,
+    }));
+}
+
 /** Rebuild the full tab/pane state from a persisted session, or null if there's
  *  nothing valid to restore. Restores tree structure (split ratios, layout),
  *  titles, manual-rename lock, and each pane's last cwd. */
@@ -197,17 +285,20 @@ function loadSession(): { tabs: TabState[]; activeId: number } | null {
     seedPaneCounters(data.nextLeafId ?? 0, data.nextSplitId ?? 0);
     if (Number.isFinite(data.nextTabId)) nextTabId = data.nextTabId;
 
+    const persistedBlocks = loadPersistedBlocks();
     const tabs: TabState[] = [];
     for (const pt of data.tabs) {
       if (!pt || !pt.tree) continue;
       const ids = leafIds(pt.tree);
       if (ids.length === 0) continue;
-      const cwdById = new Map(
-        (pt.leaves ?? []).map((l) => [l.id, l.cwd ?? null] as const)
-      );
+      const byId = new Map((pt.leaves ?? []).map((l) => [l.id, l] as const));
       const leaves: Record<number, LeafData> = {};
       for (const lid of ids) {
-        leaves[lid] = makeLeafWithId(lid, cwdById.get(lid) ?? null);
+        const pl = byId.get(lid);
+        const leaf = makeLeafWithId(lid, pl?.cwd ?? null, pl?.remote ?? null);
+        leaf.blocks = restoreBlocks(persistedBlocks[String(lid)]);
+        leaf.nextBlockId = leaf.blocks.length;
+        leaves[lid] = leaf;
       }
       tabs.push({
         id: pt.id,
@@ -331,6 +422,34 @@ export default function Tabs() {
     } catch {}
   });
   const [paletteOpen, setPaletteOpen] = createSignal(false);
+  /** Prefix the palette opens with: "" actions, "!" history, "?" AI. */
+  const [paletteInitial, setPaletteInitial] = createSignal("");
+  const openPalette = (prefix = "") => {
+    setPaletteInitial(prefix);
+    setPaletteOpen(true);
+  };
+  /** Workflow to open directly in the workflows palette (from the palette). */
+  const [workflowPreselect, setWorkflowPreselect] = createSignal<string | null>(null);
+  // Which extra context "explain this block" sends — opt-in, remembered.
+  const [aiContext, setAiContext] = createSignal<{ env: boolean; prev: boolean }>(
+    (() => {
+      try {
+        const v = JSON.parse(localStorage.getItem("lume.ai.ctx") ?? "null");
+        if (v && typeof v === "object") return { env: !!v.env, prev: !!v.prev };
+      } catch {}
+      return { env: false, prev: false };
+    })()
+  );
+  createEffect(() => {
+    try {
+      localStorage.setItem("lume.ai.ctx", JSON.stringify(aiContext()));
+    } catch {}
+  });
+  /** Terminals offered by the remote Lumes this one is a client of, keyed by
+   *  the local session (pty) id of the pane showing them. */
+  const [remoteClientTabs, setRemoteClientTabs] = createSignal<
+    Record<number, RemoteClientTabs>
+  >({});
   const [workflowsOpen, setWorkflowsOpen] = createSignal(false);
   const [sshOpen, setSshOpen] = createSignal(false);
   const [blockNavMode, setBlockNavMode] = createSignal(false);
@@ -401,6 +520,9 @@ export default function Tabs() {
   const [editingTabId, setEditingTabId] = createSignal<number | null>(null);
   const [editingTitle, setEditingTitle] = createSignal("");
   const [layoutsOpen, setLayoutsOpen] = createSignal(false);
+  /** Workspaces dropdown (▾ next to the tab bar's +), anchored to its button. */
+  const [wsMenuAnchor, setWsMenuAnchor] = createSignal<DOMRect | null>(null);
+  const wsMenuOpen = () => wsMenuAnchor() !== null;
 
   // Native grid (Linux): terminal pixels are painted by a native layer above
   // the webview. The grid never yields to xterm anymore — DOM overlays stay
@@ -415,8 +537,10 @@ export default function Tabs() {
       paletteOpen() ||
       workflowsOpen() ||
       sshOpen() ||
+      wsConfirm() !== null ||
       remoteDialogOpen();
     layoutsOpen();
+    wsMenuOpen();
     draggingTabId();
     draggingPaneLeafId();
     // Context menus are overlay rects too: the native grid must learn their
@@ -441,7 +565,7 @@ export default function Tabs() {
       '.pane-grip, .lume-block-copy, .lume-block-flash, .lume-autocomplete, .lume-ghost, [class*="context-menu"], [class*="ctx-menu"], ' +
       // Full DOM overlays (modals, palettes, search bar, pane drop zones):
       // the grid paints around these rects instead of yielding to xterm.
-      ".settings-panel, .palette, .layouts-popup, .remote-slideover, .term-search, .pane-drop-zone, .usage-card";
+      ".settings-panel, .palette, .layouts-popup, .remote-slideover, .term-search, .pane-drop-zone, .usage-card, .ssh-lost-bar, .lume-toast, .ws-menu";
     let lastRects = "";
     let overlayRaf = 0;
     const syncOverlayRects = () => {
@@ -458,13 +582,17 @@ export default function Tabs() {
           )
             return;
           const r = el.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0)
-            rects.push([
-              Math.floor(r.left),
-              Math.floor(r.top),
-              Math.ceil(r.width),
-              Math.ceil(r.height),
-            ]);
+          if (r.width > 0 && r.height > 0) {
+            // Round the EDGES outward, not the size: a popup centred at a
+            // fractional x (230.5) with floor(left) + ceil(width) stopped
+            // half a pixel short, and the grid repainted its right/bottom
+            // border. One extra pixel covers the anti-aliased edge too.
+            const x0 = Math.floor(r.left) - 1;
+            const y0 = Math.floor(r.top) - 1;
+            const x1 = Math.ceil(r.right) + 1;
+            const y1 = Math.ceil(r.bottom) + 1;
+            rects.push([x0, y0, x1 - x0, y1 - y0]);
+          }
         });
         const key = JSON.stringify(rects);
         if (key !== lastRects) {
@@ -479,6 +607,12 @@ export default function Tabs() {
     window.addEventListener("lume-overlay-sync", syncOverlayRects);
     document.addEventListener("mousedown", syncOverlayRects, true);
     document.addEventListener("mouseup", syncOverlayRects, true);
+    // Every popup opens with an animation (slide / fade-in): a rect measured
+    // on the opening frame is offset by the slide, and the grid painted over
+    // the popup's bottom edge until the next mousemove or poll. Re-measure
+    // once each animation or transition settles.
+    document.addEventListener("animationend", syncOverlayRects, true);
+    document.addEventListener("transitionend", syncOverlayRects, true);
     // Safety net for non-mouse triggers (keyboard-opened menus, animations).
     const overlayPoll = setInterval(syncOverlayRects, 300);
     onCleanup(() => {
@@ -486,6 +620,8 @@ export default function Tabs() {
       window.removeEventListener("lume-overlay-sync", syncOverlayRects);
       document.removeEventListener("mousedown", syncOverlayRects, true);
       document.removeEventListener("mouseup", syncOverlayRects, true);
+      document.removeEventListener("animationend", syncOverlayRects, true);
+      document.removeEventListener("transitionend", syncOverlayRects, true);
       clearInterval(overlayPoll);
       if (overlayRaf) cancelAnimationFrame(overlayRaf);
     });
@@ -610,11 +746,38 @@ export default function Tabs() {
       });
     }
 
+    // Opt-in context (toggles at the bottom of the blocks panel).
+    const ctx = aiContext();
+    let context: BlockContext | null = null;
+    if (ctx.env || ctx.prev) {
+      const leaf = tabs[loc.tIdx]?.leaves[leafId];
+      context = {};
+      if (ctx.env && leaf) {
+        context.cwd = leaf.remote ? null : leaf.cwd;
+        context.branch = leaf.gitBranch ?? null;
+      }
+      if (ctx.prev && leaf) {
+        const idx = leaf.blocks.findIndex((b) => b.id === blockId);
+        for (let j = idx - 1; j >= 0; j--) {
+          const p = leaf.blocks[j];
+          if (hasCommand(p)) {
+            context.previous = {
+              command: p.command!,
+              output: p.output ? p.output.slice(-4000) : null,
+              exitCode: p.exitCode,
+            };
+            break;
+          }
+        }
+      }
+    }
+
     try {
       const requestId = await aiExplainBlock({
         command: block.command,
         output: block.output,
         exitCode: block.exitCode ?? 0,
+        context,
       });
       const l = locateBlock(tabId, leafId, blockId);
       if (!l || !l.block.ai) {
@@ -732,6 +895,9 @@ export default function Tabs() {
   // Uses the Tauri notification plugin (the Web Notification API is unreliable
   // under WebKitGTK). Toggle + threshold live in config.notifications.
   const commandRunStart = new Map<number, number>();
+  /** Where each pane's running command was launched (cwd + branch at 133;C):
+   *  a `cd` or `git checkout` changes them before the command's 133;D. */
+  const commandStartCtx = new Map<number, { cwd: string | null; branch: string | null }>();
 
   // `document.hasFocus()` is unreliable under WebKitGTK, so track focus from
   // Tauri's native window events (driven by the window manager), with DOM
@@ -869,7 +1035,9 @@ export default function Tabs() {
    *  (written once the PTY exists, via the leaf's pendingInput). */
   const openCommandInNewTab = (title: string, command: string) => {
     const leaf = makeLeaf();
-    leaf.pendingInput = command.endsWith("\n") ? command : command + "\n";
+    // "\r" is the Enter key on every platform; a bare "\n" reaches
+    // PowerShell (through ConPTY) as Ctrl+Enter, which inserts a line.
+    leaf.pendingInput = command.replace(/[\r\n]+$/, "") + "\r";
     const tab: TabState = {
       id: nextTabId++,
       title,
@@ -896,19 +1064,20 @@ export default function Tabs() {
     void refreshPlanUsage(0);
   });
 
-  // When the phone taps "+", switch the remote to the new tab once its pty
-  // spawns (a freshly-created leaf has ptyId === null for a moment).
-  const [remoteFocusTabId, setRemoteFocusTabId] = createSignal<number | null>(
-    null
-  );
+  // When a remote client taps "+", point THAT connection at the new tab once
+  // its pty spawns (a freshly-created leaf has ptyId === null for a moment).
+  const [remoteFocus, setRemoteFocus] = createSignal<{
+    tabId: number;
+    conn: number | null;
+  } | null>(null);
   createEffect(() => {
-    const tid = remoteFocusTabId();
-    if (tid === null) return;
-    const tab = tabs.find((t) => t.id === tid);
+    const f = remoteFocus();
+    if (f === null) return;
+    const tab = tabs.find((t) => t.id === f.tabId);
     const pid = tab?.leaves[tab.activeLeafId]?.ptyId;
     if (typeof pid === "number") {
-      void remoteSetTarget(pid).catch(() => {});
-      setRemoteFocusTabId(null);
+      void remoteSetTarget(pid, f.conn).catch(() => {});
+      setRemoteFocus(null);
     }
   });
 
@@ -933,9 +1102,20 @@ export default function Tabs() {
   // `running` flips true the effect re-runs and pushes the current list.
   createEffect(() => {
     if (!remoteInfo()?.running) return;
-    const list = tabs
-      .map((t) => ({ id: t.leaves[t.activeLeafId]?.ptyId, title: t.title }))
-      .filter((t): t is { id: number; title: string } => typeof t.id === "number");
+    // Every pane is reachable (not just each tab's focused one). Panes that
+    // are themselves a client of another Lume are never re-shared.
+    const list: { id: number; title: string }[] = [];
+    for (const t of tabs) {
+      const ids = leafIds(t.tree);
+      ids.forEach((lid, i) => {
+        const l = t.leaves[lid];
+        if (!l || l.remote || typeof l.ptyId !== "number") return;
+        list.push({
+          id: l.ptyId,
+          title: ids.length > 1 ? `${t.title} · ${i + 1}` : t.title,
+        });
+      });
+    }
     void remoteSetTabs(list).catch(() => {});
   });
   // Live refresh of the connected-clients count + tunnel URL while running.
@@ -951,10 +1131,10 @@ export default function Tabs() {
   const startRemoteControl = async () => {
     try {
       const status = await remoteStatus();
-      const port = Number(localStorage.getItem("lume.remotePort")) || 4530;
+      const port = config.remote?.port || 4530;
       const info = status.running
         ? status
-        : await remoteStart(port, status.tunnelAvailable);
+        : await remoteStart(port, status.tunnelAvailable && config.remote?.autoTunnel !== false);
       setRemoteInfo(info);
       void remoteSetTarget(activeLeaf()?.ptyId ?? null);
       setRemoteDialogOpen(true);
@@ -978,9 +1158,11 @@ export default function Tabs() {
     if (remoteInstalling()) return;
     setRemoteInstalling(true);
     try {
-      await remoteInstallCloudflared();
+      // Already installed (auto-tunnel turned off in settings): just restart
+      // the share with the tunnel on.
+      if (!remoteInfo()?.tunnelAvailable) await remoteInstallCloudflared();
       await remoteStop();
-      const port = Number(localStorage.getItem("lume.remotePort")) || 4530;
+      const port = config.remote?.port || 4530;
       const info = await remoteStart(port, true);
       setRemoteInfo(info);
       void remoteSetTarget(activeLeaf()?.ptyId ?? null);
@@ -1000,7 +1182,7 @@ export default function Tabs() {
     // hostile file name would execute on "insert". Flatten them — only the
     // explicit `execute` path sends the single trailing newline.
     const flat = text.replace(/[\r\n]+/g, " ");
-    const payload = execute ? flat.trimEnd() + "\n" : flat;
+    const payload = execute ? flat.trimEnd() + "\r" : flat;
     const bytes = new TextEncoder().encode(payload);
     const chunk = 0x8000;
     let bin = "";
@@ -1091,12 +1273,158 @@ export default function Tabs() {
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
   };
-  // Same as addTab, but flags the new tab so the remote (phone) follows it.
-  const addTabFromRemote = () => {
+  // Same as addTab, but flags the new tab so the remote client that asked
+  // for it follows it.
+  const addTabFromRemote = (conn: number | null) => {
     const tab = makeEmptyTab();
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
-    setRemoteFocusTabId(tab.id);
+    setRemoteFocus({ tabId: tab.id, conn });
+  };
+
+  // --- Lume ↔ Lume: a pane showing a terminal of another Lume ---
+
+  const openRemoteLume = (url: string, title?: string) => {
+    const leaf = makeLeaf();
+    leaf.remote = { url };
+    const tab: TabState = {
+      id: nextTabId++,
+      title: title || t("remoteClient.tabTitle"),
+      tree: { type: "leaf", leafId: leaf.id },
+      leaves: { [leaf.id]: leaf },
+      activeLeafId: leaf.id,
+      lockTitle: true,
+    };
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
+  };
+
+  const onRemoteLeafConnected = (
+    tabId: number,
+    leafId: number,
+    info: { serverName: string; url: string }
+  ) => {
+    const tIdx = tabIndex(tabId);
+    if (tIdx === -1 || !tabs[tIdx].leaves[leafId]) return;
+    // Persist the address WITHOUT the one-time pairing secret.
+    setTabs(tIdx, "leaves", leafId, "remote", { url: info.url, serverName: info.serverName });
+    if (leafIds(tabs[tIdx].tree).length === 1) setTabs(tIdx, "title", info.serverName);
+  };
+
+  // --- Workspaces ---
+
+  const tildify = (p: string | null): string | null => {
+    if (!p) return null;
+    const rel = homeRelative(p, userHome());
+    return rel === null ? p : rel === "" ? "~" : "~/" + rel;
+  };
+
+  /** Snapshot of the open tabs as a workspace: layouts, cwds, titles — and,
+   *  as startup commands, whatever each pane is running right now (a dev
+   *  server, a queue worker…), so "save" captures the usual setup. */
+  /** What "save as workspace" captures: the active tab, or every tab. */
+  type WsScope = "tab" | "all";
+  const sessionToWorkspace = (name: string, scope: WsScope = "all"): Workspace => {
+    const toWs = (node: TreeNode, tab: TabState): WsNode => {
+      if (node.type === "leaf") {
+        const l = tab.leaves[node.leafId];
+        if (!l || l.remote) return {};
+        const last = l.blocks[l.blocks.length - 1];
+        const running =
+          last?.status === "running" && (last.command ?? "").trim()
+            ? last.command!.trim()
+            : null;
+        return { cwd: tildify(l.cwd), command: running };
+      }
+      return {
+        split: node.direction,
+        ratio: Math.round(node.ratio * 1000) / 1000,
+        children: node.children.map((c) => toWs(c, tab)),
+      };
+    };
+    return {
+      name,
+      tabs: (scope === "tab" ? tabs.filter((tab) => tab.id === activeId()) : tabs).map(
+        (tab) => ({
+          title: tab.lockTitle ? tab.title : null,
+          layout: toWs(tab.tree, tab),
+        })
+      ),
+    };
+  };
+
+  /** Open a workspace as new tabs. Startup commands only run when asked. */
+  const openWorkspace = async (ws: Workspace, withCommands: boolean) => {
+    const opened: TabState[] = [];
+    for (const wt of ws.tabs) {
+      const leaves: Record<number, LeafData> = {};
+      let count = 0;
+      let firstCwd: string | null = null;
+      const build = async (node: WsNode): Promise<TreeNode | null> => {
+        if (isSplit(node)) {
+          const kids = node.children.filter(Boolean);
+          if (kids.length === 0) return build({});
+          if (kids.length === 1) return build(kids[0]);
+          const first = await build(kids[0]);
+          const rest =
+            kids.length === 2
+              ? await build(kids[1])
+              : await build({ split: node.split, children: kids.slice(1) });
+          if (!first) return rest;
+          if (!rest) return first;
+          const ratio =
+            kids.length === 2 && typeof node.ratio === "number"
+              ? Math.min(0.9, Math.max(0.1, node.ratio))
+              : 1 / kids.length;
+          return makeSplit(node.split === "column" ? "column" : "row", first, rest, ratio);
+        }
+        if (count >= MAX_PANES_PER_TAB) return null;
+        count++;
+        const leaf = makeLeaf();
+        const cwd = node.cwd ? await expandPath(node.cwd).catch(() => node.cwd!) : null;
+        leaf.cwd = cwd;
+        firstCwd ??= cwd;
+        const cmd = (node.command ?? "").trim();
+        if (withCommands && cmd) leaf.pendingInput = cmd + "\r";
+        leaves[leaf.id] = leaf;
+        return { type: "leaf", leafId: leaf.id };
+      };
+      const tree = (await build(wt.layout)) ?? (await build({}))!;
+      const ids = leafIds(tree);
+      const fallbackTitle =
+        (firstCwd ?? "").split(/[\\/]/).filter(Boolean).pop() || ws.name;
+      opened.push({
+        id: nextTabId++,
+        title: wt.title || fallbackTitle,
+        tree,
+        leaves,
+        activeLeafId: ids[0],
+        lockTitle: !!wt.title,
+      });
+    }
+    if (!opened.length) return;
+    setTabs((prev) => [...prev, ...opened]);
+    setActiveId(opened[0].id);
+  };
+
+  /** Default "open" of a workspace, per the settings: run its commands,
+   *  ask first, or never run them. */
+  const [wsConfirm, setWsConfirm] = createSignal<Workspace | null>(null);
+  const openWorkspaceByPolicy = (ws: Workspace) => {
+    const mode = config.workspaces?.runCommands ?? "always";
+    if (mode === "never" || wsCommands(ws).length === 0) return void openWorkspace(ws, false);
+    if (mode === "ask") return void setWsConfirm(ws);
+    void openWorkspace(ws, true);
+  };
+
+  const posixQuote = (s: string) =>
+    /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+
+  /** Open a file in the user's editor, in a new tab (file-tree edit command). */
+  const editFileInNewTab = (title: string, path: string) => {
+    const tpl = config.fileTree.fileEdit || "${EDITOR:-nano} {path}";
+    // split/join, not replace(): a `$&` or `$'` in the path must stay literal.
+    openCommandInNewTab(title, tpl.split("{path}").join(posixQuote(path)));
   };
 
   // --- Inline tab rename ---
@@ -1765,6 +2093,8 @@ export default function Tabs() {
           startedAt: Date.now(),
         });
         commandRunStart.set(leafId, Date.now());
+        commandStartCtx.set(leafId, { cwd: leaf.cwd, branch: leaf.gitBranch ?? null });
+        if (leaf.sshLost) setTabs(tIdx, "leaves", leafId, "sshLost", null);
         break;
       }
       case "outputEnd": {
@@ -1790,6 +2120,31 @@ export default function Tabs() {
             }
           });
         }
+        // Rich history: the command + the context it ran in.
+        {
+          const l = tabs[tIdx].leaves[leafId];
+          const b = l?.blocks[lastIdx];
+          const cmd = (b?.command ?? "").trim();
+          const startCtx = commandStartCtx.get(leafId);
+          commandStartCtx.delete(leafId);
+          if (l && b && cmd) {
+            void historyAppend({
+              cmd: b.command!,
+              cwd: startCtx ? startCtx.cwd : l.cwd,
+              exit: ev.exitCode,
+              ts: b.startedAt,
+              dur: Date.now() - b.startedAt,
+              branch: startCtx ? startCtx.branch : l.gitBranch ?? null,
+            }).catch(() => {});
+            // An ssh/mosh session that dropped (ssh exits 255 on network
+            // errors): offer to reconnect in place.
+            if (ev.exitCode === 255 && isRemoteSessionCommand(cmd)) {
+              setTabs(tIdx, "leaves", leafId, "sshLost", cmd);
+            }
+          }
+          // The command may have switched branch (checkout, rebase…).
+          refreshGit(tabId, leafId);
+        }
         const runStart = commandRunStart.get(leafId);
         commandRunStart.delete(leafId);
         if (runStart) {
@@ -1806,12 +2161,40 @@ export default function Tabs() {
     }
   };
 
+  /** Re-read the git branch of a pane's cwd (cheap: reads .git/HEAD). */
+  const refreshGit = (tabId: number, leafId: number) => {
+    const tIdx = tabIndex(tabId);
+    const cwd = tabs[tIdx]?.leaves[leafId]?.cwd;
+    if (tIdx === -1 || !cwd || tabs[tIdx].leaves[leafId]?.remote) return;
+    gitInfo(cwd)
+      .then((g) => {
+        const i = tabIndex(tabId);
+        const l = tabs[i]?.leaves[leafId];
+        if (!l || l.cwd !== cwd) return; // moved on meanwhile
+        const branch = g?.branch ?? null;
+        if (l.gitBranch !== branch) setTabs(i, "leaves", leafId, "gitBranch", branch);
+      })
+      .catch(() => {});
+  };
+
+  /** Branch shown on a tab: its active pane's — hidden while that pane runs
+   *  an ssh session (the branch is the LOCAL one, misleading there). */
+  const tabBranch = (tab: TabState): string | null => {
+    if (config.behavior?.showGitBranch === false) return null;
+    const l = tab.leaves[tab.activeLeafId];
+    if (!l || l.remote || !l.gitBranch) return null;
+    const last = l.blocks[l.blocks.length - 1];
+    if (last?.status === "running" && isRemoteSessionCommand(last.command)) return null;
+    return l.gitBranch;
+  };
+
   const handleCwd = (tabId: number, leafId: number, cwd: string) => {
     const tIdx = tabIndex(tabId);
     if (tIdx === -1) return;
     // Always record each pane's cwd so the session can be restored to it.
     if (tabs[tIdx].leaves[leafId]) {
       setTabs(tIdx, "leaves", leafId, "cwd", cwd);
+      refreshGit(tabId, leafId);
     }
     // SSH tabs keep their host as title — don't overwrite with the local cwd.
     if (tabs[tIdx].lockTitle) return;
@@ -1887,7 +2270,11 @@ export default function Tabs() {
     },
     paletteAI: (e) => {
       e.preventDefault();
-      setPaletteOpen(true);
+      openPalette("");
+    },
+    history: (e) => {
+      e.preventDefault();
+      openPalette("!");
     },
     workflows: (e) => {
       e.preventDefault();
@@ -1917,6 +2304,413 @@ export default function Tabs() {
   const reverseBindings = createMemo(() =>
     comboToAction(resolveBindings(config.keybindings))
   );
+
+  // --- Command palette: every action, workspace, host, workflow, theme… ---
+
+  const [paletteData, setPaletteData] = createSignal<{
+    workspaces: Workspace[];
+    hosts: SshHost[];
+    workflows: Workflow[];
+    peers: RemotePeer[];
+    sshPrefs: Record<string, SshPrefs>;
+  }>({ workspaces: [], hosts: [], workflows: [], peers: [], sshPrefs: {} });
+  const reloadPaletteData = () =>
+    Promise.all([
+      listWorkspaces().catch(() => [] as Workspace[]),
+      listSshHosts().catch(() => [] as SshHost[]),
+      listWorkflows().catch(() => [] as Workflow[]),
+      remoteClientPeers().catch(() => [] as RemotePeer[]),
+    ]).then(([workspaces, hosts, workflows, peers]) =>
+      setPaletteData({ workspaces, hosts, workflows, peers, sshPrefs: sshPrefs() })
+    );
+  createEffect(() => {
+    if (paletteOpen() || wsMenuOpen()) void reloadPaletteData();
+  });
+
+  const bindingLabel = (id: ActionId) => {
+    const combo = resolveBindings(config.keybindings)[id];
+    return combo ? comboToLabel(combo) : undefined;
+  };
+
+  /** A host's options, with the settings' tmux default for hosts the user
+   *  never toggled. */
+  const effectiveSshPrefs = (prefs: SshPrefs | undefined): SshPrefs => ({
+    ...prefs,
+    tmux: prefs?.tmux ?? !!config.ssh?.tmuxByDefault,
+  });
+  const connectSsh = (target: string, prefs: SshPrefs) => {
+    const title = target.includes("@") ? target.split("@").pop() || target : target;
+    pushSshRecent(target);
+    openCommandInNewTab(
+      title,
+      sshCommand(target, effectiveSshPrefs(prefs), config.ssh?.tmuxSession || "lume")
+    );
+  };
+
+  const confirmPrompt = (
+    title: string,
+    expected: string,
+    action: () => Promise<void> | void
+  ): PromptRequest => ({
+    kind: "prompt",
+    title,
+    placeholder: expected,
+    onSubmit: async (v) => {
+      if (v.trim() !== expected) throw new Error(t("palette.confirmMismatch"));
+      await action();
+    },
+  });
+
+  /** An existing workspace with this name (saving again replaces it). */
+  const workspaceNamed = (name: string) =>
+    paletteData().workspaces.find(
+      (w) => w.name.trim().toLowerCase() === name.trim().toLowerCase()
+    );
+
+  const workspaceOps = {
+    save: async (name: string, scope: WsScope) => {
+      const existing = workspaceNamed(name);
+      await saveWorkspace(
+        { ...sessionToWorkspace(name.trim(), scope), description: existing?.description },
+        existing?.source ?? null
+      );
+      flashToast(t("palette.wsSaved", { name }));
+      await reloadPaletteData();
+    },
+    /** Replace with the current state, keeping the workspace's scope: a
+     *  one-tab workspace takes the active tab, a multi-tab one every tab. */
+    update: async (ws: Workspace) => {
+      await saveWorkspace(
+        {
+          ...sessionToWorkspace(ws.name, ws.tabs.length > 1 ? "all" : "tab"),
+          description: ws.description,
+        },
+        ws.source ?? null
+      );
+      flashToast(t("palette.wsSaved", { name: ws.name }));
+      void reloadPaletteData();
+    },
+    edit: async (ws: Workspace) =>
+      editFileInNewTab(ws.name, await workspaceFilePath(ws.source!)),
+    remove: async (ws: Workspace) => {
+      await deleteWorkspace(ws.source!);
+      void reloadPaletteData();
+    },
+  };
+
+  const paletteItems = createMemo<PaletteItem[]>(() => {
+    if (!paletteOpen()) return [];
+    const d = paletteData();
+    const G = {
+      term: t("palette.groupTerminal"),
+      ws: t("palette.groupWorkspace"),
+      hist: t("palette.groupHistory"),
+      ssh: "SSH",
+      wf: t("palette.groupWorkflow"),
+      remote: t("palette.groupRemote"),
+      ai: t("palette.groupAi"),
+      look: t("palette.groupAppearance"),
+      lume: "Lume",
+    };
+    const items: PaletteItem[] = [];
+    const add = (it: PaletteItem) => items.push(it);
+
+    // --- Terminal ---
+    add({ id: "newTab", group: G.term, title: t("keys.action.newTab"), hint: bindingLabel("newTab"), icon: <IconPlus size={13} />, run: () => addTab() });
+    add({ id: "splitH", group: G.term, title: t("keys.action.splitH"), hint: bindingLabel("splitH"), icon: <IconSplitH size={13} />, run: () => splitActivePane("row") });
+    add({ id: "splitV", group: G.term, title: t("keys.action.splitV"), hint: bindingLabel("splitV"), icon: <IconSplitV size={13} />, run: () => splitActivePane("column") });
+    add({ id: "closePane", group: G.term, title: t("palette.closePane"), hint: bindingLabel("closeTab"), icon: <IconX size={13} />, run: () => closeActivePane() });
+    const layouts: [LayoutKind, string][] = [
+      ["single", "layouts.single"],
+      ["sideBySide", "layouts.twoCols"],
+      ["stacked", "layouts.twoRows"],
+      ["grid2x2", "layouts.grid"],
+      ["mainPlusSide", "layouts.mainSide"],
+      ["tripleColumn", "layouts.tripleCol"],
+    ];
+    add({
+      id: "layouts",
+      group: G.term,
+      title: t("palette.layoutMenu"),
+      icon: <IconLayouts size={13} />,
+      children: () =>
+        layouts.map(([kind, key]) => ({
+          id: `layout:${kind}`,
+          group: G.term,
+          title: t(key),
+          icon: <IconLayouts size={13} />,
+          run: () => applyLayout(kind),
+        })),
+    });
+    add({
+      id: "termSearch",
+      group: G.term,
+      title: t("keys.action.termSearch"),
+      hint: bindingLabel("termSearch"),
+      icon: <IconSearch size={13} />,
+      run: () => {
+        const l = activeLeaf();
+        if (l) queueMicrotask(() => leafSearchFns.get(l.id)?.());
+      },
+    });
+
+    // --- Workspaces: one row per workspace to open; management in a submenu ---
+    for (const ws of d.workspaces) {
+      const cmds = wsCommands(ws);
+      add({
+        id: `ws:${ws.source}`,
+        group: G.ws,
+        title: ws.name,
+        subtitle:
+          t("palette.wsTabs", { n: ws.tabs.length }) +
+          (cmds.length ? `  ·  ${cmds.join("  ·  ")}` : ""),
+        keywords: `${t("palette.wsOpenKw")} ${ws.description ?? ""}`,
+        icon: <IconWorkspace size={13} />,
+        run: () => openWorkspaceByPolicy(ws),
+        altRun: cmds.length ? () => openWorkspace(ws, false) : undefined,
+        altHint: cmds.length ? t("palette.wsNoCommands") : undefined,
+      });
+    }
+    const savePrompt = (scope: WsScope, title: string): PromptRequest => ({
+      kind: "prompt",
+      title,
+      placeholder: t("palette.wsNamePlaceholder"),
+      onSubmit: (name) => workspaceOps.save(name, scope),
+    });
+    add({
+      id: "ws:saveTab",
+      group: G.ws,
+      title: t("palette.wsSaveTab"),
+      subtitle: t("palette.wsSaveSub"),
+      icon: <IconPlus size={13} />,
+      run: () => savePrompt("tab", t("palette.wsSaveTab")),
+    });
+    if (tabs.length > 1) {
+      add({
+        id: "ws:saveAll",
+        group: G.ws,
+        title: t("palette.wsSaveAll", { n: tabs.length }),
+        icon: <IconPlus size={13} />,
+        run: () => savePrompt("all", t("palette.wsSaveAll", { n: tabs.length })),
+      });
+    }
+    if (d.workspaces.length) {
+      add({
+        id: "ws:manage",
+        group: G.ws,
+        title: t("palette.wsManage"),
+        icon: <IconPencil size={13} />,
+        children: () =>
+          d.workspaces.map((ws) => ({
+            id: `ws:m:${ws.source}`,
+            group: G.ws,
+            title: ws.name,
+            icon: <IconWorkspace size={13} />,
+            children: () => [
+              { id: `ws:update:${ws.source}`, group: G.ws, title: t("palette.wsUpdateShort"), icon: <IconRefresh size={13} />, run: () => workspaceOps.update(ws) },
+              { id: `ws:edit:${ws.source}`, group: G.ws, title: t("palette.wsEditShort"), icon: <IconPencil size={13} />, run: () => workspaceOps.edit(ws) },
+              {
+                id: `ws:delete:${ws.source}`,
+                group: G.ws,
+                title: t("palette.wsDeleteShort"),
+                danger: true,
+                icon: <IconX size={13} />,
+                run: () =>
+                  confirmPrompt(t("palette.wsDeleteConfirm", { name: ws.name }), ws.name, () =>
+                    workspaceOps.remove(ws)
+                  ),
+              },
+            ],
+          })),
+      });
+    }
+
+    // --- History ---
+    add({ id: "hist", group: G.hist, title: t("palette.histSearch"), hint: bindingLabel("history"), icon: <IconHistory size={13} />, run: () => ({ kind: "query", value: "!" }) });
+    add({ id: "hist:failed", group: G.hist, title: t("palette.histFailed"), icon: <IconHistory size={13} />, run: () => ({ kind: "query", value: "! failed " }) });
+    add({ id: "hist:here", group: G.hist, title: t("palette.histHere"), icon: <IconHistory size={13} />, run: () => ({ kind: "query", value: "! here " }) });
+    const branch = activeLeaf()?.gitBranch;
+    if (branch) {
+      add({ id: "hist:branch", group: G.hist, title: t("palette.histBranch", { branch }), icon: <IconBranch size={13} />, run: () => ({ kind: "query", value: `! branch:${branch} ` }) });
+    }
+
+    // --- SSH: favorites + recents up front, every host in a submenu ---
+    const hostItem = (h: SshHost): PaletteItem => {
+      const prefs = effectiveSshPrefs(d.sshPrefs[h.name]);
+      return {
+        id: `ssh:${h.name}`,
+        group: G.ssh,
+        title: h.name,
+        subtitle: [
+          h.user ? `${h.user}@${h.hostName ?? h.name}` : h.hostName ?? "",
+          prefs.mosh ? "mosh" : "",
+          prefs.tmux ? "tmux" : "",
+        ]
+          .filter(Boolean)
+          .join("  ·  "),
+        icon: <IconSsh size={13} />,
+        run: () => connectSsh(h.name, prefs),
+      };
+    };
+    const favs = sshFavorites();
+    const recents = sshRecents();
+    const quick = d.hosts
+      .filter((h) => favs.includes(h.name) || recents.includes(h.name))
+      .sort((a, b) => {
+        const r = (h: SshHost) =>
+          favs.includes(h.name) ? favs.indexOf(h.name) : 100 + recents.indexOf(h.name);
+        return r(a) - r(b);
+      })
+      .slice(0, 4);
+    for (const h of quick) add({ ...hostItem(h), id: `sshq:${h.name}` });
+    if (d.hosts.length) {
+      add({
+        id: "ssh:all",
+        group: G.ssh,
+        title: t("palette.sshAll", { n: d.hosts.length }),
+        icon: <IconSsh size={13} />,
+        children: () => d.hosts.map(hostItem),
+      });
+    }
+    add({ id: "ssh", group: G.ssh, title: t("palette.sshManager"), hint: bindingLabel("ssh"), icon: <IconSsh size={13} />, run: () => { setSshOpen(true); } });
+
+    // --- Workflows ---
+    if (d.workflows.length) {
+      add({
+        id: "wf:all",
+        group: G.wf,
+        title: t("palette.wfRun", { n: d.workflows.length }),
+        icon: <IconWorkflow size={13} />,
+        children: () =>
+          d.workflows.map((w) => ({
+            id: `wf:${w.source}`,
+            group: G.wf,
+            title: w.name,
+            subtitle: w.command,
+            keywords: `${w.description ?? ""} ${w.tags.join(" ")}`,
+            icon: <IconWorkflow size={13} />,
+            run: () => {
+              setWorkflowPreselect(w.source);
+              setWorkflowsOpen(true);
+            },
+          })),
+      });
+    }
+    add({ id: "wf", group: G.wf, title: t("palette.workflows"), hint: bindingLabel("workflows"), icon: <IconWorkflow size={13} />, run: () => { setWorkflowPreselect(null); setWorkflowsOpen(true); } });
+
+    // --- Remote: this Lume as a server, then as a client of other Lumes ---
+    const running = !!remoteInfo()?.running;
+    add({
+      id: "remote",
+      group: G.remote,
+      title: running ? t("palette.remoteShow") : t("palette.remoteStart"),
+      icon: <IconSmartphone size={13} />,
+      run: () => {
+        if (running) setRemoteDialogOpen(true);
+        else void startRemoteControl();
+      },
+    });
+    if (running) {
+      add({ id: "remote:pair", group: G.remote, title: t("palette.remotePair"), icon: <IconSmartphone size={13} />, run: async () => { setRemoteInfo(await remoteNewPairing()); setRemoteDialogOpen(true); } });
+      add({ id: "remote:stop", group: G.remote, title: t("remote.stop"), danger: true, icon: <IconX size={13} />, run: () => stopRemoteControl() });
+    }
+    // Terminals of the remote Lume shown in the active pane.
+    const al = activeLeaf();
+    const rt = al?.remote && al.ptyId !== null ? remoteClientTabs()[al.ptyId] : undefined;
+    if (al && rt) {
+      add({
+        id: "lume:terminals",
+        group: G.remote,
+        title: t("palette.lumeTerminals", { name: rt.serverName }),
+        icon: <IconRemote size={13} />,
+        children: () => [
+          ...rt.items
+            .filter((it) => it.id !== rt.active)
+            .map((it) => ({
+              id: `lume:switch:${it.id}`,
+              group: G.remote,
+              title: t("palette.lumeSwitch", { title: it.title }),
+              icon: <IconRemote size={13} />,
+              run: () => void remoteClientSwitch(al.ptyId!, it.id),
+            })),
+          { id: "lume:newtab", group: G.remote, title: t("palette.lumeNewTab"), icon: <IconPlus size={13} />, run: () => void remoteClientNewTab(al.ptyId!) },
+        ],
+      });
+    }
+    for (const p of d.peers) {
+      add({ id: `lume:peer:${p.serverId}`, group: G.remote, title: t("palette.lumeOpen", { name: p.serverName }), subtitle: p.url, icon: <IconRemote size={13} />, run: () => openRemoteLume(p.url, p.serverName) });
+    }
+    add({
+      id: "lume:connect",
+      group: G.remote,
+      title: t("palette.lumeConnect"),
+      subtitle: t("palette.lumeConnectSub"),
+      icon: <IconRemote size={13} />,
+      run: (): PromptRequest => ({
+        kind: "prompt",
+        title: t("palette.lumeConnect"),
+        placeholder: "http://192.168.1.10:4530/#p=…",
+        onSubmit: (url) => openRemoteLume(url),
+      }),
+    });
+
+    // --- AI ---
+    add({ id: "ai", group: G.ai, title: t("palette.aiAsk"), icon: <IconSparkles size={13} />, run: () => ({ kind: "query", value: "? " }) });
+
+    // --- Appearance ---
+    add({
+      id: "themes",
+      group: G.look,
+      title: t("palette.themeMenu"),
+      icon: <IconTheme size={13} />,
+      children: () =>
+        THEME_PRESETS.map((preset) => ({
+          id: `theme:${preset.name}`,
+          group: G.look,
+          title: preset.name,
+          icon: <IconTheme size={13} />,
+          run: () => {
+            setConfig("appearance", "theme", { ...preset.theme });
+            persistConfig();
+          },
+        })),
+    });
+    add({ id: "fileTree", group: G.look, title: t("palette.toggleFileTree"), icon: <IconFolder size={13} />, run: () => { setFileTreeVisible(!fileTreeVisible()); } });
+    add({ id: "blocks", group: G.look, title: t("keys.action.togglePanel"), hint: bindingLabel("togglePanel"), icon: <IconBlocks size={13} />, run: () => { setPanelVisible(!panelVisible()); } });
+
+    // --- Lume ---
+    add({ id: "settings", group: G.lume, title: t("keys.action.settings"), hint: bindingLabel("settings"), icon: <IconSettings size={13} />, run: () => { setSettingsOpen(true); } });
+    add({
+      id: "lume:forget",
+      group: G.lume,
+      title: t("palette.maintenance"),
+      icon: <IconX size={13} />,
+      children: () => [
+        {
+          id: "hist:clear",
+          group: G.lume,
+          title: t("palette.histClear"),
+          danger: true,
+          run: () =>
+            confirmPrompt(t("palette.histClearConfirm"), t("palette.histClearWord"), async () => {
+              await historyClear();
+              flashToast(t("palette.histCleared"));
+            }),
+        },
+        ...d.peers.map((p) => ({
+          id: `lume:forget:${p.serverId}`,
+          group: G.lume,
+          title: t("palette.lumeForget", { name: p.serverName }),
+          danger: true,
+          run: () =>
+            confirmPrompt(t("palette.lumeForgetConfirm", { name: p.serverName }), p.serverName, () =>
+              remoteClientForget(p.serverId)
+            ),
+        })),
+      ],
+    });
+    return items;
+  });
 
   /** Assign a combo to an action, clearing it from any other action first. */
   const applyBinding = (id: ActionId, combo: string) => {
@@ -1973,6 +2767,19 @@ export default function Tabs() {
       e.stopImmediatePropagation();
       if (e.key === "Escape") setCloseConfirm(null);
       else if (e.key === "Enter") confirmClose();
+      return;
+    }
+
+    // Same for the "run this workspace's commands?" question.
+    const pendingWs = wsConfirm();
+    if (pendingWs) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape") setWsConfirm(null);
+      else if (e.key === "Enter") {
+        setWsConfirm(null);
+        void openWorkspace(pendingWs, !e.shiftKey);
+      }
       return;
     }
 
@@ -2119,6 +2926,8 @@ export default function Tabs() {
   let unlistenAiError: UnlistenFn | undefined;
   let unlistenUsage: UnlistenFn | undefined;
   let unlistenRemoteNewTab: UnlistenFn | undefined;
+  let unlistenRemotePaired: UnlistenFn | undefined;
+  let unlistenRemoteClientTabs: UnlistenFn | undefined;
 
   onMount(async () => {
     window.addEventListener("keydown", onKeyDown, true);
@@ -2132,11 +2941,20 @@ export default function Tabs() {
       unlistenAiError?.();
       unlistenUsage?.();
       unlistenRemoteNewTab?.();
+      unlistenRemotePaired?.();
+      unlistenRemoteClientTabs?.();
     });
 
-    unlistenRemoteNewTab = await listen("remote:new-tab", () =>
-      addTabFromRemote()
+    unlistenRemoteNewTab = await listen<{ conn?: number }>("remote:new-tab", (e) =>
+      addTabFromRemote(typeof e.payload?.conn === "number" ? e.payload.conn : null)
     );
+    unlistenRemotePaired = await listen<{ name?: string }>("remote:paired", (e) => {
+      flashToast(t("remote.pairedToast", { name: e.payload?.name ?? "?" }));
+      void refreshRemote();
+    });
+    unlistenRemoteClientTabs = await listen<RemoteClientTabs>("remote-client:tabs", (e) => {
+      setRemoteClientTabs((m) => ({ ...m, [e.payload.id]: e.payload }));
+    });
 
     unlistenAiChunk = await listen<AiChunkEvent>("ai:chunk", (e) => {
       const loc = findBlockByRequest(e.payload.requestId);
@@ -2240,6 +3058,7 @@ export default function Tabs() {
         leaves: leafIds(t.tree).map((lid) => ({
           id: lid,
           cwd: t.leaves[lid]?.cwd ?? null,
+          remote: t.leaves[lid]?.remote ?? null,
         })),
       })),
     };
@@ -2273,6 +3092,53 @@ export default function Tabs() {
   window.addEventListener("beforeunload", saveSessionNow);
   onCleanup(() => window.removeEventListener("beforeunload", saveSessionNow));
 
+  // Recent blocks per pane, saved separately (and less often) than the
+  // session layout: they only change at command boundaries.
+  const serializeBlocks = (): Record<string, PersistedBlock[]> => {
+    const out: Record<string, PersistedBlock[]> = {};
+    for (const tab of tabs) {
+      for (const lid of leafIds(tab.tree)) {
+        const l = tab.leaves[lid];
+        if (!l || l.remote) continue;
+        const done = l.blocks.filter((b) => hasCommand(b) && b.status === "done");
+        if (!done.length) continue;
+        out[String(lid)] = done.slice(-PERSIST_BLOCKS_PER_LEAF).map((b) => ({
+          c: b.command!,
+          o: b.output ? b.output.slice(-PERSIST_OUTPUT_CHARS) : null,
+          s: b.startedAt,
+          f: b.finishedAt,
+          x: b.exitCode,
+        }));
+      }
+    }
+    return out;
+  };
+  const saveBlocksNow = () => {
+    try {
+      if (config.behavior?.persistBlocks === false) localStorage.removeItem(BLOCKS_KEY);
+      else localStorage.setItem(BLOCKS_KEY, JSON.stringify(serializeBlocks()));
+    } catch {}
+  };
+  let blocksSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  createEffect(() => {
+    // Track block count + last status of every pane (not the outputs).
+    config.behavior?.persistBlocks;
+    for (const tab of tabs) {
+      for (const key of Object.keys(tab.leaves)) {
+        const l = tab.leaves[Number(key)];
+        l.blocks.length;
+        l.blocks[l.blocks.length - 1]?.status;
+      }
+    }
+    if (blocksSaveTimer) clearTimeout(blocksSaveTimer);
+    blocksSaveTimer = setTimeout(() => {
+      blocksSaveTimer = null;
+      saveBlocksNow();
+    }, 1500);
+  });
+  window.addEventListener("beforeunload", saveBlocksNow);
+  onCleanup(() => window.removeEventListener("beforeunload", saveBlocksNow));
+
   return (
     <Show
       when={configReady()}
@@ -2292,6 +3158,7 @@ export default function Tabs() {
               </button>
             </div>
             <div class="tab-list-wrap">
+              <div class="tab-list-scroll">
               <Show when={tabScroll().left}>
                 <button
                   class="tab-scroll-btn left"
@@ -2395,7 +3262,23 @@ export default function Tabs() {
                   <span class="tab-index">{idx() + 1}</span>
                   <Show
                     when={editingTabId() === tab.id}
-                    fallback={<span class="tab-title">{tab.title}</span>}
+                    fallback={
+                      <>
+                        <Show when={tab.leaves[tab.activeLeafId]?.remote}>
+                          <span class="tab-remote" title={t("remoteClient.tabHint")}>
+                            <IconRemote size={11} />
+                          </span>
+                        </Show>
+                        <span class="tab-title">{tab.title}</span>
+                        <Show when={tabBranch(tab)}>
+                          {(b) => (
+                            <span class="tab-branch" title={t("tab.branch", { branch: b() })}>
+                              ⎇ {b()}
+                            </span>
+                          )}
+                        </Show>
+                      </>
+                    }
                   >
                     <input
                       class="tab-title-input"
@@ -2445,13 +3328,7 @@ export default function Tabs() {
                 </div>
               )}
             </For>
-            <button
-              class="tab-new"
-              title={t("toolbar.newTab")}
-              onClick={addTab}
-            >
-              <IconPlus size={13} />
-            </button>
+
               </div>
               <Show when={tabScroll().right}>
                 <button
@@ -2462,6 +3339,29 @@ export default function Tabs() {
                   <IconChevronRight size={14} />
                 </button>
               </Show>
+              </div>
+              {/* Outside the scrolling strip: always reachable, however
+                  many tabs are open. */}
+              <div class="tab-new-group">
+            <button
+              class="tab-new"
+              title={t("toolbar.newTab")}
+              onClick={addTab}
+            >
+              <IconPlus size={14} />
+            </button>
+            <button
+              class="tab-ws-toggle"
+              classList={{ active: wsMenuOpen() }}
+              title={t("wsMenu.toggle")}
+              onClick={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setWsMenuAnchor(wsMenuOpen() ? null : r);
+              }}
+            >
+              <IconChevronDown size={12} />
+            </button>
+              </div>
             </div>
             <div class="tab-actions">
               <UsagePill provider={() => ai()?.provider ?? ""} />
@@ -2862,6 +3762,13 @@ export default function Tabs() {
                                   // Unguarded: the shell is already gone, and a
                                   // block left stuck on `running` (no 133;D on
                                   // the way out) must not strand the pane.
+                                  // A Lume ↔ Lume pane stays open: its last
+                                  // lines say why it ended (revoked, closed…).
+                                  const idx = tabIndex(tab.id);
+                                  if (tabs[idx]?.leaves[leafId]?.remote) {
+                                    setTabs(idx, "leaves", leafId, "ptyId", null);
+                                    return;
+                                  }
                                   closeLeafNow(tab.id, leafId);
                                 }}
                                 onBlock={(ev) =>
@@ -2919,6 +3826,23 @@ export default function Tabs() {
                                 multiPane={() =>
                                   Object.keys(tab.leaves).length > 1
                                 }
+                                onRemoteConnected={(info) =>
+                                  onRemoteLeafConnected(tab.id, leafId, info)
+                                }
+                                onSshReconnect={() => {
+                                  const idx = tabIndex(tab.id);
+                                  const l = tabs[idx]?.leaves[leafId];
+                                  if (!l?.sshLost || l.ptyId === null) return;
+                                  const cmd = l.sshLost;
+                                  setTabs(idx, "leaves", leafId, "sshLost", null);
+                                  ptyWriteText(l.ptyId, cmd + "\r");
+                                  leafFocusFns.get(leafId)?.();
+                                }}
+                                onSshDismiss={() => {
+                                  const idx = tabIndex(tab.id);
+                                  if (idx !== -1)
+                                    setTabs(idx, "leaves", leafId, "sshLost", null);
+                                }}
                               />
                             </Show>
                           );
@@ -2929,21 +3853,27 @@ export default function Tabs() {
                 )}
               </For>
             </div>
-            <CommandPalette
+            <Palette
               open={paletteOpen}
-              onClose={() => setPaletteOpen(false)}
+              initialQuery={paletteInitial}
+              onClose={() => {
+                setPaletteOpen(false);
+                focusActiveTerminal();
+              }}
+              items={paletteItems}
               aiAvailable={() => ai()?.available ?? false}
               aiCommand={() => ai()?.command ?? ""}
               ptyId={() => activeLeaf()?.ptyId ?? null}
-              onInsert={async (cmd) => {
-                await insertIntoActiveTerminal(cmd);
-                setPaletteOpen(false);
-              }}
+              cwd={() => (activeLeaf()?.remote ? null : activeLeaf()?.cwd ?? null)}
+              home={userHome}
+              onInsert={(cmd, execute) => void insertIntoActiveTerminal(cmd, execute)}
             />
             <WorkflowsPalette
               open={workflowsOpen}
+              preselect={workflowPreselect}
               onClose={() => {
                 setWorkflowsOpen(false);
+                setWorkflowPreselect(null);
                 focusActiveTerminal();
               }}
               onInsert={(cmd) => insertIntoActiveTerminal(cmd)}
@@ -2961,12 +3891,8 @@ export default function Tabs() {
             <SshPalette
               open={sshOpen}
               onClose={() => setSshOpen(false)}
-              onConnect={(target) => {
-                const title = target.includes("@")
-                  ? target.split("@").pop() || target
-                  : target;
-                openCommandInNewTab(title, sshCommand(target));
-              }}
+              onConnect={(target, prefs) => connectSsh(target, prefs)}
+              tmuxDefault={() => !!config.ssh?.tmuxByDefault}
             />
             <BlocksPanel
               blocks={visibleBlocks}
@@ -3006,6 +3932,8 @@ export default function Tabs() {
                 const l = activeLeaf();
                 if (t && l) explainBlock(t.id, l.id, blockId);
               }}
+              aiContext={aiContext}
+              onAiContextChange={setAiContext}
               onCancelAi={(blockId) => {
                 const t = activeTab();
                 const l = activeLeaf();
@@ -3039,8 +3967,89 @@ export default function Tabs() {
               info={remoteInfo}
               installing={remoteInstalling}
               onEnableTunnel={enableTunnel}
+              onNewPairing={async () => {
+                try {
+                  setRemoteInfo(await remoteNewPairing());
+                } catch {}
+              }}
+              onRevoke={async (id) => {
+                try {
+                  setRemoteInfo(await remoteRevokeDevice(id));
+                } catch (e) {
+                  console.error("revoke", e);
+                }
+              }}
               onStop={stopRemoteControl}
               onClose={() => setRemoteDialogOpen(false)}
+            />
+            <Show when={wsConfirm()}>
+              {(ws) => (
+                <div class="palette-overlay" onClick={() => setWsConfirm(null)}>
+                  <div
+                    class="palette confirm-dialog"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div class="confirm-head">
+                      <span class="confirm-icon">
+                        <IconWorkspace size={16} />
+                      </span>
+                      <span class="confirm-title">{t("wsConfirm.title", { name: ws().name })}</span>
+                    </div>
+                    <div class="confirm-body">
+                      <p class="confirm-text">{t("wsConfirm.body")}</p>
+                      <ul class="confirm-cmds">
+                        <For each={wsCommands(ws())}>
+                          {(c) => (
+                            <li class="confirm-cmd">
+                              <code>{c}</code>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                    <div class="palette-footer">
+                      <span class="palette-hint" innerHTML={t("wsConfirm.hint")} />
+                      <div class="palette-actions">
+                        <button
+                          class="palette-btn ghost"
+                          onClick={() => {
+                            const w = ws();
+                            setWsConfirm(null);
+                            void openWorkspace(w, false);
+                          }}
+                        >
+                          {t("wsConfirm.without")}
+                        </button>
+                        <button
+                          class="palette-btn primary"
+                          onClick={() => {
+                            const w = ws();
+                            setWsConfirm(null);
+                            void openWorkspace(w, true);
+                          }}
+                        >
+                          {t("wsConfirm.run")}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Show>
+            <WorkspaceMenu
+              open={wsMenuOpen}
+              anchor={wsMenuAnchor}
+              workspaces={() => paletteData().workspaces}
+              onClose={() => setWsMenuAnchor(null)}
+              onOpen={(ws, withCommands) =>
+                withCommands ? openWorkspaceByPolicy(ws) : void openWorkspace(ws, false)
+              }
+              onSave={workspaceOps.save}
+              tabCount={() => tabs.length}
+              existingName={(name) => workspaceNamed(name)?.name ?? null}
+              onUpdate={workspaceOps.update}
+              onEdit={(ws) => void workspaceOps.edit(ws)}
+              onDelete={workspaceOps.remove}
             />
             <CloseConfirm
               target={closeConfirm}

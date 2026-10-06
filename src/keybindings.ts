@@ -33,6 +33,7 @@ export type ActionId =
   | "search"
   | "termSearch"
   | "paletteAI"
+  | "history"
   | "workflows"
   | "ssh"
   | "copy"
@@ -54,6 +55,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "search", label: "keys.action.search", default: "Ctrl+f" },
   { id: "termSearch", label: "keys.action.termSearch", default: "Ctrl+Shift+f" },
   { id: "paletteAI", label: "keys.action.paletteAI", default: "Ctrl+Shift+p" },
+  { id: "history", label: "keys.action.history", default: "Ctrl+Shift+h" },
   { id: "workflows", label: "keys.action.workflows", default: "Ctrl+Shift+r" },
   { id: "ssh", label: "keys.action.ssh", default: "Ctrl+Shift+s" },
   { id: "copy", label: "keys.action.copy", default: "Ctrl+Shift+c" },

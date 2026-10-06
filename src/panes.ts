@@ -12,6 +12,14 @@ export type LeafData = {
   /** Last-known working directory (OSC 7). Persisted so the pane reopens in the
    *  same place after a Lume restart. Also used as the spawn cwd on restore. */
   cwd: string | null;
+  /** Lume ↔ Lume: this pane shows a terminal of another Lume at `url`
+   *  (address without pairing secret once connected). Persisted, so the pane
+   *  reconnects on restore. */
+  remote?: { url: string; serverName?: string } | null;
+  /** Current git branch of `cwd` (null outside a repo). */
+  gitBranch?: string | null;
+  /** Command line of the last block (for the "ssh lost" reconnect offer). */
+  sshLost?: string | null;
 };
 
 export type TreeNode =
@@ -40,7 +48,11 @@ export function makeLeaf(): LeafData {
 }
 
 /** Build a leaf with a specific id (used when restoring a persisted session). */
-export function makeLeafWithId(id: number, cwd: string | null): LeafData {
+export function makeLeafWithId(
+  id: number,
+  cwd: string | null,
+  remote: LeafData["remote"] = null
+): LeafData {
   return {
     id,
     ptyId: null,
@@ -49,6 +61,7 @@ export function makeLeafWithId(id: number, cwd: string | null): LeafData {
     selectedBlockId: null,
     pendingInput: null,
     cwd,
+    remote,
   };
 }
 

@@ -24,41 +24,31 @@ import {
   IconChevronRight,
   IconDownload,
   IconFolder,
+  IconHistory,
   IconInfo,
   IconKeyboard,
   IconRefresh,
+  IconRemote,
   IconSettings,
+  IconSmartphone,
   IconSparkles,
   IconSsh,
+  IconWorkspace,
   IconX,
 } from "./icons";
+import {
+  HistorySection,
+  RemoteSection,
+  SshSection,
+  WorkspacesSection,
+} from "./SettingsSections";
+import Toggle from "./Toggle";
 import {
   ACTIONS,
   comboToLabel,
   resolveBindings,
   type ActionId,
 } from "./keybindings";
-
-/** A small on/off pill switch, used in place of native checkboxes. */
-function Toggle(props: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={props.checked}
-      class="settings-toggle"
-      classList={{ on: props.checked }}
-      disabled={props.disabled}
-      onClick={() => props.onChange(!props.checked)}
-    >
-      <span class="settings-toggle-knob" />
-    </button>
-  );
-}
 
 type Props = {
   open: () => boolean;
@@ -79,6 +69,10 @@ type Section =
   | "notifications"
   | "ai"
   | "fileTree"
+  | "remote"
+  | "history"
+  | "workspaces"
+  | "ssh"
   | "keys"
   | "general"
   | "about";
@@ -364,6 +358,38 @@ export default function Settings(props: Props) {
             >
               <IconFolder size={15} />
               <span>{t("nav.fileTree")}</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "remote" }}
+              onClick={() => setSection("remote")}
+            >
+              <IconSmartphone size={15} />
+              <span>{t("nav.remote")}</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "history" }}
+              onClick={() => setSection("history")}
+            >
+              <IconHistory size={15} />
+              <span>{t("nav.history")}</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "workspaces" }}
+              onClick={() => setSection("workspaces")}
+            >
+              <IconWorkspace size={15} />
+              <span>{t("nav.workspaces")}</span>
+            </button>
+            <button
+              class="settings-nav"
+              classList={{ active: section() === "ssh" }}
+              onClick={() => setSection("ssh")}
+            >
+              <IconRemote size={15} />
+              <span>{t("nav.ssh")}</span>
             </button>
             <button
               class="settings-nav"
@@ -986,6 +1012,19 @@ export default function Settings(props: Props) {
               </div>
             </Show>
 
+            <Show when={section() === "remote"}>
+              <RemoteSection config={props.config} setConfig={props.setConfig} onChange={props.onChange} />
+            </Show>
+            <Show when={section() === "history"}>
+              <HistorySection config={props.config} setConfig={props.setConfig} onChange={props.onChange} />
+            </Show>
+            <Show when={section() === "workspaces"}>
+              <WorkspacesSection config={props.config} setConfig={props.setConfig} onChange={props.onChange} />
+            </Show>
+            <Show when={section() === "ssh"}>
+              <SshSection config={props.config} setConfig={props.setConfig} onChange={props.onChange} />
+            </Show>
+
             <Show when={section() === "keys"}>
               <div class="settings-section">
                 <p class="settings-note" innerHTML={t("keys.hint")} />
@@ -1063,6 +1102,17 @@ export default function Settings(props: Props) {
                 <p class="settings-note">
                   {t("general.focusFollowsMouseNote")}
                 </p>
+
+                <div class="settings-row">
+                  <span class="settings-label">{t("general.showGitBranch")}</span>
+                  <Toggle
+                    checked={props.config.behavior.showGitBranch !== false}
+                    onChange={(v) => {
+                      props.setConfig("behavior", "showGitBranch", v);
+                      props.onChange();
+                    }}
+                  />
+                </div>
 
                 <div class="settings-subtitle">{t("general.backup")}</div>
                 <div class="settings-row">

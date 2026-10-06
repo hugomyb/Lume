@@ -40,21 +40,43 @@ Built with **Rust + Tauri 2 + SolidJS + xterm.js**: a few-MB native binary,
 
 ## Features
 
-- **Remote control** — drive your terminals from your phone or another PC, on the
-  LAN or over the internet (cloudflared quick tunnel), with QR pairing. The mobile
-  page has a Termux-style key row, live directory completion, swipe-to-move-cursor,
-  and a tab bar to switch/create terminals.
+New to Lume? The **[user guide](docs/guide.md)** shows how to use each feature.
+
+- **Remote control** — drive your terminals from your phone, a browser or
+  **another Lume**, on the LAN or over the internet (cloudflared quick tunnel).
+  Devices pair once with a single-use QR code, can be revoked one by one, and
+  the session is **end-to-end encrypted** (neither the LAN nor the tunnel sees
+  it). The mobile page has a Termux-style key row, live directory completion,
+  swipe-to-move-cursor, and a tab bar to switch/create terminals; a Lume ↔ Lume
+  pane reconnects by itself after a network drop or a restart. Internet tunnel
+  optional (LAN only if you prefer).
+- **Command palette** (`Ctrl+Shift+P`) — every action, workspace, SSH host,
+  workflow and theme in one searchable list, organised in sections with
+  sub-lists and recent actions; `!` searches the history, `?` asks the AI for a
+  command.
 - **Command blocks** — each command + its output is an isolated, navigable block
   (via shell integration / OSC 133), with exit-code badges, copy, rerun.
-- **Inline AI** — explain a block or generate a command from natural language.
-  Multiple providers: the local **Claude** or **Codex** CLI, or any
+- **Inline AI** — explain a block or generate a command from natural language,
+  with opt-in extra context (folder, branch, previous block). Multiple providers: the local **Claude** or **Codex** CLI, or any
   **OpenAI-compatible API** (OpenAI, DeepSeek, Ollama…). Pick per provider model.
 - **Panes & tabs** — splits, drag-and-drop rearrange, layout presets, full
-  session persistence (tabs, panes, sizes, working dirs).
+  session persistence (tabs, panes, sizes, working dirs, recent blocks), and the
+  current git branch on each tab.
+- **Workspaces** — save the current tab (or all of them) as a named workspace
+  from the `▾` next to the `+`, and reopen it in one click: layout, folders and
+  startup commands such as `npm run dev` (run, ask first, or never — your
+  choice). Plain YAML files you can share and version.
+- **Rich history** (`Ctrl+Shift+H`) — every command with its folder, exit code,
+  duration and git branch; filter with `failed`, `here`, `project:…`,
+  `branch:…`. Stored locally in a plain JSONL file, with "never record"
+  patterns for secrets.
+- **SSH manager** — hosts from `~/.ssh/config` (including `Include`s), favorites,
+  per-host tmux re-attach or mosh, and a one-click reconnect when a session drops.
+- **Workflows** — parameterized command snippets (Warp-compatible YAML).
 - **Autocomplete** — inline suggestions from history, files, aliases, commands.
 - **File tree sidebar** that follows the active pane's directory, with
   customizable right-click commands.
-- **Themes & fonts** — 9 built-in themes, custom font import, Nerd Font support,
+- **Themes & fonts** — 10 built-in themes, custom font import, Nerd Font support,
   remappable keybindings, text zoom.
 - **14 languages** — fully translated UI, switchable in settings (English default).
 - **Desktop notifications** when long commands finish in the background.

@@ -1052,8 +1052,13 @@ pub fn native_grid_attach(
     let generation;
     let model = {
         let mut map = models().lock();
+        // A re-attach (style change, resync) must keep the pane's focus:
+        // the web side only reports focus CHANGES, so resetting it here left
+        // a freshly opened tab without its cursor.
+        let mut was_focused = false;
         if let Some(old) = map.get(&id) {
             *old.generation.lock() += 1;
+            was_focused = *old.focused.lock();
         }
         let model = Arc::new(GridModel {
             term: Mutex::new(Term::new(
@@ -1070,7 +1075,7 @@ pub fn native_grid_attach(
             parser: Mutex::new(Processor::new()),
             style: Mutex::new(style),
             generation: Mutex::new(0),
-            focused: Mutex::new(false),
+            focused: Mutex::new(was_focused),
             rect: Mutex::new((x, y, width, height)),
             visible: Mutex::new(true),
             selection: Mutex::new(None),

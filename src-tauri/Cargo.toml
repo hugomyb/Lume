@@ -46,6 +46,11 @@ tauri-plugin-dialog = "2.7.1"
 # Blocking HTTP client (rustls/ring → no OpenSSL, keeps the portable build) for
 # the API-key AI providers (OpenAI-compatible streaming).
 ureq = { version = "2", features = ["json"] }
+# Remote control end-to-end encryption (NaCl secretbox — the web client uses
+# tweetnacl, byte-compatible) and the Lume ↔ Lume client side.
+crypto_secretbox = "0.1"
+url = "2"
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 
 # Native terminal grid renderer (Linux, phase 0) — terminal model + GTK painting.
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -1,5 +1,5 @@
 import { createEffect, onCleanup, Show } from "solid-js";
-import Terminal from "./Terminal";
+import Terminal, { type RemoteConnectInfo } from "./Terminal";
 import { placeholderMap, placeholderVer } from "./PaneNode";
 import type { Appearance } from "./config";
 import type { LeafData } from "./panes";
@@ -26,6 +26,7 @@ type Props = {
   ) => void;
   onBlockLine: (markerId: number) => void;
   onRefreshReady: (refresh: () => void) => void;
+  onRemoteConnected?: (info: RemoteConnectInfo) => void;
   onActivate: () => void;
   /** Focus-follows-mouse setting: hovering the pane activates it. */
   focusFollowsMouse: () => boolean;
@@ -34,6 +35,9 @@ type Props = {
   onPaneDragEnd: () => void;
   /** Whether the tab has more than one pane (grip is useless otherwise). */
   multiPane: () => boolean;
+  /** An ssh/mosh session of this pane dropped: rerun it / dismiss the offer. */
+  onSshReconnect?: () => void;
+  onSshDismiss?: () => void;
 };
 
 /** Renders a Terminal in a wrapper div that lives at the top level of the
@@ -126,6 +130,16 @@ export default function PortableTerminal(props: Props) {
         props.onContextMenu(e.clientX, e.clientY);
       }}
     >
+      <Show when={props.leaf.sshLost}>
+        <div class="ssh-lost-bar" onMouseDown={(e) => e.stopPropagation()}>
+          <span>{t("ssh.lost")}</span>
+          <code>{props.leaf.sshLost}</code>
+          <button class="primary" onClick={() => props.onSshReconnect?.()}>
+            {t("ssh.reconnect")}
+          </button>
+          <button onClick={() => props.onSshDismiss?.()}>{t("ssh.dismiss")}</button>
+        </div>
+      </Show>
       <Show when={props.multiPane()}>
         <div
           class="pane-grip"
@@ -157,6 +171,8 @@ export default function PortableTerminal(props: Props) {
         active={props.active}
         appearance={props.appearance}
         initialCwd={props.leaf.cwd}
+        remoteUrl={props.leaf.remote?.url ?? null}
+        onRemoteConnected={props.onRemoteConnected}
         onSpawned={props.onSpawned}
         onExit={props.onExit}
         onBlock={props.onBlock}

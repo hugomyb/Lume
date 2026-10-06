@@ -441,9 +441,83 @@ struct AiUsageEvent {
     remaining_tokens: Option<String>,
 }
 
+/// Extra, user-approved context for "explain this block": where it ran and
+/// the block right before it. Each part is opt-in from the blocks panel.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockContext {
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub previous: Option<PreviousBlock>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviousBlock {
+    pub command: String,
+    #[serde(default)]
+    pub output: Option<String>,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+}
+
+/// The previous block only sets the scene: keep its output short.
+const MAX_PREVIOUS_OUTPUT_CHARS: usize = 2000;
+
+#[cfg(test)]
 fn build_prompt(command: &str, output: &str, exit_code: i32, language: &str) -> String {
+    build_prompt_with_context(
+        command,
+        output,
+        exit_code,
+        language,
+        &BlockContext::default(),
+    )
+}
+
+fn build_prompt_with_context(
+    command: &str,
+    output: &str,
+    exit_code: i32,
+    language: &str,
+    ctx: &BlockContext,
+) -> String {
     let mut p = String::new();
     p.push_str("Analyze this terminal block.\n\n");
+    if ctx.cwd.is_some() || ctx.branch.is_some() {
+        p.push_str("Environment:\n");
+        if let Some(cwd) = &ctx.cwd {
+            p.push_str(&format!("- Working directory: {cwd}\n"));
+        }
+        if let Some(branch) = &ctx.branch {
+            p.push_str(&format!("- Git branch: {branch}\n"));
+        }
+        p.push('\n');
+    }
+    if let Some(prev) = &ctx.previous {
+        p.push_str("Previous command (for context only):\n```\n");
+        p.push_str(prev.command.trim());
+        p.push_str("\n```\n");
+        if let Some(out) = prev.output.as_deref().filter(|o| !o.trim().is_empty()) {
+            // Keep the END of the previous output: that's where errors land.
+            let chars: Vec<char> = out.chars().collect();
+            let start = chars.len().saturating_sub(MAX_PREVIOUS_OUTPUT_CHARS);
+            let tail: String = chars[start..].iter().collect();
+            p.push_str("Its output:\n```\n");
+            if start > 0 {
+                p.push_str("[…]\n");
+            }
+            p.push_str(&tail);
+            p.push_str("\n```\n");
+        }
+        if let Some(code) = prev.exit_code {
+            p.push_str(&format!("Its exit code: {code}\n"));
+        }
+        p.push('\n');
+    }
     p.push_str("Command:\n```\n");
     p.push_str(command.trim());
     p.push_str("\n```\n\n");
@@ -565,16 +639,18 @@ pub fn ai_explain_block(
     command: String,
     output: Option<String>,
     exit_code: i32,
+    context: Option<BlockContext>,
 ) -> Result<u64, String> {
     let (ai, language) = {
         let cfg = config.lock();
         (cfg.ai.clone(), cfg.language.clone())
     };
-    let prompt = build_prompt(
+    let prompt = build_prompt_with_context(
         &command,
         output.as_deref().unwrap_or(""),
         exit_code,
         &language,
+        &context.unwrap_or_default(),
     );
     dispatch(app, state, ai, prompt)
 }
@@ -1256,5 +1332,34 @@ mod tests {
         assert!(p.contains("[ASSISTANT]"));
         assert!(p.contains("what is ls"));
         assert!(p.contains("and -la"));
+    }
+
+    #[test]
+    fn explain_prompt_includes_selected_context() {
+        let ctx = BlockContext {
+            cwd: Some("/p/palr".into()),
+            branch: Some("main".into()),
+            previous: Some(PreviousBlock {
+                command: "composer install".into(),
+                output: Some(format!("{}END-OF-PREV", "x".repeat(5000))),
+                exit_code: Some(1),
+            }),
+        };
+        let p = build_prompt_with_context("php artisan migrate", "boom", 1, "en", &ctx);
+        assert!(p.contains("Working directory: /p/palr"));
+        assert!(p.contains("Git branch: main"));
+        assert!(p.contains("composer install"));
+        assert!(
+            p.contains("END-OF-PREV"),
+            "keeps the tail of the previous output"
+        );
+        assert!(p.contains("Its exit code: 1"));
+        assert!(p.len() < 5000 + 1000);
+        // No context → identical to the historical prompt.
+        assert_eq!(
+            build_prompt_with_context("ls", "", 0, "en", &BlockContext::default()),
+            build_prompt("ls", "", 0, "en")
+        );
+        assert!(!build_prompt("ls", "", 0, "en").contains("Environment"));
     }
 }

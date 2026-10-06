@@ -112,42 +112,6 @@ struct WorkflowFileBody {
     arguments: Vec<WorkflowArg>,
 }
 
-/// Turn a workflow name into a safe on-disk file stem (ascii slug).
-fn slugify(name: &str) -> String {
-    let mut out = String::new();
-    let mut prev_dash = true; // swallow leading dashes
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-            prev_dash = false;
-        } else if !prev_dash {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    let slug = out.trim_end_matches('-');
-    if slug.is_empty() {
-        "workflow".to_string()
-    } else {
-        slug.to_string()
-    }
-}
-
-/// A source filename coming from the frontend must be a bare `*.yaml`/`*.yml`
-/// name inside our own dir — no separators, no traversal.
-fn validate_source(source: &str) -> Result<(), String> {
-    let ok_ext = source.ends_with(".yaml") || source.ends_with(".yml");
-    if source.is_empty()
-        || !ok_ext
-        || source.contains('/')
-        || source.contains('\\')
-        || source.contains("..")
-    {
-        return Err(format!("invalid workflow file name: {source}"));
-    }
-    Ok(())
-}
-
 /// Create or update a workflow YAML file. `source` is the existing filename
 /// when editing; when absent (new workflow) a fresh name is derived from the
 /// workflow's name, never overwriting an existing file. Returns the filename.
@@ -171,11 +135,11 @@ pub fn save_workflow(
 
     let file_name = match source {
         Some(s) => {
-            validate_source(&s)?;
+            crate::paths::validate_yaml_name(&s)?;
             s
         }
         None => {
-            let slug = slugify(&name);
+            let slug = crate::paths::slugify(&name, "workflow");
             let mut candidate = format!("{slug}.yaml");
             let mut n = 2;
             while dir.join(&candidate).exists() {
@@ -217,7 +181,7 @@ pub fn save_workflow(
 
 #[tauri::command]
 pub fn delete_workflow(source: String) -> Result<(), String> {
-    validate_source(&source)?;
+    crate::paths::validate_yaml_name(&source)?;
     let dir = workflows_dir().ok_or("no config directory")?;
     std::fs::remove_file(dir.join(&source)).map_err(|e| e.to_string())
 }
@@ -291,6 +255,11 @@ arguments:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::validate_yaml_name as validate_source;
+
+    fn slugify(name: &str) -> String {
+        crate::paths::slugify(name, "workflow")
+    }
 
     #[test]
     fn parses_workflow_yaml() {

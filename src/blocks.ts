@@ -15,7 +15,8 @@ export type Block = {
    * this block was processed by xterm (OSC 133;A). Used to ask xterm to
    * scroll to and flash the block later — even after scrollback eviction,
    * because the underlying `IMarker` tracks the row as the buffer shifts.
-   * `null` until set; some shells/contexts may never set it. */
+   * `null` until set; some shells/contexts may never set it. -1 for a block
+   * restored from a previous Lume run (no scrollback row to point at). */
   markerId: number | null;
 };
 

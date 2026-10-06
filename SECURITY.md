@@ -25,8 +25,14 @@ and credit you in the release notes if you'd like.
 A few Lume features are inherently security-sensitive — reports about them are
 especially welcome:
 
-- **Remote control** — the HTTP/WebSocket server that mirrors a pane to another
-  device (token auth, the served web page, the optional cloudflared tunnel).
+- **Remote control** — the HTTP/WebSocket server that mirrors panes to another
+  device: QR pairing (one-time secret in the URL fragment), per-device keys and
+  revocation, the end-to-end encrypted channel (NaCl secretbox, see
+  `src-tauri/src/remote_proto.rs`), the served web page, the Lume ↔ Lume client
+  and the optional cloudflared tunnel. Known limit: the page itself is served
+  over plain HTTP on the LAN, so an *active* attacker on that network could
+  serve a modified page; the encryption protects against passive sniffing and
+  against the tunnel provider.
 - **AI providers** — handling of API keys and the commands spawned for CLI
   providers.
 - **Shell integration & PTY** — anything that could lead to unintended command

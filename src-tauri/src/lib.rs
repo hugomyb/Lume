@@ -1,21 +1,28 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use tauri::Manager;
 
 mod ai;
 mod complete;
 mod config;
 mod env_fix;
 mod fonts;
+mod git;
+mod history;
 mod notify;
 mod osc;
 mod paths;
 mod pty;
 mod remote;
+mod remote_client;
+mod remote_proto;
+mod remote_store;
 mod shell;
 mod ssh;
 mod update;
 mod workflows;
+mod workspaces;
 #[cfg(target_os = "linux")]
 mod native_grid;
 
@@ -114,6 +121,17 @@ pub fn run() {
             workflows::save_workflow,
             workflows::delete_workflow,
             ssh::list_ssh_hosts,
+            ssh::ssh_tools,
+            history::history_append,
+            history::history_search,
+            history::history_clear,
+            git::git_info,
+            workspaces::list_workspaces,
+            workspaces::save_workspace,
+            workspaces::delete_workspace,
+            workspaces::workspace_file_path,
+            workspaces::expand_path,
+            workspaces::open_workspaces_dir,
             fonts::list_system_fonts,
             fonts::import_font,
             fonts::list_custom_fonts,
@@ -126,6 +144,13 @@ pub fn run() {
             remote::remote_set_target,
             remote::remote_set_tabs,
             remote::remote_install_cloudflared,
+            remote::remote_new_pairing,
+            remote::remote_revoke_device,
+            remote_client::remote_client_connect,
+            remote_client::remote_client_switch,
+            remote_client::remote_client_new_tab,
+            remote_client::remote_client_peers,
+            remote_client::remote_client_forget,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
@@ -139,6 +164,15 @@ pub fn run() {
             ai::ai_chat,
             ai::ai_cancel,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Quitting while sharing must not leave the cloudflared tunnel
+            // (a public process) running behind us.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(remote) = app.try_state::<Arc<remote::RemoteState>>() {
+                    remote.shutdown();
+                }
+            }
+        });
 }

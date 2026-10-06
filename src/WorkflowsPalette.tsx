@@ -4,6 +4,7 @@ import {
   createSignal,
   For,
   Show,
+  untrack,
 } from "solid-js";
 import {
   deleteWorkflow,
@@ -21,6 +22,9 @@ type Props = {
   open: () => boolean;
   onClose: () => void;
   onInsert: (command: string) => void;
+  /** Open straight on this workflow's form (source file name), e.g. when
+   *  picked from the command palette. */
+  preselect?: () => string | null;
 };
 
 export default function WorkflowsPalette(props: Props) {
@@ -77,8 +81,13 @@ export default function WorkflowsPalette(props: Props) {
     setEditing(null);
     setConfirmDelete(null);
     setError(null);
+    const pre = untrack(() => props.preselect?.() ?? null);
     listWorkflows()
-      .then((ws) => setWorkflows(ws))
+      .then((ws) => {
+        setWorkflows(ws);
+        const w = pre ? ws.find((x) => x.source === pre) : undefined;
+        if (w) openWorkflow(w);
+      })
       .catch((e) => setError(String(e)));
     queueMicrotask(() => searchRef?.focus());
   });

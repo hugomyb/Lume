@@ -149,6 +149,9 @@ type Props = {
   /** Display name of the active AI provider (Claude / Codex / AI). */
   aiProvider: () => string;
   onExplain: (blockId: number) => void;
+  /** Which extra context "explain" sends (shown as toggles, opt-in). */
+  aiContext: () => { env: boolean; prev: boolean };
+  onAiContextChange: (ctx: { env: boolean; prev: boolean }) => void;
   onCancelAi: (blockId: number) => void;
   onDismissAi: (blockId: number) => void;
   onFollowUp: (blockId: number, question: string) => void;
@@ -158,6 +161,10 @@ type Props = {
 };
 
 const MIN_WIDTH = 240;
+
+/** Restored blocks (from a previous Lume run) carry markerId -1: no row in
+ *  this terminal's scrollback to scroll to. */
+const hasMarker = (b: Block) => b.markerId !== null && b.markerId >= 0;
 const MAX_WIDTH = 900;
 
 function formatCommand(cmd: string | null): string {
@@ -467,7 +474,7 @@ export default function BlocksPanel(props: Props) {
   const onClickBlock = (_e: MouseEvent, b: Block) => {
     // Click = scroll xterm to this block, with a visual flash on the prompt.
     // Copy actions live in the right-click context menu.
-    if (b.markerId !== null) props.onScrollToBlock(b.id);
+    if (hasMarker(b)) props.onScrollToBlock(b.id);
   };
 
   const aiButtonTitle = (b: Block) => {
@@ -585,7 +592,7 @@ export default function BlocksPanel(props: Props) {
                   title={
                     b.command
                       ? `${b.command}\n\n${
-                          b.markerId !== null
+                          hasMarker(b)
                             ? t("blocks.clickScroll")
                             : t("blocks.promptNotTracked")
                         }\n${t("blocks.rightClickActions")}`
@@ -663,6 +670,31 @@ export default function BlocksPanel(props: Props) {
             )}
           </For>
         </div>
+        <Show when={props.aiAvailable()}>
+          <div class="blocks-ai-ctx" title={t("blocks.aiCtxTitle")}>
+            <span class="blocks-ai-ctx-label">{t("blocks.aiCtx")}</span>
+            <label>
+              <input
+                type="checkbox"
+                checked={props.aiContext().env}
+                onChange={(e) =>
+                  props.onAiContextChange({ ...props.aiContext(), env: e.currentTarget.checked })
+                }
+              />
+              {t("blocks.aiCtxEnv")}
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={props.aiContext().prev}
+                onChange={(e) =>
+                  props.onAiContextChange({ ...props.aiContext(), prev: e.currentTarget.checked })
+                }
+              />
+              {t("blocks.aiCtxPrev")}
+            </label>
+          </div>
+        </Show>
         <Show when={ctxMenu()}>
           {(menu) => {
             const b = ctxBlock();
@@ -702,7 +734,7 @@ export default function BlocksPanel(props: Props) {
                 </button>
                 <button
                   class="ctx-item"
-                  disabled={b.markerId === null}
+                  disabled={!hasMarker(b)}
                   onClick={() => {
                     props.onScrollToBlock(b.id);
                     closeContextMenu();

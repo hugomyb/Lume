@@ -365,3 +365,45 @@ export function IconSettings(p: IconProps): JSX.Element {
     </Svg>
   );
 }
+
+/** Command history (a clock). */
+export function IconHistory(p: IconProps): JSX.Element {
+  return (
+    <Svg size={p.size}>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 14" />
+    </Svg>
+  );
+}
+
+/** Workspaces (a briefcase). */
+export function IconWorkspace(p: IconProps): JSX.Element {
+  return (
+    <Svg size={p.size}>
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </Svg>
+  );
+}
+
+/** Git branch. */
+export function IconBranch(p: IconProps): JSX.Element {
+  return (
+    <Svg size={p.size}>
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </Svg>
+  );
+}
+
+/** Theme / palette (a half-filled circle). */
+export function IconTheme(p: IconProps): JSX.Element {
+  return (
+    <Svg size={p.size}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" />
+    </Svg>
+  );
+}
