@@ -167,11 +167,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Quitting while sharing must not leave the cloudflared tunnel
-            // (a public process) running behind us.
+            // Quitting must not leave processes running behind us: the
+            // cloudflared tunnel (public), nor the tabs' jobs.
             if let tauri::RunEvent::Exit = event {
                 if let Some(remote) = app.try_state::<Arc<remote::RemoteState>>() {
                     remote.shutdown();
+                }
+                // Same for what runs in the tabs (dev servers, watchers…).
+                if let Some(pty) = app.try_state::<Arc<pty::PtyManager>>() {
+                    pty.kill_all();
                 }
             }
         });

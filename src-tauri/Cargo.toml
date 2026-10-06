@@ -53,6 +53,10 @@ url = "2"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 
 # Native terminal grid renderer (Linux, phase 0) — terminal model + GTK painting.
+# Closing a tab terminates its foreground job's process group (killpg).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 alacritty_terminal = "0.26"
 gtk = "0.18"

@@ -2298,6 +2298,7 @@ dependencies = [
  "getrandom 0.3.4",
  "glib",
  "gtk",
+ "libc",
  "notify-rust",
  "pangocairo",
  "parking_lot",

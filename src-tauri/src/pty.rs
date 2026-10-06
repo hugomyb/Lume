@@ -79,14 +79,57 @@ impl Backend {
 
     fn kill(&mut self) {
         match self {
-            Backend::Local { killer, .. } => {
+            Backend::Local { master, killer } => {
+                // The job running in the tab (npm run dev, a watcher…) is its
+                // own process group, and SIGHUP to the shell doesn't reliably
+                // reach it: tools such as nodemon survive it and are left
+                // orphaned, still holding their port. Read the foreground
+                // group BEFORE the shell goes away.
+                #[cfg(unix)]
+                let job = master.process_group_leader();
+                #[cfg(not(unix))]
+                let _ = &master;
                 let _ = killer.kill();
+                #[cfg(unix)]
+                if let Some(pgid) = job {
+                    terminate_process_group(pgid);
+                }
             }
             Backend::Remote { ctl } => {
                 let _ = ctl.send(RemoteCtl::Close);
             }
         }
     }
+}
+
+/// Hang up a process group like a closing terminal does, then insist:
+/// SIGTERM after 1 s and SIGKILL after 3 s for whatever ignored the hangup.
+/// Background jobs started with `nohup … &` aren't in the foreground group
+/// and are left alone, as in other terminals.
+#[cfg(unix)]
+fn terminate_process_group(pgid: libc::pid_t) {
+    if pgid <= 1 {
+        return;
+    }
+    let alive = move || unsafe { libc::killpg(pgid, 0) } == 0;
+    unsafe {
+        libc::killpg(pgid, libc::SIGHUP);
+    }
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(1));
+        if !alive() {
+            return;
+        }
+        unsafe {
+            libc::killpg(pgid, libc::SIGTERM);
+        }
+        thread::sleep(std::time::Duration::from_secs(2));
+        if alive() {
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
+        }
+    });
 }
 
 /// `Write` end of a remote session: bytes become `RemoteCtl::Input` messages.
@@ -212,6 +255,15 @@ impl PtyManager {
             },
         );
         (id, sink)
+    }
+
+    /// Terminate every session (app exit): each tab's shell and its
+    /// foreground job, so nothing a tab started outlives Lume.
+    pub fn kill_all(&self) {
+        let sessions: Vec<PtySession> = self.sessions.lock().drain().map(|(_, s)| s).collect();
+        for mut s in sessions {
+            s.backend.kill();
+        }
     }
 
     /// Drop a session from the table (its backend has ended).
