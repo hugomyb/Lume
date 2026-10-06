@@ -153,6 +153,20 @@ honored.
 the default stack starts with Menlo, which only exists on macOS. Pick a family
 you actually have installed (any Nerd Font, DejaVu Sans Mono, JetBrains Mono…).
 
+**The usage pill says "quota" instead of a percentage (Claude CLI).** Lume reads
+your subscription limits from `claude -p /usage`, and the CLI only includes the
+percentages when it is allowed to look them up. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+blocks that lookup — check your shell environment and the `env` block of
+`~/.claude/settings.json`. If you set it for privacy, the narrower switches keep
+the limits visible:
+
+```json
+"env": { "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1" }
+```
+
+To check what the CLI itself reports: `claude -p /usage --output-format json | jq -r .result`
+should list `Current session: N% used` lines.
+
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set
