@@ -81,7 +81,7 @@ New to Lume? The **[user guide](docs/guide.md)** shows how to use each feature.
 - **14 languages** — fully translated UI, switchable in settings (English default).
 - **Desktop notifications** when long commands finish in the background.
 - **Self-updating** on every platform, with signature-verified updates.
-- **Small download** — 3.3 MB on Windows, 5 MB on Debian/Fedora, 8.2 MB as a
+- **Small download** — 3.6 MB on Windows, 5.4 MB on Debian/Fedora, 9 MB as a
   universal macOS disk image. Not Electron.
 
 ## Install
